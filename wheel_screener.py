@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+wheel_screener.py -- Income options screener for BOTH sides of the wheel.
+
+  * Cash-Secured Puts : scans PUT_TICKERS for puts to SELL for income.
+  * Covered Calls     : scans your HOLDINGS for calls to SELL against shares
+                        you own, only at strikes ABOVE your average cost.
+
+Run:  py wheel_screener.py
+Writes qualifying_contracts.xlsx AND qualifying_contracts.html (open in browser).
+
+Rules (editable in CONFIG):
+  - Delta 0.16 (floor) to 0.30 (ceiling)
+  - Annualized yield >= YieldNeeded (25% - OTM%)
+  - Annualized yield beats matched T-bill by >= 5 points
+  - DTE 30-45, must NOT span earnings
+  - Covered calls: strike must be >= your average cost (never lock a loss)
+  - IV Rank >= 50 (optional; Yahoo has none, off by default)
+Not financial advice. Screens candidates; you decide.
+"""
+
+import math
+import datetime as dt
+
+import pandas as pd
+from scipy.stats import norm
+
+# ============================== CONFIG ==============================
+# 1) Tickers to scan for CASH-SECURED PUTS (stocks you'd be happy to buy):
+PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL"]
+
+# 2) Shares you already OWN, for COVERED CALLS -> ticker: average price you paid
+HOLDINGS = {
+    "DKNG": 18.4505,
+    "KHC": 32.9834,
+    "CMCSA": 35.12,
+    "PS": 25.25,
+}
+
+DELTA_MIN         = 0.16
+DELTA_MAX         = 0.30
+DTE_MIN           = 30
+DTE_MAX           = 45
+YIELD_HURDLE_BASE = 0.25     # YieldNeeded = BASE - OTM%
+MIN_RISK_PREMIUM  = 0.05
+IVR_MIN           = 0.50
+USE_IVR           = False
+
+RISK_FREE         = 0.043
+PREMIUM_BASIS     = "bid"    # "bid" (what you'd receive) or "mid"
+TBILL_LADDER = [(35, 0.0370), (56, 0.0372), (100, 0.0379), (190, 0.0390), (99999, 0.0398)]
+
+OUTPUT_FILE = "qualifying_contracts.xlsx"
+# ===================================================================
+
+
+def tbill_for(dte):
+    for max_dte, rate in TBILL_LADDER:
+        if dte <= max_dte:
+            return rate
+    return TBILL_LADDER[-1][1]
+
+
+def get_vix():
+    try:
+        import yfinance as yf
+        v = yf.Ticker("^VIX")
+        try:
+            px = v.fast_info.get("last_price")
+        except Exception:
+            px = None
+        if not px:
+            px = v.history(period="1d")["Close"].iloc[-1]
+        return round(float(px), 2)
+    except Exception:
+        return None
+
+
+def vix_regime(v):
+    if v is None:
+        return "unknown"
+    if v < 15:
+        return "low - thin premiums, mostly wait"
+    if v < 20:
+        return "below-average - selective"
+    if v < 30:
+        return "elevated - prime selling"
+    return "high - rich but risky"
+
+
+def _d1(S, K, T, sigma, r):
+    return (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+
+
+def bs_put_delta(S, K, T, sigma, r):
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return float("nan")
+    return norm.cdf(_d1(S, K, T, sigma, r)) - 1.0
+
+
+def bs_call_delta(S, K, T, sigma, r):
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return float("nan")
+    return norm.cdf(_d1(S, K, T, sigma, r))
+
+
+def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None):
+    strike, premium, iv = row["strike"], row["premium"], row["iv"]
+    otm     = (spot - strike) / spot
+    per_yld = premium / strike if strike else float("nan")
+    ann_yld = per_yld * 365.0 / dte if dte else float("nan")
+    absdelta = abs(bs_put_delta(spot, strike, dte / 365.0, iv, RISK_FREE))
+    delta_pct = 1.0 - absdelta
+    tbill    = tbill_for(dte)
+    risk_prem = ann_yld - tbill
+    needed   = YIELD_HURDLE_BASE - otm
+    tests = {
+        "delta_floor":  DELTA_MIN <= absdelta <= DELTA_MAX,
+        "yield_hurdle": ann_yld >= needed,
+        "tbill_spread": risk_prem >= MIN_RISK_PREMIUM,
+        "dte_window":   DTE_MIN <= dte <= DTE_MAX,
+        "no_earnings":  not earnings_in_window,
+    }
+    if USE_IVR:
+        tests["iv_rank"] = (iv_rank is not None) and (iv_rank >= IVR_MIN)
+    reasons = []
+    if not tests["delta_floor"]:
+        reasons.append(f"delta {absdelta:.2f} outside {DELTA_MIN}-{DELTA_MAX}")
+    if not tests["yield_hurdle"]:
+        reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
+    if not tests["tbill_spread"]:
+        reasons.append(f"only {risk_prem:.1%} over T-bill")
+    if not tests["dte_window"]:
+        reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
+    if not tests["no_earnings"]:
+        reasons.append("spans earnings")
+    if USE_IVR and not tests.get("iv_rank"):
+        reasons.append("IV Rank <50 or missing")
+    return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
+            "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
+            "IV": iv, "Tbill_%": tbill, "RiskPrem_%": risk_prem,
+            "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
+
+
+def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None):
+    strike, premium, iv = row["strike"], row["premium"], row["iv"]
+    otm     = (strike - spot) / spot          # calls are OTM ABOVE spot
+    per_yld = premium / spot if spot else float("nan")
+    ann_yld = per_yld * 365.0 / dte if dte else float("nan")
+    cdelta  = bs_call_delta(spot, strike, dte / 365.0, iv, RISK_FREE)
+    delta_pct = 1.0 - cdelta
+    tbill    = tbill_for(dte)
+    risk_prem = ann_yld - tbill
+    needed   = YIELD_HURDLE_BASE - otm
+    tests = {
+        "delta_floor":  DELTA_MIN <= cdelta <= DELTA_MAX,
+        "yield_hurdle": ann_yld >= needed,
+        "tbill_spread": risk_prem >= MIN_RISK_PREMIUM,
+        "dte_window":   DTE_MIN <= dte <= DTE_MAX,
+        "no_earnings":  not earnings_in_window,
+        "above_cost":   (cost_basis is None) or (strike >= cost_basis),
+    }
+    if USE_IVR:
+        tests["iv_rank"] = (iv_rank is not None) and (iv_rank >= IVR_MIN)
+    reasons = []
+    if not tests["delta_floor"]:
+        reasons.append(f"delta {cdelta:.2f} outside {DELTA_MIN}-{DELTA_MAX}")
+    if not tests["yield_hurdle"]:
+        reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
+    if not tests["tbill_spread"]:
+        reasons.append(f"only {risk_prem:.1%} over T-bill")
+    if not tests["dte_window"]:
+        reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
+    if not tests["no_earnings"]:
+        reasons.append("spans earnings")
+    if not tests["above_cost"]:
+        reasons.append(f"strike below cost {cost_basis}")
+    if USE_IVR and not tests.get("iv_rank"):
+        reasons.append("IV Rank <50 or missing")
+    return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
+            "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
+            "IV": iv, "Tbill_%": tbill, "RiskPrem_%": risk_prem,
+            "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
+
+
+def get_earnings_date(tkr):
+    try:
+        cal = tkr.get_earnings_dates(limit=8)
+        if cal is not None and len(cal):
+            fut = [d.date() for d in cal.index.to_pydatetime() if d.date() >= dt.date.today()]
+            if fut:
+                return min(fut)
+    except Exception:
+        pass
+    try:
+        cal = tkr.calendar
+        if isinstance(cal, dict) and cal.get("Earnings Date"):
+            d = cal["Earnings Date"]
+            return d[0] if isinstance(d, (list, tuple)) else d
+    except Exception:
+        pass
+    return None
+
+
+def _load(ticker):
+    import yfinance as yf
+    tkr = yf.Ticker(ticker)
+    try:
+        spot = tkr.fast_info.get("last_price")
+    except Exception:
+        spot = None
+    if not spot:
+        spot = tkr.history(period="1d")["Close"].iloc[-1]
+    return tkr, float(spot), get_earnings_date(tkr)
+
+
+def _premium(r):
+    bid = r.get("bid", 0) or 0
+    ask = r.get("ask", 0) or 0
+    if bid <= 0:
+        return None
+    return bid if PREMIUM_BASIS == "bid" else (bid + ask) / 2
+
+
+def _expirations(tkr, today):
+    for exp in tkr.options:
+        d = dt.date.fromisoformat(exp)
+        dte = (d - today).days
+        if DTE_MIN - 10 <= dte <= DTE_MAX + 20:
+            yield exp, d, dte
+
+
+def screen_puts(ticker):
+    tkr, spot, earnings = _load(ticker)
+    today = dt.date.today()
+    passers, near = [], []
+    for exp, exp_date, dte in _expirations(tkr, today):
+        earn_win = bool(earnings and today <= earnings <= exp_date)
+        for _, r in tkr.option_chain(exp).puts.iterrows():
+            if r["strike"] >= spot:
+                continue
+            prem = _premium(r)
+            if prem is None:
+                continue
+            row = {"strike": float(r["strike"]), "premium": float(prem),
+                   "iv": float(r.get("impliedVolatility", 0) or 0)}
+            res = evaluate_put(row, spot, dte, earn_win)
+            rec = {"Ticker": ticker, "CurrentPrice": round(spot, 2), "Strike": row["strike"],
+                   "Expiration": exp, "DTE": dte, "EarningsDate": earnings, **res}
+            if res["PASS"]:
+                passers.append(rec)
+            elif res["Reasons"].count(";") == 0:
+                near.append(rec)
+    return passers, near
+
+
+def screen_calls(ticker, cost_basis):
+    tkr, spot, earnings = _load(ticker)
+    today = dt.date.today()
+    passers, near = [], []
+    for exp, exp_date, dte in _expirations(tkr, today):
+        earn_win = bool(earnings and today <= earnings <= exp_date)
+        for _, r in tkr.option_chain(exp).calls.iterrows():
+            if r["strike"] <= spot:
+                continue
+            prem = _premium(r)
+            if prem is None:
+                continue
+            row = {"strike": float(r["strike"]), "premium": float(prem),
+                   "iv": float(r.get("impliedVolatility", 0) or 0)}
+            res = evaluate_call(row, spot, dte, earn_win, cost_basis)
+            rec = {"Ticker": ticker, "CurrentPrice": round(spot, 2), "CostBasis": cost_basis,
+                   "Strike": row["strike"], "Expiration": exp, "DTE": dte,
+                   "EarningsDate": earnings, **res}
+            if res["PASS"]:
+                passers.append(rec)
+            elif res["Reasons"].count(";") == 0:
+                near.append(rec)
+    return passers, near
+
+
+PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+            "AnnYield_%", "YieldNeeded_%", "Delta_%", "Tbill_%", "RiskPrem_%",
+            "IV", "EarningsDate"]
+CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
+             "Premium", "AnnYield_%", "YieldNeeded_%", "Delta_%", "Tbill_%",
+             "RiskPrem_%", "IV", "EarningsDate"]
+PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "YieldNeeded_%", "Delta_%",
+            "Tbill_%", "RiskPrem_%", "IV"}
+
+
+def _df(rows, cols):
+    if rows:
+        return pd.DataFrame(rows).sort_values("AnnYield_%", ascending=False)[cols]
+    return pd.DataFrame(columns=cols)
+
+
+def write_report(sheets, settings, path=OUTPUT_FILE):
+    """sheets = list of (name, df). Formatted xlsx."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    hdr_fill = PatternFill("solid", fgColor="1F3864")
+    hdr_font = Font(name="Arial", bold=True, color="FFFFFF")
+    green = PatternFill("solid", fgColor="C6EFCE")
+    with pd.ExcelWriter(path, engine="openpyxl") as xw:
+        for name, df in sheets + [("Settings", settings)]:
+            df.to_excel(xw, sheet_name=name, index=False)
+            sh = xw.sheets[name]
+            for ci, col in enumerate(df.columns, 1):
+                c = sh.cell(row=1, column=ci)
+                c.fill, c.font = hdr_fill, hdr_font
+                c.alignment = Alignment(horizontal="center")
+                vals = [len(str(col))] + [len(str(v)) for v in df[col].head(30)]
+                sh.column_dimensions[c.column_letter].width = max(10, min(24, max(vals) + 2))
+                if col in PCT_COLS:
+                    for ri in range(2, len(df) + 2):
+                        sh.cell(row=ri, column=ci).number_format = "0.0%"
+            sh.freeze_panes = "A2"
+            if len(df):
+                sh.auto_filter.ref = sh.dimensions
+            if name != "Settings":
+                for ri in range(2, len(df) + 2):
+                    for ci in range(1, len(df.columns) + 1):
+                        sh.cell(row=ri, column=ci).fill = green
+
+
+def _fmt(df):
+    d = df.copy()
+    for c in PCT_COLS:
+        if c in d.columns:
+            d[c] = (d[c] * 100).round(1).astype(str) + "%"
+    for c in ("Premium", "CostBasis", "CurrentPrice"):
+        if c in d.columns:
+            d[c] = "$" + d[c].round(2).astype(str)
+    return d
+
+
+def _tbl(df, empty):
+    return _fmt(df).to_html(index=False, classes="q", border=0) if len(df) else f"<p>{empty}</p>"
+
+
+def write_html(put_pass, call_pass, vix=None, path="qualifying_contracts.html"):
+    style = ("<style>body{font-family:Arial,Helvetica,sans-serif;margin:24px;"
+             "background:#0f1115;color:#e8e8e8}h1{font-size:20px}h2{margin-top:30px;"
+             "border-bottom:2px solid #1F3864;padding-bottom:4px}"
+             "p{color:#aaa}table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}"
+             "th,td{border:1px solid #333;padding:6px 9px;text-align:right}"
+             "th{background:#1F3864;color:#fff}td:first-child,th:first-child{text-align:left}"
+             ".q tbody td{background:#12331d}</style>")
+    vtxt = f"VIX {vix} ({vix_regime(vix)})" if vix is not None else "VIX n/a"
+    p = ["<html><head><meta charset='utf-8'>", style, "</head><body>",
+         "<h1>Wheel Screener</h1>",
+         f"<p>{vtxt}. Generated {dt.date.today()}. "
+         "Delta_% = chance of keeping the premium (1 &minus; delta). "
+         "YieldNeeded_% = 25% &minus; OTM%. Not financial advice.</p>",
+         "<h2>Cash-Secured Puts</h2>",
+         _tbl(put_pass, "None &mdash; nothing pays enough; stay in T-bills."),
+         "<h2>Covered Calls (strike above your cost)</h2>",
+         _tbl(call_pass, "None &mdash; no call above your cost pays enough."),
+         "</body></html>"]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("".join(p))
+
+
+def main():
+    vix = get_vix()
+    pp = []
+    for t in PUT_TICKERS:
+        try:
+            a, _ = screen_puts(t)
+            pp += a
+            print(f"PUT  {t}: {len(a)} qualifying")
+        except Exception as e:
+            print(f"PUT  {t}: ERROR {e}")
+    cp = []
+    for t, cost in HOLDINGS.items():
+        try:
+            a, _ = screen_calls(t, cost)
+            cp += a
+            print(f"CALL {t}: {len(a)} qualifying")
+        except Exception as e:
+            print(f"CALL {t}: ERROR {e}")
+
+    put_pass = _df(pp, PUT_COLS)
+    call_pass = _df(cp, CALL_COLS)
+    settings = pd.DataFrame({
+        "Setting": ["Delta floor", "Delta ceiling", "DTE min", "DTE max",
+                    "Yield needed base (25-OTM)", "Min risk premium", "IV Rank min",
+                    "Use IV Rank", "Premium basis", "Current VIX", "VIX regime", "Run date"],
+        "Value": [DELTA_MIN, DELTA_MAX, DTE_MIN, DTE_MAX, YIELD_HURDLE_BASE,
+                  MIN_RISK_PREMIUM, IVR_MIN, USE_IVR, PREMIUM_BASIS,
+                  vix, vix_regime(vix), dt.date.today().isoformat()]})
+    write_report([("Puts", put_pass), ("Covered Calls", call_pass)], settings, OUTPUT_FILE)
+    write_html(put_pass, call_pass, vix, "qualifying_contracts.html")
+    print(f"\nVIX {vix} ({vix_regime(vix)}). Puts: {len(put_pass)} | Calls: {len(call_pass)}. "
+          "Wrote xlsx + html.")
+
+
+if __name__ == "__main__":
+    main()

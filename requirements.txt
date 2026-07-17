@@ -1,0 +1,4 @@
+streamlit
+yfinance
+scipy
+pandas
