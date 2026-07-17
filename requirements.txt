@@ -2,3 +2,4 @@ streamlit
 yfinance
 scipy
 pandas
+curl_cffi

@@ -24,6 +24,38 @@ import datetime as dt
 
 import pandas as pd
 from scipy.stats import norm
+import time as _time
+
+
+def _make_session():
+    """Browser-impersonation session drastically cuts Yahoo 429 rate-limits."""
+    try:
+        from curl_cffi import requests as _cffi
+        return _cffi.Session(impersonate="chrome")
+    except Exception:
+        return None
+
+
+_SESSION = _make_session()
+
+
+def _ticker(sym):
+    import yfinance as yf
+    try:
+        return yf.Ticker(sym, session=_SESSION) if _SESSION else yf.Ticker(sym)
+    except Exception:
+        return yf.Ticker(sym)
+
+
+def _retry(fn, tries=3, delay=1.5):
+    last = None
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            last = e
+            _time.sleep(delay * (i + 1))
+    raise last
 
 # ============================== CONFIG ==============================
 # 1) Tickers to scan for CASH-SECURED PUTS (stocks you'd be happy to buy):
@@ -63,14 +95,13 @@ def tbill_for(dte):
 
 def get_vix():
     try:
-        import yfinance as yf
-        v = yf.Ticker("^VIX")
+        v = _ticker("^VIX")
         try:
             px = v.fast_info.get("last_price")
         except Exception:
             px = None
         if not px:
-            px = v.history(period="1d")["Close"].iloc[-1]
+            px = _retry(lambda: v.history(period="1d")["Close"].iloc[-1])
         return round(float(px), 2)
     except Exception:
         return None
@@ -203,14 +234,14 @@ def get_earnings_date(tkr):
 
 
 def _load(ticker):
-    import yfinance as yf
-    tkr = yf.Ticker(ticker)
+    tkr = _ticker(ticker)
     try:
         spot = tkr.fast_info.get("last_price")
     except Exception:
         spot = None
     if not spot:
-        spot = tkr.history(period="1d")["Close"].iloc[-1]
+        spot = _retry(lambda: tkr.history(period="1d")["Close"].iloc[-1])
+    _time.sleep(0.4)
     return tkr, float(spot), get_earnings_date(tkr)
 
 
@@ -223,7 +254,7 @@ def _premium(r):
 
 
 def _expirations(tkr, today):
-    for exp in tkr.options:
+    for exp in _retry(lambda: tkr.options):
         d = dt.date.fromisoformat(exp)
         dte = (d - today).days
         if DTE_MIN - 10 <= dte <= DTE_MAX + 20:
@@ -236,7 +267,7 @@ def screen_puts(ticker):
     passers, near = [], []
     for exp, exp_date, dte in _expirations(tkr, today):
         earn_win = bool(earnings and today <= earnings <= exp_date)
-        for _, r in tkr.option_chain(exp).puts.iterrows():
+        for _, r in _retry(lambda: tkr.option_chain(exp)).puts.iterrows():
             if r["strike"] >= spot:
                 continue
             prem = _premium(r)
@@ -260,7 +291,7 @@ def screen_calls(ticker, cost_basis):
     passers, near = [], []
     for exp, exp_date, dte in _expirations(tkr, today):
         earn_win = bool(earnings and today <= earnings <= exp_date)
-        for _, r in tkr.option_chain(exp).calls.iterrows():
+        for _, r in _retry(lambda: tkr.option_chain(exp)).calls.iterrows():
             if r["strike"] <= spot:
                 continue
             prem = _premium(r)
