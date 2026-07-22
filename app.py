@@ -3,15 +3,28 @@ Wheel Screener -- Streamlit web app.
 Shows your default watchlist; visitors can add tickers/holdings and re-run.
 Reuses the engine in wheel_screener.py. Deploy free on Streamlit Community Cloud.
 """
+import os
 import pandas as pd
 import streamlit as st
+
+# Load the Tradier token from Streamlit "Secrets" into the environment
+# BEFORE importing the engine, so it can reach the API.
+try:
+    if "TRADIER_TOKEN" in st.secrets:
+        os.environ["TRADIER_TOKEN"] = str(st.secrets["TRADIER_TOKEN"])
+    if "TRADIER_BASE" in st.secrets:
+        os.environ["TRADIER_BASE"] = str(st.secrets["TRADIER_BASE"])
+except Exception:
+    pass
 
 import wheel_screener as ws
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
-st.caption("Cash-secured puts & covered calls. Live quotes from Yahoo Finance. "
+st.caption("Cash-secured puts & covered calls. Live quotes from Tradier. "
            "Educational only - NOT financial advice. Verify every quote in your broker before trading.")
+if not os.environ.get("TRADIER_TOKEN"):
+    st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
 
 
 def parse_puts(txt):
