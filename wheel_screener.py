@@ -29,14 +29,16 @@ HOLDINGS = {
     "PS": 25.25,
 }
 
-DELTA_MIN         = 0.16
-DELTA_MAX         = 0.30
+# 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
+POP_MIN           = 0.65     # accept POP 65-75% (delta ~0.25-0.35), centered on 70%
+POP_MAX           = 0.75
 DTE_MIN           = 30
-DTE_MAX           = 45
-YIELD_HURDLE_BASE = 0.25
+DTE_MAX           = 90     # Options Alpha: longer duration allowed
+YIELD_HURDLE_BASE = 0.25     # richness filter (stands in for IV rank): yield >= 25% - OTM%
+USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50
-USE_IVR           = False
+USE_IVR           = False    # Tradier gives current IV but NOT IV rank (needs IV history)
 
 RISK_FREE         = 0.043
 PREMIUM_BASIS     = "bid"
@@ -175,20 +177,21 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     tests = {
-        "delta_floor":  DELTA_MIN <= absdelta <= DELTA_MAX,
+        "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "yield_hurdle": ann_yld >= needed,
-        "tbill_spread": risk_prem >= MIN_RISK_PREMIUM,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "no_earnings":  not earnings_in_window,
     }
+    if USE_TBILL_SPREAD:
+        tests["tbill_spread"] = risk_prem >= MIN_RISK_PREMIUM
     if USE_IVR:
         tests["iv_rank"] = (iv_rank is not None) and (iv_rank >= IVR_MIN)
     reasons = []
-    if not tests["delta_floor"]:
-        reasons.append(f"delta {absdelta:.2f} outside {DELTA_MIN}-{DELTA_MAX}")
+    if not tests["pop_target"]:
+        reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["yield_hurdle"]:
         reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
-    if not tests["tbill_spread"]:
+    if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
@@ -213,21 +216,22 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     tests = {
-        "delta_floor":  DELTA_MIN <= cd <= DELTA_MAX,
+        "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "yield_hurdle": ann_yld >= needed,
-        "tbill_spread": risk_prem >= MIN_RISK_PREMIUM,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "no_earnings":  not earnings_in_window,
         "above_cost":   (cost_basis is None) or (strike >= cost_basis),
     }
+    if USE_TBILL_SPREAD:
+        tests["tbill_spread"] = risk_prem >= MIN_RISK_PREMIUM
     if USE_IVR:
         tests["iv_rank"] = (iv_rank is not None) and (iv_rank >= IVR_MIN)
     reasons = []
-    if not tests["delta_floor"]:
-        reasons.append(f"delta {cd:.2f} outside {DELTA_MIN}-{DELTA_MAX}")
+    if not tests["pop_target"]:
+        reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["yield_hurdle"]:
         reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
-    if not tests["tbill_spread"]:
+    if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
@@ -244,16 +248,31 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
 
 
 def get_earnings_date(symbol):
-    """Best-effort via Yahoo; returns None on failure (earnings filter then skipped)."""
-    try:
-        tkr = _ticker(symbol)
-        cal = tkr.get_earnings_dates(limit=8)
-        if cal is not None and len(cal):
-            fut = [d.date() for d in cal.index.to_pydatetime() if d.date() >= dt.date.today()]
-            if fut:
-                return min(fut)
-    except Exception:
-        pass
+    """Next earnings date via Yahoo (two methods + one retry). None = none found.
+    ETFs legitimately return None (no earnings), so None is treated as 'no earnings'."""
+    tkr = _ticker(symbol)
+    today = dt.date.today()
+    for attempt in range(2):
+        try:
+            cal = tkr.get_earnings_dates(limit=8)
+            if cal is not None and len(cal):
+                fut = [d.date() for d in cal.index.to_pydatetime() if d.date() >= today]
+                if fut:
+                    return min(fut)
+        except Exception:
+            pass
+        try:
+            c = tkr.calendar
+            ed = c.get("Earnings Date") if isinstance(c, dict) else None
+            if ed:
+                ed = ed[0] if isinstance(ed, (list, tuple)) else ed
+                if hasattr(ed, "date"):
+                    ed = ed.date()
+                if isinstance(ed, dt.date) and ed >= today:
+                    return ed
+        except Exception:
+            pass
+        _time.sleep(0.6)
     return None
 
 
@@ -432,11 +451,11 @@ def main():
     put_pass = _df(pp, PUT_COLS)
     call_pass = _df(cp, CALL_COLS)
     settings = pd.DataFrame({
-        "Setting": ["Delta floor", "Delta ceiling", "DTE min", "DTE max",
-                    "Yield needed base (25-OTM)", "Min risk premium", "IV Rank min",
+        "Setting": ["POP min", "POP max", "DTE min", "DTE max",
+                    "Yield needed base (25-OTM)", "Use T-bill spread", "Min risk premium",
                     "Use IV Rank", "Premium basis", "Current VIX", "VIX regime", "Run date"],
-        "Value": [DELTA_MIN, DELTA_MAX, DTE_MIN, DTE_MAX, YIELD_HURDLE_BASE,
-                  MIN_RISK_PREMIUM, IVR_MIN, USE_IVR, PREMIUM_BASIS,
+        "Value": [POP_MIN, POP_MAX, DTE_MIN, DTE_MAX, YIELD_HURDLE_BASE,
+                  USE_TBILL_SPREAD, MIN_RISK_PREMIUM, USE_IVR, PREMIUM_BASIS,
                   vix, vix_regime(vix), dt.date.today().isoformat()]})
     write_report([("Puts", put_pass), ("Covered Calls", call_pass)], settings, OUTPUT_FILE)
     write_html(put_pass, call_pass, vix, "qualifying_contracts.html")

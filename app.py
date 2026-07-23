@@ -79,8 +79,8 @@ with st.sidebar:
     holds_txt = st.text_area("Covered-call holdings  (one per line:  TICKER, avg cost)",
                              "\n".join(f"{k}, {v}" for k, v in ws.HOLDINGS.items()), height=160)
     st.markdown("---")
-    st.caption("Rules: delta 0.16-0.30 - yield >= 25% - OTM% - beats T-bill by 5pts - "
-               "DTE 30-45 - no earnings in window. Edit these in wheel_screener.py.")
+    st.caption("Rules: ~70% POP (0.30 delta) - yield >= 25% - OTM% - "
+               "DTE 30-90 - no earnings in window. Edit these in wheel_screener.py.")
     if st.button("Refresh data (clear cache)"):
         st.cache_data.clear()
 
