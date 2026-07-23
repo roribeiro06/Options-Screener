@@ -32,7 +32,7 @@ HOLDINGS = {
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
 POP_MIN           = 0.65     # accept POP 65-75% (delta ~0.25-0.35), centered on 70%
 POP_MAX           = 0.75
-DTE_MIN           = 30
+DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # richness filter (stands in for IV rank): yield >= 25% - OTM%
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
@@ -284,7 +284,7 @@ def _expirations_in_window(symbol, today):
         except Exception:
             continue
         dte = (d - today).days
-        if DTE_MIN - 5 <= dte <= DTE_MAX + 10:
+        if DTE_MIN <= dte <= DTE_MAX:
             out.append((exp, d, dte))
     return out
 

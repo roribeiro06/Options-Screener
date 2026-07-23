@@ -80,7 +80,7 @@ with st.sidebar:
                              "\n".join(f"{k}, {v}" for k, v in ws.HOLDINGS.items()), height=160)
     st.markdown("---")
     st.caption("Rules: ~70% POP (0.30 delta) - yield >= 25% - OTM% - "
-               "DTE 30-90 - no earnings in window. Edit these in wheel_screener.py.")
+               "DTE 7-90 - no earnings in window. Edit these in wheel_screener.py.")
     if st.button("Refresh data (clear cache)"):
         st.cache_data.clear()
 
