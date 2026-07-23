@@ -34,7 +34,9 @@ POP_MIN           = 0.65     # accept POP 65-75% (delta ~0.25-0.35), centered on
 POP_MAX           = 0.75
 DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
-YIELD_HURDLE_BASE = 0.25     # richness filter (stands in for IV rank): yield >= 25% - OTM%
+YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
+MIN_ANN_YIELD     = 0.25     # only show contracts paying >= 25% annualized
+YIELD_OVER_IV     = 0.7      # AND annualized yield must beat 70% of the IV
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50
@@ -178,7 +180,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     needed   = YIELD_HURDLE_BASE - otm
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
-        "yield_hurdle": ann_yld >= needed,
+        "min_yield":    ann_yld >= MIN_ANN_YIELD,
+        "yield_over_iv": ann_yld > YIELD_OVER_IV * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "no_earnings":  not earnings_in_window,
     }
@@ -189,8 +192,10 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     reasons = []
     if not tests["pop_target"]:
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
-    if not tests["yield_hurdle"]:
-        reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
+    if not tests["min_yield"]:
+        reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
+    if not tests["yield_over_iv"]:
+        reasons.append(f"yield {ann_yld:.1%} not above IV {iv:.0%}")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
@@ -217,7 +222,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     needed   = YIELD_HURDLE_BASE - otm
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
-        "yield_hurdle": ann_yld >= needed,
+        "min_yield":    ann_yld >= MIN_ANN_YIELD,
+        "yield_over_iv": ann_yld > YIELD_OVER_IV * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "no_earnings":  not earnings_in_window,
         "above_cost":   (cost_basis is None) or (strike >= cost_basis),
@@ -229,8 +235,10 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     reasons = []
     if not tests["pop_target"]:
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
-    if not tests["yield_hurdle"]:
-        reasons.append(f"yield {ann_yld:.1%} < needed {needed:.1%}")
+    if not tests["min_yield"]:
+        reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
+    if not tests["yield_over_iv"]:
+        reasons.append(f"yield {ann_yld:.1%} not above IV {iv:.0%}")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
@@ -349,19 +357,19 @@ def screen_calls(symbol, cost_basis):
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "AnnYield_%", "YieldNeeded_%", "Delta_%", "IV", "EarningsDate"]
+            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "AnnYield_%", "YieldNeeded_%", "Delta_%", "IV", "EarningsDate"]
-PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "YieldNeeded_%", "Delta_%",
+             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "EarningsDate"]
+PCT_COLS = {"OTM_%", "PeriodYield_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
 
 def _df(rows, cols):
-    if rows:
-        # ticker A->Z, then strike high->low within each ticker
-        return pd.DataFrame(rows).sort_values(["Ticker", "Strike"],
-                                              ascending=[True, False])[cols]
-    return pd.DataFrame(columns=cols)
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    # display order: ticker A->Z, then strike high->low (no per-ticker cap)
+    return pd.DataFrame(rows).sort_values(["Ticker", "Strike"],
+                                          ascending=[True, False])[cols]
 
 
 def write_report(sheets, settings, path=OUTPUT_FILE):
