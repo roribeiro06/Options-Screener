@@ -26,8 +26,8 @@ st.caption("Cash-secured puts & covered calls. Live quotes from Tradier. "
 if not os.environ.get("TRADIER_TOKEN"):
     st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
 
-# --- Auto-refresh every 30 min while the tab is open, during US market hours ---
-from datetime import datetime, time as _clock
+# --- Auto-refresh aligned to the market clock (9:30, 10:00, ... 4:00 ET) ---
+from datetime import datetime, timedelta
 try:
     from zoneinfo import ZoneInfo
     _ET = ZoneInfo("America/New_York")
@@ -35,24 +35,43 @@ except Exception:
     _ET = None
 
 
-def market_open_now():
+def next_refresh_ms():
+    """Milliseconds until the next :00/:30 mark within market hours, else None.
+    Anchored to the 9:30am open, independent of when you opened the page."""
     if _ET is None:
-        return False
+        return None
     now = datetime.now(_ET)
-    if now.weekday() >= 5:            # Saturday / Sunday
-        return False
-    return _clock(9, 30) <= now.time() <= _clock(16, 0)
+    if now.weekday() >= 5:                        # weekend
+        return None
+    open_t = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    close_t = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now < open_t:
+        nxt = open_t                              # before the bell -> first update at 9:30
+    elif now <= close_t:
+        if now.minute < 30:
+            nxt = now.replace(minute=30, second=0, microsecond=0)
+        else:
+            nxt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        if nxt > close_t:
+            nxt = close_t
+    else:
+        return None                               # after the close
+    if nxt <= now:
+        nxt = now + timedelta(seconds=1)
+    return max(int((nxt - now).total_seconds() * 1000), 1000)
 
 
-if market_open_now():
+_ms = next_refresh_ms()
+if _ms is not None:
     try:
         from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=30 * 60 * 1000, key="mkt_refresh")  # 30 minutes
-        st.caption("Auto-refreshing every 30 min while open (US market hours, ET).")
+        st_autorefresh(interval=_ms, key="mkt_refresh")
+        st.caption("Auto-updates on the half hour (9:30, 10:00 ... 4:00 ET) while open. "
+                   "Use 'Refresh data' anytime for an on-demand update.")
     except Exception:
         pass
 else:
-    st.caption("Market closed - data holds until 9:30am ET, when auto-refresh resumes.")
+    st.caption("Market closed - auto-updates resume at 9:30am ET, then every half hour.")
 
 
 def parse_puts(txt):
