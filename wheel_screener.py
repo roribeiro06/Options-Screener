@@ -349,18 +349,18 @@ def screen_calls(symbol, cost_basis):
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "AnnYield_%", "YieldNeeded_%", "Delta_%", "Tbill_%", "RiskPrem_%",
-            "IV", "EarningsDate"]
+            "AnnYield_%", "YieldNeeded_%", "Delta_%", "IV", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "AnnYield_%", "YieldNeeded_%", "Delta_%", "Tbill_%",
-             "RiskPrem_%", "IV", "EarningsDate"]
+             "Premium", "AnnYield_%", "YieldNeeded_%", "Delta_%", "IV", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "YieldNeeded_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
 
 def _df(rows, cols):
     if rows:
-        return pd.DataFrame(rows).sort_values("AnnYield_%", ascending=False)[cols]
+        # ticker A->Z, then strike high->low within each ticker
+        return pd.DataFrame(rows).sort_values(["Ticker", "Strike"],
+                                              ascending=[True, False])[cols]
     return pd.DataFrame(columns=cols)
 
 
