@@ -26,6 +26,34 @@ st.caption("Cash-secured puts & covered calls. Live quotes from Tradier. "
 if not os.environ.get("TRADIER_TOKEN"):
     st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
 
+# --- Auto-refresh every 30 min while the tab is open, during US market hours ---
+from datetime import datetime, time as _clock
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:
+    _ET = None
+
+
+def market_open_now():
+    if _ET is None:
+        return False
+    now = datetime.now(_ET)
+    if now.weekday() >= 5:            # Saturday / Sunday
+        return False
+    return _clock(9, 30) <= now.time() <= _clock(16, 0)
+
+
+if market_open_now():
+    try:
+        from streamlit_autorefresh import st_autorefresh
+        st_autorefresh(interval=30 * 60 * 1000, key="mkt_refresh")  # 30 minutes
+        st.caption("Auto-refreshing every 30 min while open (US market hours, ET).")
+    except Exception:
+        pass
+else:
+    st.caption("Market closed - data holds until 9:30am ET, when auto-refresh resumes.")
+
 
 def parse_puts(txt):
     return [s.strip().upper() for s in txt.replace("\n", ",").split(",") if s.strip()]
