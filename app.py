@@ -90,8 +90,16 @@ def parse_holdings(txt):
     return tuple(out)
 
 
+def apply_criteria(c):
+    """Push the sidebar criteria into the engine's module globals."""
+    (ws.MIN_ANN_YIELD, ws.POP_MIN, ws.POP_MAX, ws.DTE_MIN, ws.DTE_MAX,
+     ws.DTE_SHORT_CUTOFF, ws.YIELD_OVER_IV_SHORT, ws.YIELD_OVER_IV_LONG,
+     ws.OTM_MIN, ws.OTM_MAX) = c
+
+
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_puts(tickers):
+def scan_puts(tickers, crit):
+    apply_criteria(crit)
     rows, errs = [], []
     for t in tickers:
         try:
@@ -103,7 +111,8 @@ def scan_puts(tickers):
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_calls(holdings):
+def scan_calls(holdings, crit):
+    apply_criteria(crit)
     rows, errs = [], []
     for t, cost in holdings:
         try:
@@ -125,14 +134,34 @@ with st.sidebar:
                             ", ".join(ws.PUT_TICKERS), height=90)
     holds_txt = st.text_area("Covered-call holdings  (one per line:  TICKER, avg cost)",
                              "\n".join(f"{k}, {v}" for k, v in ws.HOLDINGS.items()), height=160)
+
+    with st.expander("Criteria (adjustable)", expanded=False):
+        min_yield = st.number_input("Min annualized yield %", 0, 500,
+                                    int(ws.MIN_ANN_YIELD * 100), 5)
+        otm_min = st.number_input("OTM min %", 0, 100, int(ws.OTM_MIN * 100))
+        otm_max = st.number_input("OTM max %", 0, 100, int(ws.OTM_MAX * 100))
+        dte_min = st.number_input("DTE min", 0, 365, int(ws.DTE_MIN))
+        dte_max = st.number_input("DTE max", 0, 365, int(ws.DTE_MAX))
+        dte_cut = st.number_input("Short-DTE cutoff (days)", 1, 365, int(ws.DTE_SHORT_CUTOFF))
+        yiv_s = st.number_input("<= cutoff: yield must beat this % of IV", 0, 300,
+                                int(ws.YIELD_OVER_IV_SHORT * 100), 5)
+        yiv_l = st.number_input("> cutoff: yield must beat this % of IV", 0, 300,
+                                int(ws.YIELD_OVER_IV_LONG * 100), 5)
+        pop_min = st.number_input("POP min %", 0, 100, int(ws.POP_MIN * 100))
+        pop_max = st.number_input("POP max %", 0, 100, int(ws.POP_MAX * 100))
+
     st.markdown("---")
-    st.caption("Rules: ~70% POP (0.30 delta) - yield >= 25% - OTM% - "
-               "DTE 7-90 - no earnings in window. Edit these in wheel_screener.py.")
+    st.caption("Adjust thresholds in 'Criteria (adjustable)' above; changes re-run automatically. "
+               "No earnings in window (always on).")
     if st.button("Refresh data (clear cache)"):
         st.cache_data.clear()
 
 puts = parse_puts(puts_txt)
 holds = parse_holdings(holds_txt)
+
+CRITERIA = (min_yield / 100, pop_min / 100, pop_max / 100, int(dte_min), int(dte_max),
+            int(dte_cut), yiv_s / 100, yiv_l / 100, otm_min / 100, otm_max / 100)
+apply_criteria(CRITERIA)
 
 vix = cached_vix()
 if vix is not None:
@@ -140,8 +169,8 @@ if vix is not None:
 else:
     st.info("VIX unavailable right now.")
 
-dp, ep = scan_puts(tuple(puts))
-dc, ec = scan_calls(holds)
+dp, ep = scan_puts(tuple(puts), CRITERIA)
+dc, ec = scan_calls(holds, CRITERIA)
 
 st.subheader("Cash-Secured Puts")
 if len(dp):

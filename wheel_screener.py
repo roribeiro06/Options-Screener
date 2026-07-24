@@ -39,6 +39,8 @@ MIN_ANN_YIELD     = 0.25     # only show contracts paying >= 25% annualized
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
 YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must be > 100% of IV
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
+OTM_MIN             = 0.0    # min % out-of-the-money (0 = no lower bound)
+OTM_MAX             = 1.0    # max % out-of-the-money (1.0 = 100%, effectively off)
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50
@@ -186,6 +188,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
         "min_yield":    ann_yld >= MIN_ANN_YIELD,
         "yield_over_iv": ann_yld > yiv * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
+        "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
     if USE_TBILL_SPREAD:
@@ -203,6 +206,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
+    if not tests["otm_range"]:
+        reasons.append(f"OTM {otm:.1%} outside {OTM_MIN:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
     if USE_IVR and not tests.get("iv_rank"):
@@ -229,6 +234,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "min_yield":    ann_yld >= MIN_ANN_YIELD,
         "yield_over_iv": ann_yld > yiv * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
+        "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
         "above_cost":   (cost_basis is None) or (strike >= cost_basis),
     }
@@ -247,6 +253,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"only {risk_prem:.1%} over T-bill")
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
+    if not tests["otm_range"]:
+        reasons.append(f"OTM {otm:.1%} outside {OTM_MIN:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
     if not tests["above_cost"]:
