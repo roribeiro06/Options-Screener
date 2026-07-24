@@ -40,6 +40,7 @@ DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
 YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must be > 100% of IV
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
 USE_YIELD_OVER_IV   = False  # OFF: don't require yield to beat IV (set True to re-enable)
+REQUIRE_STRIKE_ABOVE_COST = False  # OFF: covered-call strike need NOT be above your cost basis
 OTM_MIN             = 0.10   # min % out-of-the-money
 OTM_MAX             = 1.0    # max % out-of-the-money (1.0 = 100%, effectively off)
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
@@ -237,8 +238,9 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "above_cost":   (cost_basis is None) or (strike >= cost_basis),
     }
+    if REQUIRE_STRIKE_ABOVE_COST:
+        tests["above_cost"] = (cost_basis is None) or (strike >= cost_basis)
     if USE_YIELD_OVER_IV:
         tests["yield_over_iv"] = ann_yld > yiv * iv
     if USE_TBILL_SPREAD:
@@ -260,7 +262,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"OTM {otm:.1%} outside {OTM_MIN:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
-    if not tests["above_cost"]:
+    if REQUIRE_STRIKE_ABOVE_COST and not tests.get("above_cost"):
         reasons.append(f"strike below cost {cost_basis}")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
