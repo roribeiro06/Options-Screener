@@ -94,7 +94,7 @@ def apply_criteria(c):
     """Push the sidebar criteria into the engine's module globals."""
     (ws.MIN_ANN_YIELD, ws.POP_MIN, ws.POP_MAX, ws.DTE_MIN, ws.DTE_MAX,
      ws.DTE_SHORT_CUTOFF, ws.YIELD_OVER_IV_SHORT, ws.YIELD_OVER_IV_LONG,
-     ws.OTM_MIN, ws.OTM_MAX) = c
+     ws.OTM_MIN, ws.OTM_MAX, ws.USE_YIELD_OVER_IV) = c
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -149,6 +149,8 @@ with st.sidebar:
                                 int(_d("YIELD_OVER_IV_SHORT", 1.0) * 100), 5)
         yiv_l = st.number_input("> cutoff: yield must beat this % of IV", 0, 300,
                                 int(_d("YIELD_OVER_IV_LONG", 0.7) * 100), 5)
+        use_yiv = st.checkbox("Apply the yield-vs-IV filter above",
+                              value=bool(_d("USE_YIELD_OVER_IV", False)))
         pop_min = st.number_input("POP min %", 0, 100, int(_d("POP_MIN", 0.65) * 100))
         pop_max = st.number_input("POP max %", 0, 100, int(_d("POP_MAX", 0.75) * 100))
 
@@ -162,7 +164,8 @@ puts = parse_puts(puts_txt)
 holds = parse_holdings(holds_txt)
 
 CRITERIA = (min_yield / 100, pop_min / 100, pop_max / 100, int(dte_min), int(dte_max),
-            int(dte_cut), yiv_s / 100, yiv_l / 100, otm_min / 100, otm_max / 100)
+            int(dte_cut), yiv_s / 100, yiv_l / 100, otm_min / 100, otm_max / 100,
+            bool(use_yiv))
 apply_criteria(CRITERIA)
 
 vix = cached_vix()

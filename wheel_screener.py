@@ -35,11 +35,12 @@ POP_MAX           = 0.75
 DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
-MIN_ANN_YIELD     = 0.25     # only show contracts paying >= 25% annualized
+MIN_ANN_YIELD     = 0.15     # only show contracts paying >= 15% annualized
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
 YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must be > 100% of IV
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
-OTM_MIN             = 0.0    # min % out-of-the-money (0 = no lower bound)
+USE_YIELD_OVER_IV   = False  # OFF: don't require yield to beat IV (set True to re-enable)
+OTM_MIN             = 0.10   # min % out-of-the-money
 OTM_MAX             = 1.0    # max % out-of-the-money (1.0 = 100%, effectively off)
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
@@ -186,11 +187,12 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= MIN_ANN_YIELD,
-        "yield_over_iv": ann_yld > yiv * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
+    if USE_YIELD_OVER_IV:
+        tests["yield_over_iv"] = ann_yld > yiv * iv
     if USE_TBILL_SPREAD:
         tests["tbill_spread"] = risk_prem >= MIN_RISK_PREMIUM
     if USE_IVR:
@@ -200,7 +202,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["min_yield"]:
         reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
-    if not tests["yield_over_iv"]:
+    if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
@@ -232,12 +234,13 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= MIN_ANN_YIELD,
-        "yield_over_iv": ann_yld > yiv * iv,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
         "above_cost":   (cost_basis is None) or (strike >= cost_basis),
     }
+    if USE_YIELD_OVER_IV:
+        tests["yield_over_iv"] = ann_yld > yiv * iv
     if USE_TBILL_SPREAD:
         tests["tbill_spread"] = risk_prem >= MIN_RISK_PREMIUM
     if USE_IVR:
@@ -247,7 +250,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["min_yield"]:
         reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
-    if not tests["yield_over_iv"]:
+    if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
         reasons.append(f"only {risk_prem:.1%} over T-bill")
