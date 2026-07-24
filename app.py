@@ -136,19 +136,21 @@ with st.sidebar:
                              "\n".join(f"{k}, {v}" for k, v in ws.HOLDINGS.items()), height=160)
 
     with st.expander("Criteria (adjustable)", expanded=False):
+        def _d(name, default):            # safe read (works even if engine file is older)
+            return getattr(ws, name, default)
         min_yield = st.number_input("Min annualized yield %", 0, 500,
-                                    int(ws.MIN_ANN_YIELD * 100), 5)
-        otm_min = st.number_input("OTM min %", 0, 100, int(ws.OTM_MIN * 100))
-        otm_max = st.number_input("OTM max %", 0, 100, int(ws.OTM_MAX * 100))
-        dte_min = st.number_input("DTE min", 0, 365, int(ws.DTE_MIN))
-        dte_max = st.number_input("DTE max", 0, 365, int(ws.DTE_MAX))
-        dte_cut = st.number_input("Short-DTE cutoff (days)", 1, 365, int(ws.DTE_SHORT_CUTOFF))
+                                    int(_d("MIN_ANN_YIELD", 0.25) * 100), 5)
+        otm_min = st.number_input("OTM min %", 0, 100, int(_d("OTM_MIN", 0.0) * 100))
+        otm_max = st.number_input("OTM max %", 0, 100, int(_d("OTM_MAX", 1.0) * 100))
+        dte_min = st.number_input("DTE min", 0, 365, int(_d("DTE_MIN", 7)))
+        dte_max = st.number_input("DTE max", 0, 365, int(_d("DTE_MAX", 90)))
+        dte_cut = st.number_input("Short-DTE cutoff (days)", 1, 365, int(_d("DTE_SHORT_CUTOFF", 21)))
         yiv_s = st.number_input("<= cutoff: yield must beat this % of IV", 0, 300,
-                                int(ws.YIELD_OVER_IV_SHORT * 100), 5)
+                                int(_d("YIELD_OVER_IV_SHORT", 1.0) * 100), 5)
         yiv_l = st.number_input("> cutoff: yield must beat this % of IV", 0, 300,
-                                int(ws.YIELD_OVER_IV_LONG * 100), 5)
-        pop_min = st.number_input("POP min %", 0, 100, int(ws.POP_MIN * 100))
-        pop_max = st.number_input("POP max %", 0, 100, int(ws.POP_MAX * 100))
+                                int(_d("YIELD_OVER_IV_LONG", 0.7) * 100), 5)
+        pop_min = st.number_input("POP min %", 0, 100, int(_d("POP_MIN", 0.65) * 100))
+        pop_max = st.number_input("POP max %", 0, 100, int(_d("POP_MAX", 0.75) * 100))
 
     st.markdown("---")
     st.caption("Adjust thresholds in 'Criteria (adjustable)' above; changes re-run automatically. "
