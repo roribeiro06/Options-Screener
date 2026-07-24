@@ -94,7 +94,7 @@ def apply_criteria(c):
     """Push the sidebar criteria into the engine's module globals."""
     (ws.MIN_ANN_YIELD, ws.POP_MIN, ws.POP_MAX, ws.DTE_MIN, ws.DTE_MAX,
      ws.DTE_SHORT_CUTOFF, ws.YIELD_OVER_IV_SHORT, ws.YIELD_OVER_IV_LONG,
-     ws.OTM_MIN, ws.OTM_MAX, ws.USE_YIELD_OVER_IV) = c
+     ws.OTM_MIN, ws.OTM_MAX, ws.USE_YIELD_OVER_IV, ws.USE_TIERED_YIELD) = c
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -140,6 +140,8 @@ with st.sidebar:
             return getattr(ws, name, default)
         min_yield = st.number_input("Min annualized yield %", 0, 500,
                                     int(_d("MIN_ANN_YIELD", 0.25) * 100), 5)
+        use_tier = st.checkbox("Tiered OTM->yield  (>=5%:25%, >=10%:15%, >=15%:10%)",
+                               value=bool(_d("USE_TIERED_YIELD", False)))
         otm_min = st.number_input("OTM min %", 0, 100, int(_d("OTM_MIN", 0.0) * 100))
         otm_max = st.number_input("OTM max %", 0, 100, int(_d("OTM_MAX", 1.0) * 100))
         dte_min = st.number_input("DTE min", 0, 365, int(_d("DTE_MIN", 7)))
@@ -165,7 +167,7 @@ holds = parse_holdings(holds_txt)
 
 CRITERIA = (min_yield / 100, pop_min / 100, pop_max / 100, int(dte_min), int(dte_max),
             int(dte_cut), yiv_s / 100, yiv_l / 100, otm_min / 100, otm_max / 100,
-            bool(use_yiv))
+            bool(use_yiv), bool(use_tier))
 apply_criteria(CRITERIA)
 
 vix = cached_vix()

@@ -35,7 +35,9 @@ POP_MAX           = 0.75
 DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
-MIN_ANN_YIELD     = 0.15     # only show contracts paying >= 15% annualized
+MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
+USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
+TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
 YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must be > 100% of IV
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
@@ -173,6 +175,14 @@ def bs_call_delta(S, K, T, sigma, r):
     return norm.cdf(_d1(S, K, T, sigma, r))
 
 
+def tiered_yield_needed(otm):
+    """Required annualized yield by OTM bracket (further OTM -> less yield needed)."""
+    for min_otm, req in TIERED_YIELD:      # ordered high OTM -> low
+        if otm >= min_otm:
+            return req
+    return TIERED_YIELD[-1][1]              # closer than smallest tier -> strictest
+
+
 def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
@@ -185,9 +195,10 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
+    req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
-        "min_yield":    ann_yld >= MIN_ANN_YIELD,
+        "min_yield":    ann_yld >= req_yield,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
@@ -202,7 +213,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     if not tests["pop_target"]:
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["min_yield"]:
-        reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
+        reasons.append(f"yield {ann_yld:.1%} < {req_yield:.0%} needed")
     if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
@@ -232,9 +243,10 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
+    req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
-        "min_yield":    ann_yld >= MIN_ANN_YIELD,
+        "min_yield":    ann_yld >= req_yield,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    OTM_MIN <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
@@ -251,7 +263,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     if not tests["pop_target"]:
         reasons.append(f"POP {delta_pct:.0%} outside {POP_MIN:.0%}-{POP_MAX:.0%}")
     if not tests["min_yield"]:
-        reasons.append(f"yield {ann_yld:.1%} < {MIN_ANN_YIELD:.0%} floor")
+        reasons.append(f"yield {ann_yld:.1%} < {req_yield:.0%} needed")
     if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
