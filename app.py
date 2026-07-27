@@ -98,6 +98,12 @@ def apply_criteria(c):
      ws.OTM_MIN, ws.OTM_MAX, ws.USE_YIELD_OVER_IV, ws.USE_TIERED_YIELD) = c
 
 
+def apply_spread_criteria(sc):
+    """Independent criteria for the multi-leg (spread) engine."""
+    (sp.ROR_ANN_MIN, sp.SPREAD_POP_MIN, sp.SPREAD_POP_MAX,
+     sp.SPREAD_DTE_MIN, sp.SPREAD_DTE_MAX, sp.SPREAD_WIDTH_PCT) = sc
+
+
 @st.cache_data(ttl=600, show_spinner=True)
 def scan_puts(tickers, crit):
     apply_criteria(crit)
@@ -125,8 +131,8 @@ def scan_calls(holdings, crit):
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_spreads(tickers, crit):
-    apply_criteria(crit)
+def scan_spreads(tickers, sc):
+    apply_spread_criteria(sc)
     rows, errs = [], []
     for t in tickers:
         try:
@@ -148,7 +154,7 @@ with st.sidebar:
     holds_txt = st.text_area("Covered-call holdings  (one per line:  TICKER, avg cost)",
                              "\n".join(f"{k}, {v}" for k, v in ws.HOLDINGS.items()), height=160)
 
-    with st.expander("Criteria (adjustable)", expanded=False):
+    with st.expander("Puts / Calls criteria", expanded=False):
         def _d(name, default):            # safe read (works even if engine file is older)
             return getattr(ws, name, default)
         min_yield = st.number_input("Min annualized yield %", 0, 500,
@@ -169,6 +175,16 @@ with st.sidebar:
         pop_min = st.number_input("POP min %", 0, 100, int(_d("POP_MIN", 0.65) * 100))
         pop_max = st.number_input("POP max %", 0, 100, int(_d("POP_MAX", 0.75) * 100))
 
+    with st.expander("Multi-leg (spreads) criteria", expanded=False):
+        def _ds(name, default):
+            return getattr(sp, name, default)
+        s_min_ror = st.number_input("Min annualized ROR %", 0, 2000, int(_ds("ROR_ANN_MIN", 0.25) * 100), 5)
+        s_pop_min = st.number_input("Spread POP min %", 0, 100, int(_ds("SPREAD_POP_MIN", 0.65) * 100))
+        s_pop_max = st.number_input("Spread POP max %", 0, 100, int(_ds("SPREAD_POP_MAX", 0.75) * 100))
+        s_dte_min = st.number_input("Spread DTE min", 0, 365, int(_ds("SPREAD_DTE_MIN", 7)))
+        s_dte_max = st.number_input("Spread DTE max", 0, 365, int(_ds("SPREAD_DTE_MAX", 90)))
+        s_width = st.number_input("Spread width %", 1, 50, int(_ds("SPREAD_WIDTH_PCT", 0.05) * 100))
+
     st.markdown("---")
     st.caption("Adjust thresholds in 'Criteria (adjustable)' above; changes re-run automatically. "
                "No earnings in window (always on).")
@@ -182,6 +198,9 @@ CRITERIA = (min_yield / 100, pop_min / 100, pop_max / 100, int(dte_min), int(dte
             int(dte_cut), yiv_s / 100, yiv_l / 100, otm_min / 100, otm_max / 100,
             bool(use_yiv), bool(use_tier))
 apply_criteria(CRITERIA)
+SPREAD_CRITERIA = (s_min_ror / 100, s_pop_min / 100, s_pop_max / 100,
+                   int(s_dte_min), int(s_dte_max), s_width / 100)
+apply_spread_criteria(SPREAD_CRITERIA)
 
 vix = cached_vix()
 if vix is not None:
@@ -213,7 +232,7 @@ if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
 st.header("Multi-Leg Strategies  (70% POP)")
-ds, es = scan_spreads(tuple(puts), CRITERIA)
+ds, es = scan_spreads(tuple(puts), SPREAD_CRITERIA)
 _SPREAD_SECTIONS = [
     ("Put credit spread",  "Put Credit Spreads  (bullish, defined risk)"),
     ("Call credit spread", "Call Credit Spreads  (bearish, defined risk)"),

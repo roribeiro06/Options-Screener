@@ -16,6 +16,10 @@ IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
 ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
+SPREAD_POP_MIN   = 0.65    # spreads have their OWN POP band (independent of puts/calls)
+SPREAD_POP_MAX   = 0.75
+SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
+SPREAD_DTE_MAX   = 90
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Legs", "Expiration", "DTE",
                "Max Profit", "Width", "MaxLoss", "ROR_%", "AnnROR_%", "POP_%", "IV", "EarningsDate"]
@@ -91,7 +95,7 @@ def _ok_defined(r, pmin, pmax):
 
 def _for_expiration(sym, spot, exp, dte, earn, chain):
     out = []
-    pmin, pmax = ws.POP_MIN, ws.POP_MAX
+    pmin, pmax = SPREAD_POP_MIN, SPREAD_POP_MAX
 
     s = _credit_spread(chain, "put", SHORT_DELTA, SHORT_DELTA_TOL)
     if s:
@@ -130,6 +134,19 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
     return out
 
 
+def _spread_expirations(symbol, today):
+    out = []
+    for exp in ws.td_expirations(symbol):
+        try:
+            d = dt.date.fromisoformat(exp)
+        except Exception:
+            continue
+        dte = (d - today).days
+        if SPREAD_DTE_MIN <= dte <= SPREAD_DTE_MAX:
+            out.append((exp, d, dte))
+    return out
+
+
 def screen_spreads(symbol):
     price = ws.td_quote(symbol)
     if not price:
@@ -138,7 +155,7 @@ def screen_spreads(symbol):
     earnings = ws.get_earnings_date(symbol)
     today = dt.date.today()
     rows = []
-    for exp, exp_date, dte in ws._expirations_in_window(symbol, today):
+    for exp, exp_date, dte in _spread_expirations(symbol, today):
         if earnings and today <= earnings <= exp_date:
             continue
         rows += _for_expiration(symbol, price, exp, dte, earnings, ws.td_chain(symbol, exp))
