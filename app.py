@@ -252,6 +252,38 @@ if es:
     st.caption("Skipped: " + " | ".join(es))
 
 st.markdown("---")
-st.caption("Delta_% = chance of keeping the premium (1 - delta). Multi-leg: Max Profit = net credit, "
-           "ROR = max profit / max loss (all defined-risk). Prices live via Tradier (delayed); "
-           "confirm in your broker. Not financial advice.")
+st.header("Legend - criteria in effect")
+try:
+    def _on(b):
+        return "ON" if b else "off"
+    _yiv = ""
+    if ws.USE_YIELD_OVER_IV:
+        _yiv = (f"  (<={ws.DTE_SHORT_CUTOFF}d: yield > {ws.YIELD_OVER_IV_SHORT:.0%} of IV; "
+                f">{ws.DTE_SHORT_CUTOFF}d: yield > {ws.YIELD_OVER_IV_LONG:.0%} of IV)")
+    st.markdown(f"""
+**What the columns mean** - OTM_% = how far the strike is out-of-the-money; POP_% = chance of keeping the premium (about 1 - delta).
+For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
+MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
+
+**Cash-Secured Puts & Covered Calls**
+- Probability of profit (POP): {ws.POP_MIN:.0%} to {ws.POP_MAX:.0%}  (about 0.30 delta = 70% POP)
+- Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%}
+- OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
+- Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
+- Yield-must-beat-IV filter: **{_on(ws.USE_YIELD_OVER_IV)}**{_yiv}
+- Tiered OTM-to-yield rule: **{_on(ws.USE_TIERED_YIELD)}**  |  Beat-T-bill rule: **{_on(ws.USE_TBILL_SPREAD)}**
+- Covered calls - require strike above your cost: **{_on(ws.REQUIRE_STRIKE_ABOVE_COST)}**
+
+**Multi-Leg (Credit Spreads & Iron Condors) - all defined-risk**
+- Structure: credit spreads use a ~{sp.SHORT_DELTA:.2f}-delta short leg (about 70% POP); iron condors use two ~{sp.IC_LEG_DELTA:.2f}-delta shorts (combined about 0.30)
+- Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
+- Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
+- Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of price (distance from short strike to long/protective strike)
+- OTM floor on the short leg(s): {ws.OTM_MIN_INDEX:.0%} for index ETFs / {ws.OTM_MIN_OTHER:.0%} for other tickers
+- Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX}; never spans earnings
+- Excluded: short strangles and straddles (undefined risk)
+
+Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
+""")
+except Exception as _e:
+    st.caption(f"(legend unavailable: {_e})")

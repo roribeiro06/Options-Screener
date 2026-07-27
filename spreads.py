@@ -22,8 +22,9 @@ SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Legs", "Expiration", "DTE",
-               "Max Profit", "Width", "MaxLoss", "ROR_%", "AnnROR_%", "POP_%", "IV", "EarningsDate"]
-PCT_COLS = {"ROR_%", "AnnROR_%", "POP_%", "IV"}
+               "OTM_%", "Width", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
+               "POP_%", "IV", "EarningsDate"]
+PCT_COLS = {"OTM_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
 def _find_by_delta(chain, opt_type, target, tol):
@@ -80,12 +81,12 @@ def _credit_spread(chain, opt_type, target_delta, tol):
             "width": width, "max_loss": max_loss}
 
 
-def _defined_row(sym, spot, exp, dte, earn, strat, legs, credit, width, max_loss, pop, iv):
+def _defined_row(sym, spot, exp, dte, earn, strat, legs, credit, width, max_loss, pop, iv, otm):
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat, "Legs": legs,
-            "Expiration": exp, "DTE": dte, "Max Profit": round(credit, 2),
-            "Width": round(width, 2), "MaxLoss": round(max_loss, 2),
+            "Expiration": exp, "DTE": dte, "OTM_%": otm, "Width": round(width, 2),
+            "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv, "EarningsDate": earn}
 
 
@@ -103,7 +104,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         pop = 1 - abs(s["short"]["delta"])
         r = _defined_row(sym, spot, exp, dte, earn, "Put credit spread",
                          f"sell {s['short']['strike']:g}P / buy {s['long_strike']:g}P",
-                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0)
+                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0,
+                         (spot - s["short"]["strike"]) / spot)
         if _ok_defined(r, pmin, pmax):
             out.append(r)
 
@@ -112,7 +114,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         pop = 1 - abs(s["short"]["delta"])
         r = _defined_row(sym, spot, exp, dte, earn, "Call credit spread",
                          f"sell {s['short']['strike']:g}C / buy {s['long_strike']:g}C",
-                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0)
+                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0,
+                         (s["short"]["strike"] - spot) / spot)
         if _ok_defined(r, pmin, pmax):
             out.append(r)
 
@@ -129,7 +132,9 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                              f"{ps['long_strike']:g}/{ps['short']['strike']:g}P  "
                              f"{cs['short']['strike']:g}/{cs['long_strike']:g}C",
-                             credit, width, max_loss, pop, iv)
+                             credit, width, max_loss, pop, iv,
+                             min((spot - ps["short"]["strike"]) / spot,
+                                 (cs["short"]["strike"] - spot) / spot))
             if _ok_defined(r, pmin, pmax):
                 out.append(r)
 
