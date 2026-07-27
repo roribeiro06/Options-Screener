@@ -21,13 +21,14 @@ from scipy.stats import norm
 
 # ============================== CONFIG ==============================
 PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL", "MU", "IGV",
-               "V", "AAPL", "LLY", "MA"]
+               "V", "AAPL", "LLY", "MA", "UBER"]
 
 HOLDINGS = {
     "DKNG": 18.4505,
     "KHC": 32.9834,
     "CMCSA": 35.12,
     "PS": 25.25,
+    "NFLX": 69.30,
 }
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
