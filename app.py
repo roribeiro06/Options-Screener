@@ -212,18 +212,27 @@ else:
 if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
-st.subheader("Credit Spreads, Iron Condors & Strangles  (70% POP)")
+st.header("Multi-Leg Strategies  (70% POP)")
 ds, es = scan_spreads(tuple(puts), CRITERIA)
-if len(ds):
-    st.dataframe(sp._fmt(ds), hide_index=True, use_container_width=True)
-    st.download_button("Download spreads (CSV)", ds.to_csv(index=False),
-                       "spreads.csv", "text/csv")
-else:
-    st.write("None qualify right now.")
+_SPREAD_SECTIONS = [
+    ("Put credit spread",  "Put Credit Spreads  (bullish, defined risk)"),
+    ("Call credit spread", "Call Credit Spreads  (bearish, defined risk)"),
+    ("Iron condor",        "Iron Condors  (neutral, defined risk)"),
+]
+for _key, _title in _SPREAD_SECTIONS:
+    st.subheader(_title)
+    _sub = ds[ds["Strategy"] == _key] if len(ds) else ds
+    if len(_sub):
+        st.dataframe(sp._fmt(_sub.drop(columns=["Strategy"])),
+                     hide_index=True, use_container_width=True)
+        st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
+                           f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")
+    else:
+        st.write("None qualify right now.")
 if es:
     st.caption("Skipped: " + " | ".join(es))
 
 st.markdown("---")
-st.caption("Delta_% = chance of keeping the premium (1 - delta). Spreads: ROR = credit / max loss; "
-           "strangles are undefined-risk. Prices live via Tradier (delayed); confirm in your broker. "
-           "Not financial advice.")
+st.caption("Delta_% = chance of keeping the premium (1 - delta). Multi-leg: Max Profit = net credit, "
+           "ROR = max profit / max loss (all defined-risk). Prices live via Tradier (delayed); "
+           "confirm in your broker. Not financial advice.")

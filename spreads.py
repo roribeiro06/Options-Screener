@@ -3,8 +3,7 @@ spreads.py -- multi-leg strategy screener (reuses wheel_screener's Tradier data)
 All anchored at Options Alpha's 70% POP:
   * Put/Call credit spreads : short leg ~0.30 delta (~70% POP), defined risk.
   * Iron condor             : short put + short call ~0.15 delta each (combined ~0.30), defined risk.
-  * Short strangle          : short put + short call ~0.15 delta each, UNDEFINED risk.
-(Straddles are excluded: at-the-money = ~50% POP, can't be a 70% POP trade.)
+Undefined-risk strategies (short strangles/straddles) are excluded. Max Profit = net credit received.
 """
 import datetime as dt
 import pandas as pd
@@ -19,7 +18,7 @@ MIN_CREDIT       = 0.05    # ignore trivial credits
 ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Legs", "Expiration", "DTE",
-               "Credit", "Width", "MaxLoss", "ROR_%", "AnnROR_%", "POP_%", "IV", "EarningsDate"]
+               "Max Profit", "Width", "MaxLoss", "ROR_%", "AnnROR_%", "POP_%", "IV", "EarningsDate"]
 PCT_COLS = {"ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
@@ -81,7 +80,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, legs, credit, width, max_loss
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat, "Legs": legs,
-            "Expiration": exp, "DTE": dte, "Credit": round(credit, 2),
+            "Expiration": exp, "DTE": dte, "Max Profit": round(credit, 2),
             "Width": round(width, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv, "EarningsDate": earn}
 
@@ -128,19 +127,6 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             if _ok_defined(r, pmin, pmax):
                 out.append(r)
 
-    sp = _find_by_delta(chain, "put", IC_LEG_DELTA, IC_LEG_TOL)
-    sc = _find_by_delta(chain, "call", IC_LEG_DELTA, IC_LEG_TOL)
-    if sp and sc:
-        credit = (sp["bid"] or 0) + (sc["bid"] or 0)
-        pop = 1 - (abs(sp["delta"]) + abs(sc["delta"]))
-        ann = credit / spot * 365.0 / dte if dte else float("nan")
-        if credit >= MIN_CREDIT and pmin <= pop <= pmax and ann >= ws.MIN_ANN_YIELD:
-            iv = ((sp.get("iv") or 0) + (sc.get("iv") or 0)) / 2
-            out.append({"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": "Short strangle",
-                        "Legs": f"sell {sp['strike']:g}P / sell {sc['strike']:g}C",
-                        "Expiration": exp, "DTE": dte, "Credit": round(credit, 2),
-                        "Width": None, "MaxLoss": None, "ROR_%": None, "AnnROR_%": ann,
-                        "POP_%": pop, "IV": iv, "EarningsDate": earn})
     return out
 
 
@@ -171,7 +157,7 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
-    for c in ("Credit", "MaxLoss", "CurrentPrice", "Width"):
+    for c in ("Max Profit", "MaxLoss", "CurrentPrice", "Width"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     return d
