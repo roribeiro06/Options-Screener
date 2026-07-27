@@ -32,8 +32,8 @@ HOLDINGS = {
 }
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
-POP_MIN           = 0.65     # accept POP 65-75% (delta ~0.25-0.35), centered on 70%
-POP_MAX           = 0.75
+POP_MIN           = 0.70     # at least 70% POP (delta <= ~0.30); higher POP is fine too
+POP_MAX           = 1.0      # no upper cap
 DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)

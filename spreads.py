@@ -16,8 +16,8 @@ IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
 ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
-SPREAD_POP_MIN   = 0.65    # spreads have their OWN POP band (independent of puts/calls)
-SPREAD_POP_MAX   = 0.75
+SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/calls)
+SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
 
