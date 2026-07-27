@@ -20,7 +20,8 @@ import pandas as pd
 from scipy.stats import norm
 
 # ============================== CONFIG ==============================
-PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL", "MU", "IGV"]
+PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL", "MU", "IGV",
+               "V", "AAPL"]
 
 HOLDINGS = {
     "DKNG": 18.4505,

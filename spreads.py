@@ -1,0 +1,177 @@
+"""
+spreads.py -- multi-leg strategy screener (reuses wheel_screener's Tradier data).
+All anchored at Options Alpha's 70% POP:
+  * Put/Call credit spreads : short leg ~0.30 delta (~70% POP), defined risk.
+  * Iron condor             : short put + short call ~0.15 delta each (combined ~0.30), defined risk.
+  * Short strangle          : short put + short call ~0.15 delta each, UNDEFINED risk.
+(Straddles are excluded: at-the-money = ~50% POP, can't be a 70% POP trade.)
+"""
+import datetime as dt
+import pandas as pd
+import wheel_screener as ws
+
+SHORT_DELTA      = 0.30    # one-sided credit-spread short leg
+SHORT_DELTA_TOL  = 0.08    # accept 0.22-0.38
+IC_LEG_DELTA     = 0.15    # iron condor / strangle: each short leg
+IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
+SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
+MIN_CREDIT       = 0.05    # ignore trivial credits
+ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
+
+SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Legs", "Expiration", "DTE",
+               "Credit", "Width", "MaxLoss", "ROR_%", "AnnROR_%", "POP_%", "IV", "EarningsDate"]
+PCT_COLS = {"ROR_%", "AnnROR_%", "POP_%", "IV"}
+
+
+def _find_by_delta(chain, opt_type, target, tol):
+    best, bestdiff = None, 1e9
+    for o in chain:
+        if o["type"] != opt_type or o.get("delta") is None:
+            continue
+        if (o.get("bid") or 0) <= 0:
+            continue
+        diff = abs(abs(o["delta"]) - target)
+        if diff < bestdiff:
+            best, bestdiff = o, diff
+    if best is not None and abs(abs(best["delta"]) - target) <= tol:
+        return best
+    return None
+
+
+def _leg_at(chain, opt_type, strike):
+    for o in chain:
+        if o["type"] == opt_type and abs(o["strike"] - strike) < 1e-6:
+            return o
+    return None
+
+
+def _long_strike(chain, opt_type, short_strike):
+    strikes = sorted({o["strike"] for o in chain if o["type"] == opt_type})
+    if opt_type == "put":
+        target = short_strike * (1 - SPREAD_WIDTH_PCT)
+        cand = [s for s in strikes if s < short_strike]
+    else:
+        target = short_strike * (1 + SPREAD_WIDTH_PCT)
+        cand = [s for s in strikes if s > short_strike]
+    return min(cand, key=lambda s: abs(s - target)) if cand else None
+
+
+def _credit_spread(chain, opt_type, target_delta, tol):
+    short = _find_by_delta(chain, opt_type, target_delta, tol)
+    if not short:
+        return None
+    ls = _long_strike(chain, opt_type, short["strike"])
+    if ls is None:
+        return None
+    lng = _leg_at(chain, opt_type, ls)
+    if not lng:
+        return None
+    credit = (short["bid"] or 0) - (lng["ask"] or 0)
+    width = abs(short["strike"] - ls)
+    if credit < MIN_CREDIT or width <= 0:
+        return None
+    max_loss = width - credit
+    if max_loss <= 0:
+        return None
+    return {"short": short, "long_strike": ls, "credit": credit,
+            "width": width, "max_loss": max_loss}
+
+
+def _defined_row(sym, spot, exp, dte, earn, strat, legs, credit, width, max_loss, pop, iv):
+    ror = credit / max_loss if max_loss > 0 else float("nan")
+    ann = ror * 365.0 / dte if dte else float("nan")
+    return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat, "Legs": legs,
+            "Expiration": exp, "DTE": dte, "Credit": round(credit, 2),
+            "Width": round(width, 2), "MaxLoss": round(max_loss, 2),
+            "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv, "EarningsDate": earn}
+
+
+def _ok_defined(r, pmin, pmax):
+    return (pmin <= r["POP_%"] <= pmax) and (r["AnnROR_%"] >= ROR_ANN_MIN)
+
+
+def _for_expiration(sym, spot, exp, dte, earn, chain):
+    out = []
+    pmin, pmax = ws.POP_MIN, ws.POP_MAX
+
+    s = _credit_spread(chain, "put", SHORT_DELTA, SHORT_DELTA_TOL)
+    if s:
+        pop = 1 - abs(s["short"]["delta"])
+        r = _defined_row(sym, spot, exp, dte, earn, "Put credit spread",
+                         f"sell {s['short']['strike']:g}P / buy {s['long_strike']:g}P",
+                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0)
+        if _ok_defined(r, pmin, pmax):
+            out.append(r)
+
+    s = _credit_spread(chain, "call", SHORT_DELTA, SHORT_DELTA_TOL)
+    if s:
+        pop = 1 - abs(s["short"]["delta"])
+        r = _defined_row(sym, spot, exp, dte, earn, "Call credit spread",
+                         f"sell {s['short']['strike']:g}C / buy {s['long_strike']:g}C",
+                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0)
+        if _ok_defined(r, pmin, pmax):
+            out.append(r)
+
+    ps = _credit_spread(chain, "put", IC_LEG_DELTA, IC_LEG_TOL)
+    cs = _credit_spread(chain, "call", IC_LEG_DELTA, IC_LEG_TOL)
+    if ps and cs:
+        credit = ps["credit"] + cs["credit"]
+        width = max(ps["width"], cs["width"])
+        max_loss = width - credit
+        pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
+        if max_loss > 0:
+            iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
+            r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
+                             f"{ps['long_strike']:g}/{ps['short']['strike']:g}P  "
+                             f"{cs['short']['strike']:g}/{cs['long_strike']:g}C",
+                             credit, width, max_loss, pop, iv)
+            if _ok_defined(r, pmin, pmax):
+                out.append(r)
+
+    sp = _find_by_delta(chain, "put", IC_LEG_DELTA, IC_LEG_TOL)
+    sc = _find_by_delta(chain, "call", IC_LEG_DELTA, IC_LEG_TOL)
+    if sp and sc:
+        credit = (sp["bid"] or 0) + (sc["bid"] or 0)
+        pop = 1 - (abs(sp["delta"]) + abs(sc["delta"]))
+        ann = credit / spot * 365.0 / dte if dte else float("nan")
+        if credit >= MIN_CREDIT and pmin <= pop <= pmax and ann >= ws.MIN_ANN_YIELD:
+            iv = ((sp.get("iv") or 0) + (sc.get("iv") or 0)) / 2
+            out.append({"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": "Short strangle",
+                        "Legs": f"sell {sp['strike']:g}P / sell {sc['strike']:g}C",
+                        "Expiration": exp, "DTE": dte, "Credit": round(credit, 2),
+                        "Width": None, "MaxLoss": None, "ROR_%": None, "AnnROR_%": ann,
+                        "POP_%": pop, "IV": iv, "EarningsDate": earn})
+    return out
+
+
+def screen_spreads(symbol):
+    price = ws.td_quote(symbol)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = ws.get_earnings_date(symbol)
+    today = dt.date.today()
+    rows = []
+    for exp, exp_date, dte in ws._expirations_in_window(symbol, today):
+        if earnings and today <= earnings <= exp_date:
+            continue
+        rows += _for_expiration(symbol, price, exp, dte, earnings, ws.td_chain(symbol, exp))
+    return rows
+
+
+def _df(rows):
+    if not rows:
+        return pd.DataFrame(columns=SPREAD_COLS)
+    return pd.DataFrame(rows).sort_values(["Ticker", "AnnROR_%"],
+                                          ascending=[True, False])[SPREAD_COLS]
+
+
+def _fmt(df):
+    d = df.copy()
+    for c in PCT_COLS:
+        if c in d.columns:
+            d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
+    for c in ("Credit", "MaxLoss", "CurrentPrice", "Width"):
+        if c in d.columns:
+            d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
+    return d

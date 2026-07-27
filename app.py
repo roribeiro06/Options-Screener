@@ -18,6 +18,7 @@ except Exception:
     pass
 
 import wheel_screener as ws
+import spreads as sp
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
@@ -123,6 +124,18 @@ def scan_calls(holdings, crit):
     return ws._df(rows, ws.CALL_COLS), errs
 
 
+@st.cache_data(ttl=600, show_spinner=True)
+def scan_spreads(tickers, crit):
+    apply_criteria(crit)
+    rows, errs = [], []
+    for t in tickers:
+        try:
+            rows += sp.screen_spreads(t)
+        except Exception as e:
+            errs.append(f"{t}: {e}")
+    return sp._df(rows), errs
+
+
 @st.cache_data(ttl=600)
 def cached_vix():
     return ws.get_vix()
@@ -199,6 +212,18 @@ else:
 if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
+st.subheader("Credit Spreads, Iron Condors & Strangles  (70% POP)")
+ds, es = scan_spreads(tuple(puts), CRITERIA)
+if len(ds):
+    st.dataframe(sp._fmt(ds), hide_index=True, use_container_width=True)
+    st.download_button("Download spreads (CSV)", ds.to_csv(index=False),
+                       "spreads.csv", "text/csv")
+else:
+    st.write("None qualify right now.")
+if es:
+    st.caption("Skipped: " + " | ".join(es))
+
 st.markdown("---")
-st.caption("Delta_% = chance of keeping the premium (1 - delta). YieldNeeded_% = 25% - OTM%. "
-           "Prices are live but unofficial (Yahoo); always confirm in your broker. Not financial advice.")
+st.caption("Delta_% = chance of keeping the premium (1 - delta). Spreads: ROR = credit / max loss; "
+           "strangles are undefined-risk. Prices live via Tradier (delayed); confirm in your broker. "
+           "Not financial advice.")
