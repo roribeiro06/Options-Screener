@@ -21,7 +21,7 @@ from scipy.stats import norm
 
 # ============================== CONFIG ==============================
 PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL", "MU", "IGV",
-               "V", "AAPL"]
+               "V", "AAPL", "LLY", "MA"]
 
 HOLDINGS = {
     "DKNG": 18.4505,
