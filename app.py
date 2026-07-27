@@ -242,8 +242,11 @@ for _key, _title in _SPREAD_SECTIONS:
     st.subheader(_title)
     _sub = ds[ds["Strategy"] == _key] if len(ds) else ds
     if len(_sub):
-        st.dataframe(sp._fmt(_sub.drop(columns=["Strategy"])),
-                     hide_index=True, use_container_width=True)
+        _disp = _sub.drop(columns=["Strategy"])
+        for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
+            if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
+                _disp = _disp.drop(columns=[_lc])
+        st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
         st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
                            f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")
     else:
