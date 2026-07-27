@@ -49,6 +49,15 @@ INDEX_TICKERS       = {"SPY", "QQQ", "DIA"}   # these get the 5% OTM floor; all 
 OTM_MIN_INDEX       = 0.05   # min % OTM for index ETFs (applies to ALL strategies)
 OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL strategies)
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
+NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV"}   # ETFs: no earnings to span
+EXCLUDE_IF_EARNINGS_UNKNOWN = True   # hide a STOCK whose earnings date can't be confirmed (safe)
+# Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
+# Fill in your tickers' next earnings date; update roughly once a quarter.
+EARNINGS_DATES = {
+    # "NVDA": "2026-08-27",
+    # "MSFT": "2026-07-29",
+    # "LLY":  "2026-08-06",
+}
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50
@@ -184,6 +193,16 @@ def otm_min_for(symbol):
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
 
 
+def earnings_blocks(symbol, earnings, today, exp_date):
+    """True if this expiration window must be excluded because of earnings.
+    Known date in window -> block. ETF (no earnings) -> never. Stock w/ unknown date -> block if strict."""
+    if earnings is not None:
+        return today <= earnings <= exp_date
+    if symbol in NO_EARNINGS_TICKERS:
+        return False
+    return EXCLUDE_IF_EARNINGS_UNKNOWN
+
+
 def tiered_yield_needed(otm):
     """Required annualized yield by OTM bracket (further OTM -> less yield needed)."""
     for min_otm, req in TIERED_YIELD:      # ordered high OTM -> low
@@ -296,8 +315,15 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
 
 
 def get_earnings_date(symbol):
-    """Next earnings date via Yahoo (two methods + one retry). None = none found.
-    ETFs legitimately return None (no earnings), so None is treated as 'no earnings'."""
+    """Manual EARNINGS_DATES override wins; otherwise best-effort Yahoo (two methods + retry)."""
+    manual = EARNINGS_DATES.get(symbol)
+    if manual:
+        try:
+            d = dt.date.fromisoformat(manual)
+            if d >= dt.date.today():
+                return d
+        except Exception:
+            pass
     tkr = _ticker(symbol)
     today = dt.date.today()
     for attempt in range(2):
@@ -346,7 +372,7 @@ def screen_puts(symbol):
     today = dt.date.today()
     passers, near = [], []
     for exp, exp_date, dte in _expirations_in_window(symbol, today):
-        earn_win = bool(earnings and today <= earnings <= exp_date)
+        earn_win = earnings_blocks(symbol, earnings, today, exp_date)
         for o in td_chain(symbol, exp):
             if o["type"] != "put" or o["strike"] >= price:
                 continue
@@ -375,7 +401,7 @@ def screen_calls(symbol, cost_basis):
     today = dt.date.today()
     passers, near = [], []
     for exp, exp_date, dte in _expirations_in_window(symbol, today):
-        earn_win = bool(earnings and today <= earnings <= exp_date)
+        earn_win = earnings_blocks(symbol, earnings, today, exp_date)
         for o in td_chain(symbol, exp):
             if o["type"] != "call" or o["strike"] <= price:
                 continue
