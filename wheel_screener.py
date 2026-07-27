@@ -54,6 +54,8 @@ EXCLUDE_IF_EARNINGS_UNKNOWN = True   # hide a STOCK whose earnings date can't be
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
 # Fill in your tickers' next earnings date; update roughly once a quarter.
 EARNINGS_DATES = {
+    "UBER": "2026-08-05",
+    # add your other stocks' next earnings the same way (YYYY-MM-DD):
     # "NVDA": "2026-08-27",
     # "MSFT": "2026-07-29",
     # "LLY":  "2026-08-06",
