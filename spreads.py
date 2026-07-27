@@ -96,9 +96,10 @@ def _ok_defined(r, pmin, pmax):
 def _for_expiration(sym, spot, exp, dte, earn, chain):
     out = []
     pmin, pmax = SPREAD_POP_MIN, SPREAD_POP_MAX
+    omin = ws.otm_min_for(sym)   # short leg must be at least this far OTM
 
     s = _credit_spread(chain, "put", SHORT_DELTA, SHORT_DELTA_TOL)
-    if s:
+    if s and (spot - s["short"]["strike"]) / spot >= omin:
         pop = 1 - abs(s["short"]["delta"])
         r = _defined_row(sym, spot, exp, dte, earn, "Put credit spread",
                          f"sell {s['short']['strike']:g}P / buy {s['long_strike']:g}P",
@@ -107,7 +108,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             out.append(r)
 
     s = _credit_spread(chain, "call", SHORT_DELTA, SHORT_DELTA_TOL)
-    if s:
+    if s and (s["short"]["strike"] - spot) / spot >= omin:
         pop = 1 - abs(s["short"]["delta"])
         r = _defined_row(sym, spot, exp, dte, earn, "Call credit spread",
                          f"sell {s['short']['strike']:g}C / buy {s['long_strike']:g}C",
@@ -117,7 +118,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
 
     ps = _credit_spread(chain, "put", IC_LEG_DELTA, IC_LEG_TOL)
     cs = _credit_spread(chain, "call", IC_LEG_DELTA, IC_LEG_TOL)
-    if ps and cs:
+    if (ps and cs and (spot - ps["short"]["strike"]) / spot >= omin
+            and (cs["short"]["strike"] - spot) / spot >= omin):
         credit = ps["credit"] + cs["credit"]
         width = max(ps["width"], cs["width"])
         max_loss = width - credit

@@ -44,8 +44,10 @@ YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must b
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
 USE_YIELD_OVER_IV   = False  # OFF: don't require yield to beat IV (set True to re-enable)
 REQUIRE_STRIKE_ABOVE_COST = False  # OFF: covered-call strike need NOT be above your cost basis
-OTM_MIN             = 0.10   # min % out-of-the-money
-OTM_MAX             = 1.0    # max % out-of-the-money (1.0 = 100%, effectively off)
+INDEX_TICKERS       = {"SPY", "QQQ", "DIA"}   # these get the 5% OTM floor; all others 10%
+OTM_MIN_INDEX       = 0.05   # min % OTM for index ETFs (applies to ALL strategies)
+OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL strategies)
+OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50
@@ -176,6 +178,11 @@ def bs_call_delta(S, K, T, sigma, r):
     return norm.cdf(_d1(S, K, T, sigma, r))
 
 
+def otm_min_for(symbol):
+    """Per-ticker minimum OTM: 5% for index ETFs, 10% for everything else."""
+    return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
+
+
 def tiered_yield_needed(otm):
     """Required annualized yield by OTM bracket (further OTM -> less yield needed)."""
     for min_otm, req in TIERED_YIELD:      # ordered high OTM -> low
@@ -184,7 +191,7 @@ def tiered_yield_needed(otm):
     return TIERED_YIELD[-1][1]              # closer than smallest tier -> strictest
 
 
-def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
+def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
     per_yld = premium / strike if strike else float("nan")
@@ -197,11 +204,12 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
+    _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
-        "otm_range":    OTM_MIN <= otm <= OTM_MAX,
+        "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
     if USE_YIELD_OVER_IV:
@@ -222,7 +230,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
     if not tests["otm_range"]:
-        reasons.append(f"OTM {otm:.1%} outside {OTM_MIN:.0%}-{OTM_MAX:.0%}")
+        reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
     if USE_IVR and not tests.get("iv_rank"):
@@ -233,7 +241,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None):
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
 
-def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None):
+def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None, otm_min=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (strike - spot) / spot
     per_yld = premium / spot if spot else float("nan")
@@ -245,11 +253,12 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
+    _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
-        "otm_range":    OTM_MIN <= otm <= OTM_MAX,
+        "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
     if REQUIRE_STRIKE_ABOVE_COST:
@@ -272,7 +281,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     if not tests["dte_window"]:
         reasons.append(f"DTE {dte} outside {DTE_MIN}-{DTE_MAX}")
     if not tests["otm_range"]:
-        reasons.append(f"OTM {otm:.1%} outside {OTM_MIN:.0%}-{OTM_MAX:.0%}")
+        reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
     if REQUIRE_STRIKE_ABOVE_COST and not tests.get("above_cost"):
@@ -346,7 +355,7 @@ def screen_puts(symbol):
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                               delta=o["delta"])
+                               delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings, **res}
             if res["PASS"]:
@@ -375,7 +384,7 @@ def screen_calls(symbol, cost_basis):
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
                                  "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                cost_basis, delta=o["delta"])
+                                cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings, **res}
