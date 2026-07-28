@@ -26,7 +26,7 @@ SPREAD_DTE_MAX   = 90
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "EarningsDate"]
+               "POP_%", "IV", "Value", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
@@ -93,7 +93,8 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
-            "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv, "EarningsDate": earn}
+            "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
+            "Value": (round(ann / iv, 2) if iv else float("nan")), "EarningsDate": earn}
 
 
 def _ok_defined(r, pmin, pmax):
