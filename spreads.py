@@ -25,9 +25,9 @@ SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
-               "OTM_%", "Width", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
+               "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
                "POP_%", "IV", "EarningsDate"]
-PCT_COLS = {"OTM_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
+PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
 def _find_by_delta(chain, opt_type, target, tol):
@@ -90,7 +90,8 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
     ann = ror * 365.0 / dte if dte else float("nan")
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": put_legs, "Call Legs": call_legs,
-            "Expiration": exp, "DTE": dte, "OTM_%": otm, "Width": round(width, 2),
+            "Expiration": exp, "DTE": dte, "OTM_%": otm,
+            "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv, "EarningsDate": earn}
 
