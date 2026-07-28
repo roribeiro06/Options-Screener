@@ -221,13 +221,13 @@ else:
 if ep:
     st.caption("Skipped: " + " | ".join(ep))
 
-st.subheader("Covered Calls  (strike above your cost)")
+st.subheader("Covered Calls")
 if len(dc):
     st.dataframe(ws._fmt(dc), hide_index=True, use_container_width=True)
     st.download_button("Download calls (CSV)", dc.to_csv(index=False),
                        "calls.csv", "text/csv")
 else:
-    st.write("None qualify right now - no call above your cost pays enough.")
+    st.write("None qualify right now.")
 if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
