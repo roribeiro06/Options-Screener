@@ -100,7 +100,7 @@ def apply_criteria(c):
 
 def apply_spread_criteria(sc):
     """Independent criteria for the multi-leg (spread) engine."""
-    (sp.ROR_ANN_MIN, sp.SPREAD_POP_MIN, sp.SPREAD_POP_MAX,
+    (sp.ROR_ANN_MIN, sp.SPREAD_POP_MIN,
      sp.SPREAD_DTE_MIN, sp.SPREAD_DTE_MAX, sp.SPREAD_WIDTH_PCT) = sc
 
 
@@ -179,8 +179,8 @@ with st.sidebar:
         def _ds(name, default):
             return getattr(sp, name, default)
         s_min_ror = st.number_input("Min annualized ROR %", 0, 2000, int(_ds("ROR_ANN_MIN", 0.25) * 100), 5)
-        s_pop_min = st.number_input("Spread POP min %", 0, 100, int(_ds("SPREAD_POP_MIN", 0.65) * 100))
-        s_pop_max = st.number_input("Spread POP max %", 0, 100, int(_ds("SPREAD_POP_MAX", 0.75) * 100))
+        s_pop_min = st.number_input("Spread POP min % (no upper cap)", 0, 100,
+                                    int(_ds("SPREAD_POP_MIN", 0.70) * 100))
         s_dte_min = st.number_input("Spread DTE min", 0, 365, int(_ds("SPREAD_DTE_MIN", 7)))
         s_dte_max = st.number_input("Spread DTE max", 0, 365, int(_ds("SPREAD_DTE_MAX", 90)))
         s_width = st.number_input("Spread width %", 1, 50, int(_ds("SPREAD_WIDTH_PCT", 0.05) * 100))
@@ -198,7 +198,7 @@ CRITERIA = (min_yield / 100, pop_min / 100, pop_max / 100, int(dte_min), int(dte
             int(dte_cut), yiv_s / 100, yiv_l / 100, otm_max / 100,
             bool(use_yiv), bool(use_tier))
 apply_criteria(CRITERIA)
-SPREAD_CRITERIA = (s_min_ror / 100, s_pop_min / 100, s_pop_max / 100,
+SPREAD_CRITERIA = (s_min_ror / 100, s_pop_min / 100,
                    int(s_dte_min), int(s_dte_max), s_width / 100)
 apply_spread_criteria(SPREAD_CRITERIA)
 

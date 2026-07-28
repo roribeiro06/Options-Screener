@@ -101,7 +101,7 @@ def _ok_defined(r, pmin, pmax):
 
 def _for_expiration(sym, spot, exp, dte, earn, chain):
     out, seen = [], set()
-    pmin, pmax = SPREAD_POP_MIN, SPREAD_POP_MAX
+    pmin = SPREAD_POP_MIN            # floor only - no upper POP cap
     omin = ws.otm_min_for(sym)
 
     # Credit spreads: scan several short-leg deltas so POP ranges from the floor upward
@@ -115,7 +115,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             if otm < omin:
                 continue
             pop = 1 - abs(s["short"]["delta"])
-            if not (pmin <= pop <= pmax):
+            if pop < pmin:
                 continue
             key = (opt_type, sk, s["long_strike"])
             if key in seen:
@@ -146,7 +146,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         if max_loss <= 0:
             continue
         pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
-        if not (pmin <= pop <= pmax):
+        if pop < pmin:
             continue
         key = ("ic", ps["short"]["strike"], cs["short"]["strike"])
         if key in seen:
