@@ -13,6 +13,9 @@ SHORT_DELTA      = 0.30    # one-sided credit-spread short leg
 SHORT_DELTA_TOL  = 0.08    # accept 0.22-0.38
 IC_LEG_DELTA     = 0.15    # iron condor / strangle: each short leg
 IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
+SHORT_DELTAS   = [0.30, 0.25, 0.20, 0.15]   # scan credit-spread shorts -> POP 70-85%
+IC_LEG_DELTAS  = [0.15, 0.12, 0.10]         # scan iron-condor legs -> combined POP 70-80%
+SCAN_TOL       = 0.04                        # tolerance when matching a target delta
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
 ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
@@ -97,49 +100,65 @@ def _ok_defined(r, pmin, pmax):
 
 
 def _for_expiration(sym, spot, exp, dte, earn, chain):
-    out = []
+    out, seen = [], set()
     pmin, pmax = SPREAD_POP_MIN, SPREAD_POP_MAX
-    omin = ws.otm_min_for(sym)   # short leg must be at least this far OTM
+    omin = ws.otm_min_for(sym)
 
-    s = _credit_spread(chain, "put", SHORT_DELTA, SHORT_DELTA_TOL)
-    if s and (spot - s["short"]["strike"]) / spot >= omin:
-        pop = 1 - abs(s["short"]["delta"])
-        r = _defined_row(sym, spot, exp, dte, earn, "Put credit spread",
-                         f"sell {s['short']['strike']:g}P / buy {s['long_strike']:g}P", "",
-                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0,
-                         (spot - s["short"]["strike"]) / spot)
-        if _ok_defined(r, pmin, pmax):
-            out.append(r)
+    # Credit spreads: scan several short-leg deltas so POP ranges from the floor upward
+    for td in SHORT_DELTAS:
+        for opt_type in ("put", "call"):
+            s = _credit_spread(chain, opt_type, td, SCAN_TOL)
+            if not s:
+                continue
+            sk = s["short"]["strike"]
+            otm = (spot - sk) / spot if opt_type == "put" else (sk - spot) / spot
+            if otm < omin:
+                continue
+            pop = 1 - abs(s["short"]["delta"])
+            if not (pmin <= pop <= pmax):
+                continue
+            key = (opt_type, sk, s["long_strike"])
+            if key in seen:
+                continue
+            if opt_type == "put":
+                strat, pl, cl = "Put credit spread", f"sell {sk:g}P / buy {s['long_strike']:g}P", ""
+            else:
+                strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
+            r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
+                             s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0, otm)
+            if r["AnnROR_%"] >= ROR_ANN_MIN:
+                seen.add(key)
+                out.append(r)
 
-    s = _credit_spread(chain, "call", SHORT_DELTA, SHORT_DELTA_TOL)
-    if s and (s["short"]["strike"] - spot) / spot >= omin:
-        pop = 1 - abs(s["short"]["delta"])
-        r = _defined_row(sym, spot, exp, dte, earn, "Call credit spread",
-                         "", f"sell {s['short']['strike']:g}C / buy {s['long_strike']:g}C",
-                         s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0,
-                         (s["short"]["strike"] - spot) / spot)
-        if _ok_defined(r, pmin, pmax):
-            out.append(r)
-
-    ps = _credit_spread(chain, "put", IC_LEG_DELTA, IC_LEG_TOL)
-    cs = _credit_spread(chain, "call", IC_LEG_DELTA, IC_LEG_TOL)
-    if (ps and cs and (spot - ps["short"]["strike"]) / spot >= omin
-            and (cs["short"]["strike"] - spot) / spot >= omin):
+    # Iron condors: scan several per-leg deltas -> combined POP from the floor upward
+    for td in IC_LEG_DELTAS:
+        ps = _credit_spread(chain, "put", td, SCAN_TOL)
+        cs = _credit_spread(chain, "call", td, SCAN_TOL)
+        if not (ps and cs):
+            continue
+        p_otm = (spot - ps["short"]["strike"]) / spot
+        c_otm = (cs["short"]["strike"] - spot) / spot
+        if p_otm < omin or c_otm < omin:
+            continue
         credit = ps["credit"] + cs["credit"]
         width = max(ps["width"], cs["width"])
         max_loss = width - credit
+        if max_loss <= 0:
+            continue
         pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
-        if max_loss > 0:
-            iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
-            r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
-                             f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
-                             f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                             credit, width, max_loss, pop, iv,
-                             min((spot - ps["short"]["strike"]) / spot,
-                                 (cs["short"]["strike"] - spot) / spot))
-            if _ok_defined(r, pmin, pmax):
-                out.append(r)
-
+        if not (pmin <= pop <= pmax):
+            continue
+        key = ("ic", ps["short"]["strike"], cs["short"]["strike"])
+        if key in seen:
+            continue
+        iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
+        r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
+                         f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
+                         f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
+                         credit, width, max_loss, pop, iv, min(p_otm, c_otm))
+        if r["AnnROR_%"] >= ROR_ANN_MIN:
+            seen.add(key)
+            out.append(r)
     return out
 
 
@@ -165,7 +184,7 @@ def screen_spreads(symbol):
     today = dt.date.today()
     rows = []
     for exp, exp_date, dte in _spread_expirations(symbol, today):
-        if earnings and today <= earnings <= exp_date:
+        if ws.earnings_blocks(symbol, earnings, today, exp_date):
             continue
         rows += _for_expiration(symbol, price, exp, dte, earnings, ws.td_chain(symbol, exp))
     return rows

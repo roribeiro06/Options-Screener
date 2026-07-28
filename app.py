@@ -278,7 +278,7 @@ MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR a
 - Covered calls - require strike above your cost: **{_on(ws.REQUIRE_STRIKE_ABOVE_COST)}**
 
 **Multi-Leg (Credit Spreads & Iron Condors) - all defined-risk**
-- Structure: credit spreads use a ~{sp.SHORT_DELTA:.2f}-delta short leg (about 70% POP); iron condors use two ~{sp.IC_LEG_DELTA:.2f}-delta shorts (combined about 0.30)
+- Structure: credit-spread short legs scanned from ~{sp.SHORT_DELTA:.2f} delta and further OTM; iron condors use two matched shorts. POP ranges from the floor up (safer variants included).
 - Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
 - Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of price (distance from short strike to long/protective strike)
