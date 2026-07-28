@@ -29,6 +29,7 @@ HOLDINGS = {
     "CMCSA": 35.12,
     "PS": 25.25,
     "NFLX": 69.30,
+    "MRVL": 232.03,
 }
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
