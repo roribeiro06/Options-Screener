@@ -276,6 +276,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%}
 - OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
+- **Puts only** extra filters: premium >= ${ws.PUT_MIN_PREMIUM:.0f}/share; AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
 - Yield-must-beat-IV filter: **{_on(ws.USE_YIELD_OVER_IV)}**{_yiv}
 - Tiered OTM-to-yield rule: **{_on(ws.USE_TIERED_YIELD)}**  |  Beat-T-bill rule: **{_on(ws.USE_TBILL_SPREAD)}**
 - Covered calls - require strike above your cost: **{_on(ws.REQUIRE_STRIKE_ABOVE_COST)}**

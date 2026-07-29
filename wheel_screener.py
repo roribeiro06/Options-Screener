@@ -42,6 +42,11 @@ DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
+
+# --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
+PUT_MIN_PREMIUM      = 10.0   # minimum option premium per share ($). Set 0 to disable.
+PUT_MIN_YIELD_OVER_IV = 0.60  # annualized yield must be >= this fraction of IV. 0 to disable.
+PUT_MIN_OTM_OVER_IV  = 0.25   # OTM distance must be >= this fraction of IV. 0 to disable.
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
@@ -239,6 +244,12 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
+    if PUT_MIN_PREMIUM > 0:
+        tests["min_premium"] = premium >= PUT_MIN_PREMIUM
+    if PUT_MIN_YIELD_OVER_IV > 0:
+        tests["yield_vs_iv"] = bool(iv) and ann_yld >= PUT_MIN_YIELD_OVER_IV * iv
+    if PUT_MIN_OTM_OVER_IV > 0:
+        tests["otm_vs_iv"] = bool(iv) and otm >= PUT_MIN_OTM_OVER_IV * iv
     if USE_YIELD_OVER_IV:
         tests["yield_over_iv"] = ann_yld > yiv * iv
     if USE_TBILL_SPREAD:
@@ -252,6 +263,12 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append(f"yield {ann_yld:.1%} < {req_yield:.0%} needed")
     if not tests["min_period_yield"]:
         reasons.append(f"period yield {per_yld:.1%} < {MIN_PERIOD_YIELD:.0%}")
+    if PUT_MIN_PREMIUM > 0 and not tests.get("min_premium"):
+        reasons.append(f"premium ${premium:.2f} < ${PUT_MIN_PREMIUM:.0f}")
+    if PUT_MIN_YIELD_OVER_IV > 0 and not tests.get("yield_vs_iv"):
+        reasons.append(f"yield {ann_yld:.1%} < {PUT_MIN_YIELD_OVER_IV:.0%} of IV ({iv:.0%})")
+    if PUT_MIN_OTM_OVER_IV > 0 and not tests.get("otm_vs_iv"):
+        reasons.append(f"OTM {otm:.1%} < {PUT_MIN_OTM_OVER_IV:.0%} of IV ({iv:.0%})")
     if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):
