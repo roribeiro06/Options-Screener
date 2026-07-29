@@ -44,7 +44,8 @@ MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
-PUT_MIN_PREMIUM      = 5.0    # minimum option premium per share ($). $5/share = $500/contract. 0 to disable.
+PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
+PUT_MIN_PREMIUM_PCT  = 0.015  # premium must be >= this fraction of the strike (1.5% of strike). 0 to disable.
 PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF this round.
 PUT_MIN_OTM_OVER_IV  = 0.20   # OTM distance must be >= this fraction of IV. 0 to disable.
 # Diversity (puts only): collapse each ticker's strike/expiry ladder to the single
