@@ -267,8 +267,9 @@ try:
 **What the columns mean** - OTM_% = how far the strike is out-of-the-money; POP_% = chance of keeping the premium (about 1 - delta).
 For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
 MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
-**Value** = AnnYield / (IV x sqrt(DTE/365)) for single-leg, AnnROR / (IV x sqrt(DTE/365)) for spreads - how richly you're paid per
-unit of implied volatility, corrected for term so short- and long-dated contracts are comparable. Higher = richer premium for the risk.
+**Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
+yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
+Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.
 
 **Cash-Secured Puts & Covered Calls**
 - Probability of profit (POP): {ws.POP_MIN:.0%} to {ws.POP_MAX:.0%}  (about 0.30 delta = 70% POP)

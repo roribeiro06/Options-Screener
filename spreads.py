@@ -95,7 +95,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
-            "Value": (round(ann / (iv * math.sqrt(dte / 365.0)), 2)
+            "Value": (round(ann / iv * math.sqrt(dte / 365.0), 2)
                       if iv and dte and dte > 0 else float("nan")), "EarningsDate": earn}
 
 

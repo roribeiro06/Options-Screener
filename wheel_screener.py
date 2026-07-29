@@ -41,7 +41,7 @@ DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
-MIN_PERIOD_YIELD  = 0.0      # off (set >0 to require a min period yield, e.g. 0.01 = 1%)
+MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
@@ -266,7 +266,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append("IV Rank <50 or missing")
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
-            "IV": iv, "Value": (round(ann_yld / (iv * math.sqrt(dte / 365.0)), 2)
+            "IV": iv, "Value": (round(ann_yld / iv * math.sqrt(dte / 365.0), 2)
                                 if iv and dte and dte > 0 else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
@@ -324,7 +324,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append("IV Rank <50 or missing")
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
-            "IV": iv, "Value": (round(ann_yld / (iv * math.sqrt(dte / 365.0)), 2)
+            "IV": iv, "Value": (round(ann_yld / iv * math.sqrt(dte / 365.0), 2)
                                 if iv and dte and dte > 0 else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
