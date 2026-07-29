@@ -64,7 +64,7 @@ OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL 
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV"}   # ETFs: no earnings to span
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
-ALLOW_EARNINGS_IN_WINDOW = True   # True: DO show contracts whose window spans an earnings date. False: exclude them.
+ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans an earnings date. False: exclude them.
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
 # Fill in your tickers' next earnings date; update roughly once a quarter.
 EARNINGS_DATES = {
