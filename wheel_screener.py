@@ -51,10 +51,12 @@ PUT_MIN_OTM_OVER_IV  = 0.20   # OTM distance must be >= this fraction of IV. 0 t
 # Diversity (puts only): collapse each ticker's strike/expiry ladder to the single
 # best-SCORE contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
 PUT_BEST_PER_EXPIRATION = True
-# Composite ranking score (puts only): Score = AnnYield * POP^a * (365/DTE)^b.
-# AnnYield is the anchor; POP and shorter DTE break ties. Raise an exponent to weight it more.
+# Composite ranking score (puts only): Score = (AnnYield / IV^c) * POP^a * (365/DTE)^b.
+# Dividing by IV strips out the fact that yield is naturally richer on higher-IV (riskier) names,
+# so the score no longer rewards volatility. POP and shorter DTE break ties.
 SCORE_POP_EXP = 1.0   # a: how much higher POP is rewarded (0 = ignore POP)
 SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length)
+SCORE_IV_EXP  = 1.0   # c: IV penalty. 0 = ignore IV (old behavior), 1 = neutralize IV, >1 = actively favor calmer names
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
@@ -296,8 +298,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append("spans earnings")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
-    score = (ann_yld * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
-             if (dte and dte > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
+    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
+             if (dte and dte > 0 and iv and iv > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
              else float("nan"))
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
