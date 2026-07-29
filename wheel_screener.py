@@ -64,6 +64,7 @@ OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL 
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV"}   # ETFs: no earnings to span
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
+ALLOW_EARNINGS_IN_WINDOW = True   # True: DO show contracts whose window spans an earnings date. False: exclude them.
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
 # Fill in your tickers' next earnings date; update roughly once a quarter.
 EARNINGS_DATES = {
@@ -211,6 +212,8 @@ def otm_min_for(symbol):
 def earnings_blocks(symbol, earnings, today, exp_date):
     """True if this expiration window must be excluded because of earnings.
     Known date in window -> block. ETF (no earnings) -> never. Stock w/ unknown date -> block if strict."""
+    if ALLOW_EARNINGS_IN_WINDOW:
+        return False
     if earnings is not None:
         return today <= earnings <= exp_date
     if symbol in NO_EARNINGS_TICKERS:
@@ -250,6 +253,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
+    if PUT_MIN_PREMIUM_PCT > 0:
+        tests["min_premium_pct"] = per_yld >= PUT_MIN_PREMIUM_PCT
     if PUT_MIN_YIELD_OVER_IV > 0:
         tests["yield_vs_iv"] = bool(iv) and ann_yld >= PUT_MIN_YIELD_OVER_IV * iv
     if PUT_MIN_OTM_OVER_IV > 0:
@@ -269,6 +274,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append(f"period yield {per_yld:.1%} < {MIN_PERIOD_YIELD:.0%}")
     if PUT_MIN_PREMIUM > 0 and not tests.get("min_premium"):
         reasons.append(f"premium ${premium:.2f} < ${PUT_MIN_PREMIUM:.0f}")
+    if PUT_MIN_PREMIUM_PCT > 0 and not tests.get("min_premium_pct"):
+        reasons.append(f"premium {per_yld:.2%} of strike < {PUT_MIN_PREMIUM_PCT:.1%}")
     if PUT_MIN_YIELD_OVER_IV > 0 and not tests.get("yield_vs_iv"):
         reasons.append(f"yield {ann_yld:.1%} < {PUT_MIN_YIELD_OVER_IV:.0%} of IV ({iv:.0%})")
     if PUT_MIN_OTM_OVER_IV > 0 and not tests.get("otm_vs_iv"):
