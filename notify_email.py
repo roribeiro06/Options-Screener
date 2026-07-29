@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-notify_email.py -- run the cash-secured-put screener headlessly and email the results.
+notify_email.py -- run the FULL screener headlessly and email the results
+(cash-secured puts, covered calls, and multi-leg spreads).
 
 Designed to be run on a schedule by GitHub Actions (see .github/workflows/screener-email.yml).
 Only emails during US market hours (9:30-16:00 ET, weekdays); silently exits otherwise, so
@@ -24,6 +25,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 import wheel_screener as ws
+import spreads as sp
+
+_SPREAD_SECTIONS = [
+    ("Put credit spread",  "Put Credit Spreads (bullish, defined risk)"),
+    ("Call credit spread", "Call Credit Spreads (bearish, defined risk)"),
+    ("Iron condor",        "Iron Condors (neutral, defined risk)"),
+]
 
 
 def _now_et():
@@ -31,44 +39,90 @@ def _now_et():
         from zoneinfo import ZoneInfo
         return dt.datetime.now(ZoneInfo("America/New_York"))
     except Exception:
-        # crude fallback: assume EDT (UTC-4)
-        return dt.datetime.utcnow() - dt.timedelta(hours=4)
+        return dt.datetime.utcnow() - dt.timedelta(hours=4)   # crude EDT fallback
 
 
 def _market_open(now_et):
-    if now_et.weekday() >= 5:              # Sat/Sun
+    if now_et.weekday() >= 5:
         return False
     mins = now_et.hour * 60 + now_et.minute
-    return (9 * 60 + 30) <= mins <= (16 * 60)   # 9:30 - 16:00 ET
+    return (9 * 60 + 30) <= mins <= (16 * 60)
 
 
-def build_puts_df():
+def build_puts():
     rows = []
     for t in ws.PUT_TICKERS:
         try:
             passers, _ = ws.screen_puts(t)
             rows += passers
         except Exception as e:
-            print(f"{t}: ERROR {e}", file=sys.stderr)
+            print(f"PUT {t}: ERROR {e}", file=sys.stderr)
     return ws._df(rows, ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
 
 
-def html_email(df, now_et):
-    table = ws._fmt(df).to_html(index=False, border=0)
+def build_calls():
+    rows = []
+    for t, cost in ws.HOLDINGS.items():
+        try:
+            passers, _ = ws.screen_calls(t, cost)
+            rows += passers
+        except Exception as e:
+            print(f"CALL {t}: ERROR {e}", file=sys.stderr)
+    return ws._df(rows, ws.CALL_COLS)
+
+
+def build_spreads():
+    rows = []
+    for t in ws.PUT_TICKERS:
+        try:
+            rows += sp.screen_spreads(t)
+        except Exception as e:
+            print(f"SPREAD {t}: ERROR {e}", file=sys.stderr)
+    return sp._df(rows)
+
+
+def _table(df, fmt):
+    return fmt(df).to_html(index=False, border=0)
+
+
+def _spreads_html(ds):
+    out = ""
+    for key, title in _SPREAD_SECTIONS:
+        sub = ds[ds["Strategy"] == key] if len(ds) else ds
+        if not len(sub):
+            continue
+        disp = sub.drop(columns=["Strategy"])
+        for lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
+            if lc in disp.columns and (disp[lc].fillna("") == "").all():
+                disp = disp.drop(columns=[lc])
+        out += f"<h3>{title}</h3>{_table(disp, sp._fmt)}"
+    return out
+
+
+def html_email(puts, calls, spreads, now_et):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
-             "table{border-collapse:collapse;width:100%;font-size:13px}"
-             "th,td{border:1px solid #ccc;padding:6px 9px;text-align:right}"
+             "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
+             "h3{margin:16px 0 4px}"
+             "table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px}"
+             "th,td{border:1px solid #ccc;padding:5px 8px;text-align:right}"
              "th{background:#1F3864;color:#fff}"
-             "td:first-child,th:first-child{text-align:left}</style>")
+             "td:first-child,th:first-child{text-align:left}"
+             "p.empty{color:#888}</style>")
+
+    def section(title, df, fmt):
+        if df is None or not len(df):
+            return f"<h2>{title}</h2><p class='empty'>None qualify right now.</p>"
+        return f"<h2>{title}</h2>{_table(df, fmt)}"
+
+    spreads_body = _spreads_html(spreads) if len(spreads) else "<p class='empty'>None qualify right now.</p>"
+
     return (f"<html><head>{style}</head><body>"
-            f"<h2>Cash-Secured Puts &mdash; {len(df)} qualifying</h2>"
-            f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. Ranked by Score "
-            f"(AnnYield / IV^{getattr(ws,'SCORE_IV_EXP',1.0):g} "
-            f"&times; POP^{getattr(ws,'SCORE_POP_EXP',1.0):g} "
-            f"&times; (365/DTE)^{getattr(ws,'SCORE_DTE_EXP',0.5):g}).</p>"
-            f"{table}"
-            "<p style='color:#888;font-size:11px'>Educational only, not financial advice. "
-            "Prices via Tradier sandbox (~15 min delayed). Verify every contract in your broker.</p>"
+            f"<h1>Options Screener</h1>"
+            f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. Educational only, not financial advice. "
+            f"Prices via Tradier sandbox (~15 min delayed).</p>"
+            f"{section('Cash-Secured Puts', puts, ws._fmt)}"
+            f"{section('Covered Calls', calls, ws._fmt)}"
+            f"<h2>Multi-Leg Strategies</h2>{spreads_body}"
             "</body></html>")
 
 
@@ -77,7 +131,7 @@ def send(subject, html, user, pw, to):
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to
-    msg.attach(MIMEText("Open in an HTML-capable client to see the table.", "plain"))
+    msg.attach(MIMEText("Open in an HTML-capable client to see the tables.", "plain"))
     msg.attach(MIMEText(html, "html"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(user, pw)
@@ -86,7 +140,13 @@ def send(subject, html, user, pw, to):
 
 def main():
     now_et = _now_et()
-    if os.environ.get("IGNORE_MARKET_HOURS") != "1" and not _market_open(now_et):
+    # A manual "Run workflow" (workflow_dispatch) always sends, ignoring market hours
+    # and the empty-list skip, so you can test it any time.
+    manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    ignore_hours = manual or os.environ.get("IGNORE_MARKET_HOURS") == "1"
+    send_if_empty = manual or os.environ.get("SEND_IF_EMPTY") == "1"
+
+    if not ignore_hours and not _market_open(now_et):
         print(f"Market closed at {now_et:%Y-%m-%d %H:%M ET}; skipping.")
         return
 
@@ -97,13 +157,17 @@ def main():
         print("EMAIL_USER / EMAIL_APP_PASSWORD not set; cannot send.", file=sys.stderr)
         sys.exit(1)
 
-    df = build_puts_df()
-    if not len(df) and os.environ.get("SEND_IF_EMPTY") != "1":
-        print("No qualifying puts; not sending (set SEND_IF_EMPTY=1 to override).")
+    puts    = build_puts()
+    calls   = build_calls()
+    spreads = build_spreads()
+    total   = len(puts) + len(calls) + len(spreads)
+    if total == 0 and not send_if_empty:
+        print("Nothing qualifies anywhere; not sending (set SEND_IF_EMPTY=1 to override).")
         return
 
-    subject = f"Wheel screener: {len(df)} puts - {now_et:%b %d %I:%M %p ET}"
-    send(subject, html_email(df, now_et), user, pw, to)
+    subject = (f"Screener: {len(puts)} puts, {len(calls)} calls, {len(spreads)} spreads "
+               f"- {now_et:%b %d %I:%M %p ET}")
+    send(subject, html_email(puts, calls, spreads, now_et), user, pw, to)
     print(f"Sent: {subject} -> {to}")
 
 
