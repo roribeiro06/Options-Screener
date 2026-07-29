@@ -140,7 +140,13 @@ def send(subject, html, user, pw, to):
 
 def main():
     now_et = _now_et()
-    if os.environ.get("IGNORE_MARKET_HOURS") != "1" and not _market_open(now_et):
+    # A manual "Run workflow" (workflow_dispatch) always sends, ignoring market hours
+    # and the empty-list skip, so you can test it any time.
+    manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    ignore_hours = manual or os.environ.get("IGNORE_MARKET_HOURS") == "1"
+    send_if_empty = manual or os.environ.get("SEND_IF_EMPTY") == "1"
+
+    if not ignore_hours and not _market_open(now_et):
         print(f"Market closed at {now_et:%Y-%m-%d %H:%M ET}; skipping.")
         return
 
@@ -155,7 +161,7 @@ def main():
     calls   = build_calls()
     spreads = build_spreads()
     total   = len(puts) + len(calls) + len(spreads)
-    if total == 0 and os.environ.get("SEND_IF_EMPTY") != "1":
+    if total == 0 and not send_if_empty:
         print("Nothing qualifies anywhere; not sending (set SEND_IF_EMPTY=1 to override).")
         return
 
