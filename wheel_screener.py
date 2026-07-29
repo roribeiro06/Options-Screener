@@ -49,8 +49,12 @@ PUT_MIN_PREMIUM_PCT  = 0.015  # premium must be >= this fraction of the strike (
 PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF this round.
 PUT_MIN_OTM_OVER_IV  = 0.20   # OTM distance must be >= this fraction of IV. 0 to disable.
 # Diversity (puts only): collapse each ticker's strike/expiry ladder to the single
-# best-Value contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
+# best-SCORE contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
 PUT_BEST_PER_EXPIRATION = True
+# Composite ranking score (puts only): Score = AnnYield * POP^a * (365/DTE)^b.
+# AnnYield is the anchor; POP and shorter DTE break ties. Raise an exponent to weight it more.
+SCORE_POP_EXP = 1.0   # a: how much higher POP is rewarded (0 = ignore POP)
+SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length)
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
@@ -292,10 +296,14 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append("spans earnings")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
+    score = (ann_yld * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
+             if (dte and dte > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
+             else float("nan"))
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
             "IV": iv, "Value": (round(ann_yld / iv * math.sqrt(dte / 365.0), 2)
                                 if iv and dte and dte > 0 else float("nan")),
+            "Score": (round(score, 2) if score == score else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
@@ -408,12 +416,12 @@ def _expirations_in_window(symbol, today):
 
 
 def _best_per_expiration(rows):
-    """Keep only the single highest-Value contract per (Ticker, Expiration).
-    Collapses the redundant strike ladder so no one ticker floods the list."""
+    """Keep only the highest-Score contract per (Ticker, Expiration) -- the best
+    yield/POP/length balance for that date. Collapses the redundant strike ladder."""
     best = {}
     for r in rows:
         k = (r["Ticker"], r["Expiration"])
-        v = r.get("Value")
+        v = r.get("Score")
         v = v if isinstance(v, (int, float)) and v == v else float("-inf")
         b = best.get(k)
         if b is None or v > b[0]:
@@ -483,19 +491,20 @@ def screen_calls(symbol, cost_basis):
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Value", "EarningsDate"]
+            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Value", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
 
-def _df(rows, cols):
+def _df(rows, cols, sort_by=("Ticker", "Strike"), asc=(True, False)):
     if not rows:
         return pd.DataFrame(columns=cols)
-    # display order: ticker A->Z, then strike high->low (no per-ticker cap)
-    return pd.DataFrame(rows).sort_values(["Ticker", "Strike"],
-                                          ascending=[True, False])[cols]
+    # default: ticker A->Z, then strike high->low. Puts pass ("Ticker","Delta_%")
+    # with asc=(True, False) to rank each ticker safest-first (highest POP).
+    return pd.DataFrame(rows).sort_values(list(sort_by),
+                                          ascending=list(asc))[cols]
 
 
 def write_report(sheets, settings, path=OUTPUT_FILE):
