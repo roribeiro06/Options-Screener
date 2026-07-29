@@ -41,7 +41,7 @@ DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
-MIN_PERIOD_YIELD  = 0.01     # puts/calls: period yield (premium / capital) must be >= 1%
+MIN_PERIOD_YIELD  = 0.0      # off (set >0 to require a min period yield, e.g. 0.01 = 1%)
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
@@ -54,7 +54,7 @@ OTM_MIN_INDEX       = 0.05   # min % OTM for index ETFs (applies to ALL strategi
 OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL strategies)
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV"}   # ETFs: no earnings to span
-EXCLUDE_IF_EARNINGS_UNKNOWN = True   # hide a STOCK whose earnings date can't be confirmed (safe)
+EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
 # Fill in your tickers' next earnings date; update roughly once a quarter.
 EARNINGS_DATES = {
