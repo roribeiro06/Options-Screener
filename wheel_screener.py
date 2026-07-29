@@ -31,6 +31,7 @@ HOLDINGS = {
     "NFLX": 69.30,
     "MRVL": 232.03,
     "AVGO": 381.07,
+    "EIX": 64.43,
 }
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
