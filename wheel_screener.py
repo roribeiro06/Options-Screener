@@ -266,7 +266,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append("IV Rank <50 or missing")
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
-            "IV": iv, "Value": (round(ann_yld / iv, 2) if iv else float("nan")),
+            "IV": iv, "Value": (round(ann_yld / (iv * math.sqrt(dte / 365.0)), 2)
+                                if iv and dte and dte > 0 else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
@@ -323,7 +324,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append("IV Rank <50 or missing")
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
-            "IV": iv, "Value": (round(ann_yld / iv, 2) if iv else float("nan")),
+            "IV": iv, "Value": (round(ann_yld / (iv * math.sqrt(dte / 365.0)), 2)
+                                if iv and dte and dte > 0 else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
