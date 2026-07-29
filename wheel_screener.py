@@ -45,8 +45,8 @@ MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 10.0   # minimum option premium per share ($). Set 0 to disable.
-PUT_MIN_YIELD_OVER_IV = 0.60  # annualized yield must be >= this fraction of IV. 0 to disable.
-PUT_MIN_OTM_OVER_IV  = 0.25   # OTM distance must be >= this fraction of IV. 0 to disable.
+PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF for now (was 0.60); try 0.30 next.
+PUT_MIN_OTM_OVER_IV  = 0.0    # OTM distance >= this fraction of IV. OFF for now (was 0.25); try 0.15 next.
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
 DTE_SHORT_CUTOFF    = 21     # <=21 days = "3 weeks and under"
