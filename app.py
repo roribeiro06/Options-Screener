@@ -272,6 +272,7 @@ MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR a
 **Liquidity:** Spread_$ = the bid-ask spread in dollars per share (ask - bid); for multi-leg it's the combined round-trip bid-ask
 across all legs. Lower = tighter, cheaper to trade. OpenInt = open interest (contracts outstanding); Volume = contracts traded today.
 Higher OpenInt/Volume and a smaller Spread_$ mean easier fills and less slippage.
+Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
 **Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
 yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
 Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.

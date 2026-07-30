@@ -24,7 +24,7 @@ SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/cal
 SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
-SPREAD_MIN_OTM_OVER_IV = 0.20  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
+SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
@@ -75,6 +75,10 @@ def _credit_spread(chain, opt_type, target_delta, tol):
     lng = _leg_at(chain, opt_type, ls)
     if not lng:
         return None
+    if ws.MIN_OPEN_INTEREST > 0:
+        for leg in (short, lng):
+            if (leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST:
+                return None
     credit = (short["bid"] or 0) - (lng["ask"] or 0)
     width = abs(short["strike"] - ls)
     if credit < MIN_CREDIT or width <= 0:

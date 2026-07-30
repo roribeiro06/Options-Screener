@@ -48,8 +48,8 @@ MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appea
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
 PUT_MIN_PREMIUM_PCT  = 0.015  # premium must be >= this fraction of the strike (1.5% of strike). 0 to disable.
 PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF this round.
-PUT_MIN_OTM_OVER_IV  = 0.20   # puts: OTM distance must be >= this fraction of IV. 0 to disable.
-CALL_MIN_OTM_OVER_IV = 0.20   # covered calls: OTM distance must be >= this fraction of IV. 0 to disable.
+PUT_MIN_OTM_OVER_IV  = 0.15   # puts: OTM distance must be >= this fraction of IV. 0 to disable.
+CALL_MIN_OTM_OVER_IV = 0.15   # covered calls: OTM distance must be >= this fraction of IV. 0 to disable.
 # Diversity: collapse each ticker's strike/expiry ladder to the single best-SCORE
 # contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
 PUT_BEST_PER_EXPIRATION  = True
@@ -469,7 +469,7 @@ def screen_puts(symbol):
             bid = o["bid"] or 0
             if bid <= 0:
                 continue
-            if EXCLUDE_ZERO_LIQUIDITY and (o.get("oi") or 0) == 0 and (o.get("volume") or 0) == 0:
+            if MIN_OPEN_INTEREST > 0 and (o.get("oi") or 0) < MIN_OPEN_INTEREST:
                 continue
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
@@ -502,7 +502,7 @@ def screen_calls(symbol, cost_basis):
             bid = o["bid"] or 0
             if bid <= 0:
                 continue
-            if EXCLUDE_ZERO_LIQUIDITY and (o.get("oi") or 0) == 0 and (o.get("volume") or 0) == 0:
+            if MIN_OPEN_INTEREST > 0 and (o.get("oi") or 0) < MIN_OPEN_INTEREST:
                 continue
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
