@@ -220,11 +220,10 @@ def otm_min_for(symbol):
 
 
 def _liq(o):
-    """Liquidity snapshot for one option: bid-ask spread as % of mid, open interest, volume."""
+    """Liquidity snapshot for one option: bid-ask spread in $ per share, open interest, volume."""
     bid = o.get("bid") or 0
     ask = o.get("ask") or 0
-    mid = (bid + ask) / 2
-    return {"Spread_%": ((ask - bid) / mid) if mid > 0 else float("nan"),
+    return {"Spread_$": round((ask - bid), 2),
             "OpenInt": int(o.get("oi") or 0),
             "Volume": int(o.get("volume") or 0)}
 
@@ -518,12 +517,12 @@ def screen_calls(symbol, cost_basis):
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "Spread_%", "OpenInt", "Volume", "EarningsDate"]
+            "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "Spread_%", "OpenInt", "Volume", "EarningsDate"]
+             "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
-            "Tbill_%", "RiskPrem_%", "IV", "Spread_%"}
+            "Tbill_%", "RiskPrem_%", "IV"}
 
 
 def _df(rows, cols, sort_by=("Ticker", "Strike"), asc=(True, False)):
@@ -567,7 +566,7 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
-    for c in ("Premium", "CostBasis", "CurrentPrice"):
+    for c in ("Premium", "CostBasis", "CurrentPrice", "Spread_$"):
         if c in d.columns:
             d[c] = "$" + d[c].round(2).astype(str)
     return d

@@ -28,8 +28,8 @@ SPREAD_MIN_OTM_OVER_IV = 0.20  # each short leg's OTM must be >= this fraction o
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "Score", "Spread_%", "OpenInt", "EarningsDate"]
-PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV", "Spread_%"}
+               "POP_%", "IV", "Score", "Spread_$", "OpenInt", "EarningsDate"]
+PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
 def _find_by_delta(chain, opt_type, target, tol):
@@ -109,7 +109,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
-            "Spread_%": ((leg_bidask / credit) if credit else float("nan")),
+            "Spread_$": round(leg_bidask, 2),
             "OpenInt": int(oi), "EarningsDate": earn}
 
 
@@ -233,7 +233,7 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
-    for c in ("Max Profit", "MaxLoss", "CurrentPrice", "Width"):
+    for c in ("Max Profit", "MaxLoss", "CurrentPrice", "Width", "Spread_$"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     return d
