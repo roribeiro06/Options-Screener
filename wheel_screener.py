@@ -47,7 +47,8 @@ MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
 PUT_MIN_PREMIUM_PCT  = 0.015  # premium must be >= this fraction of the strike (1.5% of strike). 0 to disable.
 PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF this round.
-PUT_MIN_OTM_OVER_IV  = 0.20   # OTM distance must be >= this fraction of IV. 0 to disable.
+PUT_MIN_OTM_OVER_IV  = 0.20   # puts: OTM distance must be >= this fraction of IV. 0 to disable.
+CALL_MIN_OTM_OVER_IV = 0.20   # covered calls: OTM distance must be >= this fraction of IV. 0 to disable.
 # Diversity: collapse each ticker's strike/expiry ladder to the single best-SCORE
 # contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
 PUT_BEST_PER_EXPIRATION  = True
@@ -332,6 +333,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
+    if CALL_MIN_OTM_OVER_IV > 0:
+        tests["otm_vs_iv"] = bool(iv) and otm >= CALL_MIN_OTM_OVER_IV * iv
     if REQUIRE_STRIKE_ABOVE_COST:
         tests["above_cost"] = (cost_basis is None) or (strike >= cost_basis)
     if USE_YIELD_OVER_IV:
@@ -347,6 +350,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"yield {ann_yld:.1%} < {req_yield:.0%} needed")
     if not tests["min_period_yield"]:
         reasons.append(f"period yield {per_yld:.1%} < {MIN_PERIOD_YIELD:.0%}")
+    if CALL_MIN_OTM_OVER_IV > 0 and not tests.get("otm_vs_iv"):
+        reasons.append(f"OTM {otm:.1%} < {CALL_MIN_OTM_OVER_IV:.0%} of IV ({iv:.0%})")
     if USE_YIELD_OVER_IV and not tests.get("yield_over_iv"):
         reasons.append(f"yield {ann_yld:.1%} below {yiv:.0%} of IV ({iv:.0%})")
     if USE_TBILL_SPREAD and not tests.get("tbill_spread"):

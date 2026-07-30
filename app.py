@@ -279,6 +279,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
 - **Puts only** extra filters: {("premium >= $%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
+- **Covered calls** extra filter: OTM >= {getattr(ws, "CALL_MIN_OTM_OVER_IV", 0):.0%} of IV (same volatility-scaled cushion as puts)
 - **Score** (all strategies) = (AnnYield / IV^{getattr(ws, "SCORE_IV_EXP", 1.0):g}) x POP^{getattr(ws, "SCORE_POP_EXP", 1.0):g} x (365/DTE)^{getattr(ws, "SCORE_DTE_EXP", 0.5):g}. For spreads, annualized ROR replaces AnnYield. Dividing by IV stops high-volatility names from dominating on richer premium; higher POP and shorter DTE break ties. Every table is ranked by Score (highest first) within each ticker.
 - **Puts diversity:** {"best-Score contract per expiration only (collapses each ticker's strike ladder)" if getattr(ws, "PUT_BEST_PER_EXPIRATION", False) else "showing all qualifying strikes"}
 - Yield-must-beat-IV filter: **{_on(ws.USE_YIELD_OVER_IV)}**{_yiv}
