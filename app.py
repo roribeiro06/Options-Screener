@@ -292,6 +292,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
 - Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of price (distance from short strike to long/protective strike)
 - OTM floor on the short leg(s): {ws.OTM_MIN_INDEX:.0%} for index ETFs / {ws.OTM_MIN_OTHER:.0%} for other tickers
+- Each short leg's OTM must also be >= {getattr(sp, "SPREAD_MIN_OTM_OVER_IV", 0):.0%} of its IV (same volatility-scaled cushion as puts/calls)
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX}; never spans earnings
 - Excluded: short strangles and straddles (undefined risk)
 

@@ -24,6 +24,7 @@ SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/cal
 SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
+SPREAD_MIN_OTM_OVER_IV = 0.20  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
@@ -121,6 +122,9 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             otm = (spot - sk) / spot if opt_type == "put" else (sk - spot) / spot
             if otm < omin:
                 continue
+            siv = s["short"].get("iv") or 0
+            if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
+                continue
             pop = 1 - abs(s["short"]["delta"])
             if pop < pmin:
                 continue
@@ -147,6 +151,12 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         c_otm = (cs["short"]["strike"] - spot) / spot
         if p_otm < omin or c_otm < omin:
             continue
+        p_iv = ps["short"].get("iv") or 0
+        c_iv = cs["short"].get("iv") or 0
+        if SPREAD_MIN_OTM_OVER_IV > 0:
+            if (p_iv > 0 and p_otm < SPREAD_MIN_OTM_OVER_IV * p_iv) or \
+               (c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv):
+                continue
         credit = ps["credit"] + cs["credit"]
         width = max(ps["width"], cs["width"])
         max_loss = width - credit
