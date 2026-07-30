@@ -42,7 +42,7 @@ DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
-EXCLUDE_ZERO_LIQUIDITY = True  # drop any contract/leg with 0 open interest AND 0 volume (untradeable)
+MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
@@ -501,6 +501,8 @@ def screen_calls(symbol, cost_basis):
                 continue
             bid = o["bid"] or 0
             if bid <= 0:
+                continue
+            if EXCLUDE_ZERO_LIQUIDITY and (o.get("oi") or 0) == 0 and (o.get("volume") or 0) == 0:
                 continue
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
