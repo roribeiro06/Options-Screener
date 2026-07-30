@@ -68,7 +68,7 @@ def build_calls():
             rows += passers
         except Exception as e:
             print(f"CALL {t}: ERROR {e}", file=sys.stderr)
-    return ws._df(rows, ws.CALL_COLS)
+    return ws._df(rows, ws.CALL_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
 
 
 def build_spreads():

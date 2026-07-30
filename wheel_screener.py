@@ -48,10 +48,11 @@ PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of 
 PUT_MIN_PREMIUM_PCT  = 0.015  # premium must be >= this fraction of the strike (1.5% of strike). 0 to disable.
 PUT_MIN_YIELD_OVER_IV = 0.0   # annualized yield >= this fraction of IV. OFF this round.
 PUT_MIN_OTM_OVER_IV  = 0.20   # OTM distance must be >= this fraction of IV. 0 to disable.
-# Diversity (puts only): collapse each ticker's strike/expiry ladder to the single
-# best-SCORE contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
-PUT_BEST_PER_EXPIRATION = True
-# Composite ranking score (puts only): Score = (AnnYield / IV^c) * POP^a * (365/DTE)^b.
+# Diversity: collapse each ticker's strike/expiry ladder to the single best-SCORE
+# contract PER EXPIRATION. Cuts a dominant ticker's row count without a hard cap.
+PUT_BEST_PER_EXPIRATION  = True
+CALL_BEST_PER_EXPIRATION = True
+# Composite ranking score (puts AND covered calls): Score = (AnnYield / IV^c) * POP^a * (365/DTE)^b.
 # Dividing by IV strips out the fact that yield is naturally richer on higher-IV (riskier) names,
 # so the score no longer rewards volatility. POP and shorter DTE break ties.
 SCORE_POP_EXP = 1.0   # a: how much higher POP is rewarded (0 = ignore POP)
@@ -360,10 +361,14 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"strike below cost {cost_basis}")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
+    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
+             if (dte and dte > 0 and iv and iv > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
+             else float("nan"))
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
             "AnnYield_%": ann_yld, "YieldNeeded_%": needed, "Delta_%": delta_pct,
             "IV": iv, "Value": (round(ann_yld / iv * math.sqrt(dte / 365.0), 2)
                                 if iv and dte and dte > 0 else float("nan")),
+            "Score": (round(score, 2) if score == score else float("nan")),
             "Tbill_%": tbill, "RiskPrem_%": risk_prem,
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
@@ -489,13 +494,15 @@ def screen_calls(symbol, cost_basis):
                 passers.append(rec)
             elif res["Reasons"].count(";") == 0:
                 near.append(rec)
+    if CALL_BEST_PER_EXPIRATION:
+        passers = _best_per_expiration(passers)
     return passers, near
 
 
-PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+PUT_COLS =["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Value", "EarningsDate"]
+             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
