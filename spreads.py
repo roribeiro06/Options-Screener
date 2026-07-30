@@ -27,7 +27,7 @@ SPREAD_DTE_MAX   = 90
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "Value", "EarningsDate"]
+               "POP_%", "IV", "Score", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
@@ -89,14 +89,17 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
                  credit, width, max_loss, pop, iv, otm):
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
+    # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
+    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
+             if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop)
+             else float("nan"))
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": put_legs, "Call Legs": call_legs,
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
-            "Value": (round(ann / iv * math.sqrt(dte / 365.0), 2)
-                      if iv and dte and dte > 0 else float("nan")), "EarningsDate": earn}
+            "Score": (round(score, 2) if score == score else float("nan")), "EarningsDate": earn}
 
 
 def _ok_defined(r, pmin, pmax):
@@ -197,7 +200,8 @@ def screen_spreads(symbol):
 def _df(rows):
     if not rows:
         return pd.DataFrame(columns=SPREAD_COLS)
-    return pd.DataFrame(rows).sort_values(["Ticker", "AnnROR_%"],
+    # rank within each ticker by composite Score, same system as puts/calls
+    return pd.DataFrame(rows).sort_values(["Ticker", "Score"],
                                           ascending=[True, False])[SPREAD_COLS]
 
 
