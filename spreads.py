@@ -28,8 +28,8 @@ SPREAD_MIN_OTM_OVER_IV = 0.20  # each short leg's OTM must be >= this fraction o
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "Score", "EarningsDate"]
-PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
+               "POP_%", "IV", "Score", "Spread_%", "OpenInt", "EarningsDate"]
+PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV", "Spread_%"}
 
 
 def _find_by_delta(chain, opt_type, target, tol):
@@ -82,12 +82,20 @@ def _credit_spread(chain, opt_type, target_delta, tol):
     max_loss = width - credit
     if max_loss <= 0:
         return None
-    return {"short": short, "long_strike": ls, "credit": credit,
+    return {"short": short, "long": lng, "long_strike": ls, "credit": credit,
             "width": width, "max_loss": max_loss}
 
 
+def _leg_liquidity(*legs):
+    """Combined liquidity for a spread: min open interest across legs, and total
+    round-trip bid-ask across legs (illiquidity cost you pay to get in and out)."""
+    ois = [int(l.get("oi") or 0) for l in legs]
+    bidask = sum((l.get("ask") or 0) - (l.get("bid") or 0) for l in legs)
+    return (min(ois) if ois else 0), bidask
+
+
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
-                 credit, width, max_loss, pop, iv, otm):
+                 credit, width, max_loss, pop, iv, otm, oi=0, leg_bidask=0.0):
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
@@ -100,7 +108,9 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
-            "Score": (round(score, 2) if score == score else float("nan")), "EarningsDate": earn}
+            "Score": (round(score, 2) if score == score else float("nan")),
+            "Spread_%": ((leg_bidask / credit) if credit else float("nan")),
+            "OpenInt": int(oi), "EarningsDate": earn}
 
 
 def _ok_defined(r, pmin, pmax):
@@ -135,8 +145,10 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                 strat, pl, cl = "Put credit spread", f"sell {sk:g}P / buy {s['long_strike']:g}P", ""
             else:
                 strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
+            oi, ba = _leg_liquidity(s["short"], s["long"])
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
-                             s["credit"], s["width"], s["max_loss"], pop, s["short"].get("iv") or 0, otm)
+                             s["credit"], s["width"], s["max_loss"], pop,
+                             s["short"].get("iv") or 0, otm, oi, ba)
             if r["AnnROR_%"] >= ROR_ANN_MIN:
                 seen.add(key)
                 out.append(r)
@@ -169,10 +181,11 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         if key in seen:
             continue
         iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
+        oi, ba = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
         r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                         credit, width, max_loss, pop, iv, min(p_otm, c_otm))
+                         credit, width, max_loss, pop, iv, min(p_otm, c_otm), oi, ba)
         if r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
             out.append(r)

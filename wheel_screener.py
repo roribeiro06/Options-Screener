@@ -138,7 +138,9 @@ def td_chain(symbol, expiration):
                     "bid": o.get("bid") or 0,
                     "ask": o.get("ask") or 0,
                     "delta": g.get("delta"),
-                    "iv": g.get("mid_iv") or g.get("smv_vol") or 0})
+                    "iv": g.get("mid_iv") or g.get("smv_vol") or 0,
+                    "oi": o.get("open_interest") or 0,
+                    "volume": o.get("volume") or 0})
     return out
 
 
@@ -215,6 +217,16 @@ def bs_call_delta(S, K, T, sigma, r):
 def otm_min_for(symbol):
     """Per-ticker minimum OTM: 5% for index ETFs, 10% for everything else."""
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
+
+
+def _liq(o):
+    """Liquidity snapshot for one option: bid-ask spread as % of mid, open interest, volume."""
+    bid = o.get("bid") or 0
+    ask = o.get("ask") or 0
+    mid = (bid + ask) / 2
+    return {"Spread_%": ((ask - bid) / mid) if mid > 0 else float("nan"),
+            "OpenInt": int(o.get("oi") or 0),
+            "Volume": int(o.get("volume") or 0)}
 
 
 def earnings_blocks(symbol, earnings, today, exp_date):
@@ -462,7 +474,7 @@ def screen_puts(symbol):
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
-                   "Expiration": exp, "DTE": dte, "EarningsDate": earnings, **res}
+                   "Expiration": exp, "DTE": dte, "EarningsDate": earnings, **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
             elif res["Reasons"].count(";") == 0:
@@ -494,7 +506,7 @@ def screen_calls(symbol, cost_basis):
                                 cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
-                   "EarningsDate": earnings, **res}
+                   "EarningsDate": earnings, **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
             elif res["Reasons"].count(";") == 0:
@@ -504,12 +516,14 @@ def screen_calls(symbol, cost_basis):
     return passers, near
 
 
-PUT_COLS =["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score", "EarningsDate"]
+PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+            "Spread_%", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score", "EarningsDate"]
-PCT_COLS = {"OTM_%", "PeriodYield_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
-            "Tbill_%", "RiskPrem_%", "IV"}
+             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+             "Spread_%", "OpenInt", "Volume", "EarningsDate"]
+PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
+            "Tbill_%", "RiskPrem_%", "IV", "Spread_%"}
 
 
 def _df(rows, cols, sort_by=("Ticker", "Strike"), asc=(True, False)):
