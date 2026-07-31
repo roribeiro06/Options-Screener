@@ -43,6 +43,7 @@ YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two 
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
+CASH_TARGET = 40000          # capital target; screener shows # of contracts to reach at least this
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
@@ -218,6 +219,14 @@ def bs_call_delta(S, K, T, sigma, r):
 def otm_min_for(symbol):
     """Per-ticker minimum OTM: 5% for index ETFs, 10% for everything else."""
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
+
+
+def contracts_for_target(cash_per_contract, target=None):
+    """How many contracts (whole number) to tie up at least `target` dollars of capital."""
+    t = CASH_TARGET if target is None else target
+    if not cash_per_contract or cash_per_contract <= 0:
+        return float("nan")
+    return int(math.ceil(t / cash_per_contract))
 
 
 def _liq(o):
@@ -476,7 +485,10 @@ def screen_puts(symbol):
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
-                   "Expiration": exp, "DTE": dte, "EarningsDate": earnings, **_liq(o), **res}
+                   "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
+                   "Cash/Contract": round(o["strike"] * 100, 0),
+                   "Contracts_40k": contracts_for_target(o["strike"] * 100),
+                   **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
             elif res["Reasons"].count(";") == 0:
@@ -510,7 +522,10 @@ def screen_calls(symbol, cost_basis):
                                 cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
-                   "EarningsDate": earnings, **_liq(o), **res}
+                   "EarningsDate": earnings,
+                   "Cash/Contract": round(price * 100, 0),
+                   "Contracts_40k": contracts_for_target(price * 100),
+                   **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
             elif res["Reasons"].count(";") == 0:
@@ -522,10 +537,10 @@ def screen_calls(symbol, cost_basis):
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+            "Cash/Contract", "Contracts_40k", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+             "Cash/Contract", "Contracts_40k", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -571,9 +586,22 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
-    for c in ("Premium", "CostBasis", "CurrentPrice", "Spread_$"):
+    # Premium: "$/share (total premium across the # of contracts that reach the cash target)"
+    if "Premium" in d.columns and "Contracts_40k" in d.columns:
+        def _prem(p, n):
+            if pd.isna(p):
+                return "-"
+            if pd.isna(n):
+                return f"${p:.2f}"
+            return f"${p:.2f} (${p * 100 * int(n):,.0f})"
+        d["Premium"] = [_prem(p, n) for p, n in zip(d["Premium"], d["Contracts_40k"])]
+    elif "Premium" in d.columns:
+        d["Premium"] = "$" + d["Premium"].round(2).astype(str)
+    for c in ("CostBasis", "CurrentPrice", "Spread_$"):
         if c in d.columns:
             d[c] = "$" + d[c].round(2).astype(str)
+    if "Cash/Contract" in d.columns:
+        d["Cash/Contract"] = d["Cash/Contract"].apply(lambda v: f"${v:,.0f}" if pd.notna(v) else "-")
     return d
 
 
