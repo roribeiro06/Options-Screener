@@ -487,7 +487,7 @@ def screen_puts(symbol):
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                    "Cash/Contract": round(o["strike"] * 100, 0),
-                   "Contracts_40k": contracts_for_target(o["strike"] * 100),
+                   "# of contracts": contracts_for_target(o["strike"] * 100),
                    **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
@@ -524,7 +524,7 @@ def screen_calls(symbol, cost_basis):
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
                    "Cash/Contract": round(price * 100, 0),
-                   "Contracts_40k": contracts_for_target(price * 100),
+                   "# of contracts": contracts_for_target(price * 100),
                    **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
@@ -537,10 +537,10 @@ def screen_calls(symbol, cost_basis):
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "Cash/Contract", "Contracts_40k", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+            "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "Cash/Contract", "Contracts_40k", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -587,20 +587,29 @@ def _fmt(df):
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
     # Premium: "$/share (total premium across the # of contracts that reach the cash target)"
-    if "Premium" in d.columns and "Contracts_40k" in d.columns:
+    if "Premium" in d.columns and "# of contracts" in d.columns:
         def _prem(p, n):
             if pd.isna(p):
                 return "-"
             if pd.isna(n):
                 return f"${p:.2f}"
             return f"${p:.2f} (${p * 100 * int(n):,.0f})"
-        d["Premium"] = [_prem(p, n) for p, n in zip(d["Premium"], d["Contracts_40k"])]
+        d["Premium"] = [_prem(p, n) for p, n in zip(d["Premium"], d["# of contracts"])]
     elif "Premium" in d.columns:
         d["Premium"] = "$" + d["Premium"].round(2).astype(str)
     for c in ("CostBasis", "CurrentPrice", "Spread_$"):
         if c in d.columns:
             d[c] = "$" + d[c].round(2).astype(str)
-    if "Cash/Contract" in d.columns:
+    # Cash/Contract: "$/contract (total collateral across the # of contracts to reach the target)"
+    if "Cash/Contract" in d.columns and "# of contracts" in d.columns:
+        def _cash(v, n):
+            if pd.isna(v):
+                return "-"
+            if pd.isna(n):
+                return f"${v:,.0f}"
+            return f"${v:,.0f} (${v * int(n):,.0f})"
+        d["Cash/Contract"] = [_cash(v, n) for v, n in zip(d["Cash/Contract"], d["# of contracts"])]
+    elif "Cash/Contract" in d.columns:
         d["Cash/Contract"] = d["Cash/Contract"].apply(lambda v: f"${v:,.0f}" if pd.notna(v) else "-")
     return d
 

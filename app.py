@@ -269,9 +269,10 @@ try:
 **What the columns mean** - OTM_% = how far the strike is out-of-the-money; POP_% = chance of keeping the premium (about 1 - delta).
 For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
 MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
-**Capital:** Premium shows $/share and, in parentheses, the total premium you'd collect across the number of contracts that reach
-your ${getattr(ws, "CASH_TARGET", 40000):,} target. Cash/Contract = collateral one contract ties up (puts: strike x 100; covered calls:
-shares x 100; spreads: max loss x 100). Contracts_40k = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,}.
+**Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
+Premium (and Max Profit for spreads) shows $/share and, in parentheses, the total you'd collect across that many contracts.
+Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many contracts
+(puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
 **Liquidity:** Spread_$ = the bid-ask spread in dollars per share (ask - bid); for multi-leg it's the combined round-trip bid-ask
 across all legs. Lower = tighter, cheaper to trade. OpenInt = open interest (contracts outstanding); Volume = contracts traded today.
 Higher OpenInt/Volume and a smaller Spread_$ mean easier fills and less slippage.
