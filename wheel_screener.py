@@ -12,6 +12,7 @@ Not financial advice. Screens candidates; you decide.
 """
 
 import os
+import json
 import math
 import time as _time
 import datetime as dt
@@ -219,6 +220,34 @@ def bs_call_delta(S, K, T, sigma, r):
 def otm_min_for(symbol):
     """Per-ticker minimum OTM: 5% for index ETFs, 10% for everything else."""
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
+
+
+def _load_history():
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history_premiums.json")
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {"_meta": {}, "tickers": {}}
+
+
+_HISTORY = _load_history()
+
+
+def _nearest(value, buckets):
+    return min(buckets, key=lambda b: abs(b - value)) if buckets else value
+
+
+def avg_premium_range(symbol, otm, dte):
+    """Historical typical PUT premium [low, high] for this ticker at the nearest
+    OTM%/DTE bucket, from history_premiums.json. None if not available."""
+    tkr = (_HISTORY.get("tickers") or {}).get(symbol)
+    if not tkr:
+        return None
+    meta = _HISTORY.get("_meta", {})
+    ob = _nearest(otm * 100, meta.get("otm_buckets", [5, 10, 15, 20, 25, 30]))
+    db = _nearest(dte, meta.get("dte_buckets", [7, 14, 21, 30, 45, 60, 90]))
+    return tkr.get(f"{int(ob)}|{int(db)}")
 
 
 def contracts_for_target(cash_per_contract, target=None):
@@ -484,8 +513,10 @@ def screen_puts(symbol):
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol))
+            _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte)
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
+                   "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
                    "Cash/Contract": round(o["strike"] * 100, 0),
                    "# of contracts": contracts_for_target(o["strike"] * 100),
                    **_liq(o), **res}
@@ -536,7 +567,7 @@ def screen_calls(symbol, cost_basis):
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+            "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",

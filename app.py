@@ -269,6 +269,9 @@ try:
 **What the columns mean** - OTM_% = how far the strike is out-of-the-money; POP_% = chance of keeping the premium (about 1 - delta).
 For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
 MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
+**AvgPremium** (puts) = the typical premium range this ticker's put has carried at that OTM%/DTE over the past year, estimated from
+realized volatility (so it runs a touch low vs actual option prices) - a "$low-$high" band. Compare a live Premium above the band = richer than normal, below = cheaper. Refreshed weekly; "-" means no history yet.
+
 **Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
 Premium (and Max Profit for spreads) shows $/share and, in parentheses, the total you'd collect across that many contracts.
 Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many contracts
