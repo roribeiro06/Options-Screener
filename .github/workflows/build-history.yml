@@ -1,0 +1,34 @@
+name: Build history table
+
+# Recomputes history_premiums.json (typical put premiums per ticker) weekly,
+# then commits it back to the repo. The screener reads that file at runtime.
+on:
+  schedule:
+    - cron: "0 9 * * 1"     # Mondays 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write            # needed to commit the updated JSON
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build history table
+        env:
+          TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+          TRADIER_BASE: "https://sandbox.tradier.com/v1"
+        run: python build_history.py
+      - name: Commit updated table
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add history_premiums.json
+          git commit -m "Update history premiums table" || echo "no changes to commit"
+          git push
