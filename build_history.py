@@ -32,12 +32,23 @@ OUT           = "history_premiums.json"
 _N = NormalDist()
 
 
+def _d12(S, K, T, sigma, r):
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    return d1, d1 - sigma * math.sqrt(T)
+
+
 def bs_put(S, K, T, sigma, r):
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return 0.0
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
+    d1, d2 = _d12(S, K, T, sigma, r)
     return K * math.exp(-r * T) * _N.cdf(-d2) - S * _N.cdf(-d1)
+
+
+def bs_call(S, K, T, sigma, r):
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    d1, d2 = _d12(S, K, T, sigma, r)
+    return S * _N.cdf(d1) - K * math.exp(-r * T) * _N.cdf(d2)
 
 
 def daily_closes(symbol):
@@ -79,16 +90,18 @@ def build_ticker(symbol):
         return None
     rv = rolling_rv(closes, RV_WINDOW)
     prices = closes[RV_WINDOW:RV_WINDOW + len(rv)]
-    table = {}
+    put_t, call_t = {}, {}
     for otm in OTM_BUCKETS:
         for dte in DTE_BUCKETS:
             T = dte / 365.0
-            prems = sorted(bs_put(S, S * (1 - otm), T, sigma, ws.RISK_FREE)
+            key = f"{int(otm * 100)}|{dte}"
+            puts = sorted(bs_put(S, S * (1 - otm), T, sigma, ws.RISK_FREE)
+                          for S, sigma in zip(prices, rv))
+            calls = sorted(bs_call(S, S * (1 + otm), T, sigma, ws.RISK_FREE)
                            for S, sigma in zip(prices, rv))
-            low = percentile(prems, 0.25)
-            high = percentile(prems, 0.75) * IV_UPLIFT
-            table[f"{int(otm * 100)}|{dte}"] = [round(low, 2), round(high, 2)]
-    return table
+            put_t[key] = [round(percentile(puts, 0.25), 2), round(percentile(puts, 0.75) * IV_UPLIFT, 2)]
+            call_t[key] = [round(percentile(calls, 0.25), 2), round(percentile(calls, 0.75) * IV_UPLIFT, 2)]
+    return {"put": put_t, "call": call_t}
 
 
 def main():

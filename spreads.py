@@ -27,7 +27,7 @@ SPREAD_DTE_MAX   = 90
 SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
-               "OTM_%", "Width", "Width_%", "Max Profit", "MaxLoss", "ROR_%", "AnnROR_%",
+               "OTM_%", "Width", "Width_%", "Max Profit", "AvgPremium", "MaxLoss", "ROR_%", "AnnROR_%",
                "POP_%", "IV", "Score", "Cash/Contract", "# of contracts",
                "Spread_$", "OpenInt", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
@@ -99,8 +99,20 @@ def _leg_liquidity(*legs):
     return (min(ois) if ois else 0), bidask
 
 
+def _avg_credit_range(sym, dte, kind, short_strike, long_strike, spot):
+    """Estimated typical net credit [low, high] for one credit spread, from the
+    historical per-leg premium table (short premium minus long premium)."""
+    so = (spot - short_strike) / spot if kind == "put" else (short_strike - spot) / spot
+    lo = (spot - long_strike) / spot if kind == "put" else (long_strike - spot) / spot
+    s = ws.avg_premium_range(sym, so, dte, kind)
+    l = ws.avg_premium_range(sym, lo, dte, kind)
+    if not (s and l):
+        return None
+    return (max(0.0, s[0] - l[1]), max(0.0, s[1] - l[0]))
+
+
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
-                 credit, width, max_loss, pop, iv, otm, oi=0, leg_bidask=0.0):
+                 credit, width, max_loss, pop, iv, otm, oi=0, leg_bidask=0.0, avg_credit=None):
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
@@ -114,6 +126,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
+            "AvgPremium": (f"${avg_credit[0]:.2f}-${avg_credit[1]:.2f}" if avg_credit else "-"),
             "Cash/Contract": round(max_loss * 100, 0),
             "# of contracts": ws.contracts_for_target(max_loss * 100),
             "Spread_$": round(leg_bidask, 2),
@@ -153,9 +166,10 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             else:
                 strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
             oi, ba = _leg_liquidity(s["short"], s["long"])
+            acr = _avg_credit_range(sym, dte, opt_type, sk, s["long_strike"], spot)
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
                              s["credit"], s["width"], s["max_loss"], pop,
-                             s["short"].get("iv") or 0, otm, oi, ba)
+                             s["short"].get("iv") or 0, otm, oi, ba, acr)
             if r["AnnROR_%"] >= ROR_ANN_MIN:
                 seen.add(key)
                 out.append(r)
@@ -189,10 +203,13 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             continue
         iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
         oi, ba = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
+        _pac = _avg_credit_range(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot)
+        _cac = _avg_credit_range(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot)
+        acr = (_pac[0] + _cac[0], _pac[1] + _cac[1]) if (_pac and _cac) else None
         r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                         credit, width, max_loss, pop, iv, min(p_otm, c_otm), oi, ba)
+                         credit, width, max_loss, pop, iv, min(p_otm, c_otm), oi, ba, acr)
         if r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
             out.append(r)

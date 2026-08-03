@@ -238,16 +238,24 @@ def _nearest(value, buckets):
     return min(buckets, key=lambda b: abs(b - value)) if buckets else value
 
 
-def avg_premium_range(symbol, otm, dte):
-    """Historical typical PUT premium [low, high] for this ticker at the nearest
-    OTM%/DTE bucket, from history_premiums.json. None if not available."""
+def avg_premium_range(symbol, otm, dte, kind="put"):
+    """Historical typical option premium [low, high] for this ticker at the nearest
+    OTM%/DTE bucket, from history_premiums.json. kind is 'put' or 'call'.
+    None if not available."""
     tkr = (_HISTORY.get("tickers") or {}).get(symbol)
     if not tkr:
+        return None
+    # new tables are {"put": {...}, "call": {...}}; old ones were a flat put table
+    if "put" in tkr or "call" in tkr:
+        table = tkr.get(kind)
+    else:
+        table = tkr if kind == "put" else None
+    if not table:
         return None
     meta = _HISTORY.get("_meta", {})
     ob = _nearest(otm * 100, meta.get("otm_buckets", [5, 10, 15, 20, 25, 30]))
     db = _nearest(dte, meta.get("dte_buckets", [7, 14, 21, 30, 45, 60, 90]))
-    return tkr.get(f"{int(ob)}|{int(db)}")
+    return table.get(f"{int(ob)}|{int(db)}")
 
 
 def contracts_for_target(cash_per_contract, target=None):
@@ -551,9 +559,11 @@ def screen_calls(symbol, cost_basis):
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
                                  "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                 cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
+            _apr = avg_premium_range(symbol, (o["strike"] - price) / price, dte, "call")
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
+                   "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
                    "Cash/Contract": round(price * 100, 0),
                    "# of contracts": contracts_for_target(price * 100),
                    **_liq(o), **res}
@@ -570,7 +580,7 @@ PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "P
             "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+             "Premium", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
              "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
