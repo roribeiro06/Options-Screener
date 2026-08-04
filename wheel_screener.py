@@ -45,7 +45,7 @@ DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
-MIN_ANN_YIELD_INDEX = 0.08   # broad indexes (SPY/QQQ/DIA) are lower risk -> lower yield floor is OK
+MIN_ANN_YIELD_INDEX = 0.10   # broad indexes (SPY/QQQ/DIA) are lower risk -> lower yield floor is OK
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
 CASH_TARGET = 40000          # capital target; screener shows # of contracts to reach at least this
