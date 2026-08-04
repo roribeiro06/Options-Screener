@@ -613,6 +613,11 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             if o["type"] != kind:
                 continue
             k = o["strike"]
+            # sell side only: OTM puts (below price) for CSPs, OTM calls (above price) for covered calls
+            if kind == "put" and k >= price:
+                continue
+            if kind == "call" and k <= price:
+                continue
             if strike_min is not None and k < strike_min:
                 continue
             if strike_max is not None and k > strike_max:

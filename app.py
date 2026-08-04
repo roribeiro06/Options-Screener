@@ -239,6 +239,39 @@ else:
 if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
+st.markdown("---")
+st.header("Contract Lookup")
+st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
+           "(cash-secured puts) or calls (covered calls, as if you held the shares) - even ones that don't pass "
+           "the criteria above. Puts show strikes below the price, calls above it. Same stats (Score, yields, IV, liquidity).")
+with st.form("lookup_form"):
+    _c1, _c2, _c3, _c4 = st.columns([1.2, 1, 1, 1])
+    lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
+    lk_kind = _c2.radio("Type", ["put", "call"], horizontal=True)
+    lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
+    _d1, _d2 = st.columns(2)
+    _today = datetime.now().date()
+    lk_start = _d1.date_input("Expiration from", _today)
+    lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
+    lk_go = st.form_submit_button("Search")
+
+if lk_go and lk_ticker:
+    try:
+        _res = scan_lookup(lk_ticker, lk_kind,
+                           lk_smin or None, lk_smax or None, lk_start, lk_end)
+        if len(_res):
+            _label = "cash-secured put" if lk_kind == "put" else "covered call"
+            st.write(f"**{len(_res)} {_label} contracts** for {lk_ticker} ({lk_start} to {lk_end}).")
+            st.dataframe(ws._fmt(_res), hide_index=True, use_container_width=True)
+            st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
+                               f"{lk_ticker}_{lk_kind}_lookup.csv", "text/csv")
+        else:
+            st.write("No sellable contracts in that range (for puts try strikes below the price; for calls, above).")
+    except Exception as _e:
+        st.error(f"Lookup failed: {_e}")
+
+st.markdown("---")
 st.header("Multi-Leg Strategies  (70% POP)")
 ds, es = scan_spreads(tuple(puts), SPREAD_CRITERIA)
 _SPREAD_SECTIONS = [
@@ -261,37 +294,6 @@ for _key, _title in _SPREAD_SECTIONS:
         st.write("None qualify right now.")
 if es:
     st.caption("Skipped: " + " | ".join(es))
-
-st.markdown("---")
-st.header("Contract Lookup")
-st.caption("Look up ANY ticker's contracts in a strike/expiration range - even ones that don't pass the "
-           "criteria and so never appear above. Same stats (Score, yields, IV, liquidity, etc.).")
-with st.form("lookup_form"):
-    _c1, _c2, _c3, _c4 = st.columns([1.2, 1, 1, 1])
-    lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
-    lk_kind = _c2.radio("Type", ["put", "call"], horizontal=True)
-    lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
-    lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
-    _d1, _d2 = st.columns(2)
-    _today = datetime.now().date()
-    lk_start = _d1.date_input("Expiration from", _today)
-    lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
-    lk_go = st.form_submit_button("Search")
-
-if lk_go and lk_ticker:
-    try:
-        _res = scan_lookup(lk_ticker, lk_kind,
-                           lk_smin or None, lk_smax or None, lk_start, lk_end)
-        if len(_res):
-            st.write(f"**{len(_res)} {lk_kind} contracts** for {lk_ticker} "
-                     f"({lk_start} to {lk_end}).")
-            st.dataframe(ws._fmt(_res), hide_index=True, use_container_width=True)
-            st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
-                               f"{lk_ticker}_{lk_kind}_lookup.csv", "text/csv")
-        else:
-            st.write("No contracts found in that range (check the ticker, strikes, and dates).")
-    except Exception as _e:
-        st.error(f"Lookup failed: {_e}")
 
 st.markdown("---")
 st.header("Legend - criteria in effect")
