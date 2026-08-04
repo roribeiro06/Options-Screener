@@ -288,7 +288,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 
 **Cash-Secured Puts & Covered Calls**
 - Probability of profit (POP): {ws.POP_MIN:.0%} to {ws.POP_MAX:.0%}  (about 0.30 delta = 70% POP)
-- Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%}
+- Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%} for stocks, {getattr(ws, "MIN_ANN_YIELD_INDEX", ws.MIN_ANN_YIELD):.0%} for broad indexes (SPY/QQQ/DIA, which also skip the per-share premium floors since they're lower risk)
 - OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
 - **Puts only** extra filters: {("premium >= $%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV

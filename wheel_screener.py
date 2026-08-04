@@ -45,6 +45,7 @@ DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 90     # Options Alpha: longer duration allowed
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
+MIN_ANN_YIELD_INDEX = 0.08   # broad indexes (SPY/QQQ/DIA) are lower risk -> lower yield floor is OK
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
 CASH_TARGET = 40000          # capital target; screener shows # of contracts to reach at least this
@@ -298,7 +299,7 @@ def tiered_yield_needed(otm):
     return TIERED_YIELD[-1][1]              # closer than smallest tier -> strictest
 
 
-def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None):
+def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None, is_index=False):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
     per_yld = premium / strike if strike else float("nan")
@@ -310,19 +311,21 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
-    req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
+    # broad indexes get a lower yield floor (lower risk) and skip the stock-oriented premium floors
+    flat_floor = MIN_ANN_YIELD_INDEX if is_index else MIN_ANN_YIELD
+    req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
-        "min_period_yield": per_yld >= MIN_PERIOD_YIELD,
+        "min_period_yield": is_index or (per_yld >= MIN_PERIOD_YIELD),
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
-    if PUT_MIN_PREMIUM_PCT > 0:
+    if PUT_MIN_PREMIUM_PCT > 0 and not is_index:
         tests["min_premium_pct"] = per_yld >= PUT_MIN_PREMIUM_PCT
     if PUT_MIN_YIELD_OVER_IV > 0:
         tests["yield_vs_iv"] = bool(iv) and ann_yld >= PUT_MIN_YIELD_OVER_IV * iv
@@ -523,7 +526,8 @@ def screen_puts(symbol):
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                               delta=o["delta"], otm_min=otm_min_for(symbol))
+                               delta=o["delta"], otm_min=otm_min_for(symbol),
+                               is_index=(symbol in INDEX_TICKERS))
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte)
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
