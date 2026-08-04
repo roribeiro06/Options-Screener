@@ -583,6 +583,76 @@ def screen_calls(symbol, cost_basis):
     return passers, near
 
 
+def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
+                     exp_start=None, exp_end=None):
+    """Manual lookup: return EVERY contract for a ticker within the given strike
+    and expiration range, with all the same stats, regardless of whether it passes
+    the screener's criteria. No PASS filter, no OI floor, no earnings/dedup."""
+    price = td_quote(symbol)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = get_earnings_date(symbol)
+    today = dt.date.today()
+    idx = symbol in INDEX_TICKERS
+    rows = []
+    for exp in td_expirations(symbol):
+        try:
+            d = dt.date.fromisoformat(exp)
+        except Exception:
+            continue
+        dte = (d - today).days
+        if dte < 0:
+            continue
+        if exp_start and d < exp_start:
+            continue
+        if exp_end and d > exp_end:
+            continue
+        earn_win = earnings_blocks(symbol, earnings, today, d)
+        for o in td_chain(symbol, exp):
+            if o["type"] != kind:
+                continue
+            k = o["strike"]
+            if strike_min is not None and k < strike_min:
+                continue
+            if strike_max is not None and k > strike_max:
+                continue
+            bid = o["bid"] or 0
+            if bid <= 0:
+                continue
+            premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
+            if kind == "put":
+                res = evaluate_put({"strike": k, "premium": float(premium),
+                                    "iv": float(o["iv"] or 0)}, price, dte, earn_win,
+                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx)
+                _apr = avg_premium_range(symbol, (price - k) / price, dte, "put")
+                rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
+                       "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
+                       "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                       "Cash/Contract": round(k * 100, 0),
+                       "# of contracts": contracts_for_target(k * 100),
+                       **_liq(o), **res}
+            else:
+                res = evaluate_call({"strike": k, "premium": float(premium),
+                                     "iv": float(o["iv"] or 0)}, price, dte, earn_win,
+                                    None, delta=o["delta"], otm_min=otm_min_for(symbol))
+                _apr = avg_premium_range(symbol, (k - price) / price, dte, "call")
+                rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
+                       "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
+                       "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                       "Cash/Contract": round(price * 100, 0),
+                       "# of contracts": contracts_for_target(price * 100),
+                       **_liq(o), **res}
+            rows.append(rec)
+    return rows
+
+
+# Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
+LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+               "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+               "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+
+
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
