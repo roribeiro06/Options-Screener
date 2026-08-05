@@ -29,10 +29,20 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 - **`build_history.py`** — offline job: pulls ~1yr of Tradier stock prices, models typical put/call
   premiums per ticker by OTM%/DTE bucket (realized-vol based, reported as a low-high range),
   writes `history_premiums.json`.
+- **`build_volume_leaders.py`** — offline job: finds S&P 500 tickers OUTSIDE `PUT_TICKERS` with the
+  heaviest options volume today (batched stock-volume quotes narrow ~500 names to 40 candidates,
+  then a real options-chain lookup ranks the top 5 by actual contract volume), screens those 5 with
+  `screen_puts` using the same criteria as the main screener, writes `volume_leaders.json`. This is
+  how a ticker you never added (e.g. PG) can surface on its own if a contract is both liquid and
+  qualifying. `sp500_tickers.py` is the static candidate universe (Wikipedia snapshot; refresh
+  manually if constituents drift).
 - **`notify_email.py`** — headless run that emails all strategies (Gmail SMTP); market-hours guarded.
 - **`history_premiums.json`** — the precomputed premium table (committed; refreshed weekly).
+- **`volume_leaders.json`** — today's high-volume discovery results (committed; refreshed daily after close).
 - **`.github/workflows/screener-email.yml`** — emails every 30 min during market hours (weekdays).
 - **`.github/workflows/build-history.yml`** — rebuilds history_premiums.json weekly, commits it.
+- **`.github/workflows/build-volume-leaders.yml`** — rebuilds volume_leaders.json daily after the
+  close (weekdays 20:15 UTC), commits it. Has a manual "Run workflow" button too.
 - **`requirements.txt`** — streamlit, streamlit-autorefresh, yfinance, scipy, pandas, curl_cffi, requests.
 
 ## GitHub Secrets (Settings -> Secrets and variables -> Actions)
@@ -63,6 +73,11 @@ Max Profit / MaxLoss / ROR / AnnROR / Width.
 ## Recent open items / ideas
 - After changing build_history.py to add call premiums, RE-RUN the "Build history table"
   Action so history_premiums.json has both put and call tables (calls/spreads AvgPremium need it).
+- "Find high-volume tickers" Action needs at least one manual "Run workflow" click after first
+  deploy (Actions tab) so `volume_leaders.json` exists before its daily 20:15 UTC schedule fires;
+  the app shows a friendly message in the meantime instead of erroring.
+- Discovery is puts-only for now (covered calls need owned shares, which discovered tickers don't
+  have). Could extend the same two-stage volume-ranking to multi-leg spreads later.
 - Optional: index OTM floor could be tightened below 5% to surface richer index puts (safety trade-off).
 - Optional: extend AvgPremium to a paid historical-IV source for exactness (currently realized-vol estimate).
 

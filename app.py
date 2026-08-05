@@ -240,6 +240,29 @@ if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
 st.markdown("---")
+st.subheader("Discover: High-Volume Puts (outside your watchlist)")
+st.caption("Daily background scan of the S&P 500 for the tickers trading the heaviest options volume "
+           "today, screened with the same Cash-Secured-Put criteria as above -- so a name you didn't "
+           "add to the watchlist can still surface if one of its contracts qualifies. "
+           "Refreshed once a day via GitHub Actions (not live).")
+_vl = ws.load_volume_leaders()
+if _vl:
+    _leaders = _vl.get("leaders", [])
+    if _leaders:
+        _lead_txt = " | ".join(f"{l['ticker']} ({l['option_volume']:,} contracts today)" for l in _leaders)
+        st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest options volume: {_lead_txt}")
+    _dv = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+    if len(_dv):
+        st.dataframe(ws._fmt(_dv), hide_index=True, use_container_width=True)
+        st.download_button("Download discoveries (CSV)", _dv.to_csv(index=False),
+                           "volume_leaders.csv", "text/csv")
+    else:
+        st.write("None of today's highest-volume tickers currently qualify.")
+else:
+    st.write("No scan yet - run the 'Find high-volume tickers' GitHub Action "
+             "(Actions tab -> Run workflow), or wait for tomorrow's scheduled run.")
+
+st.markdown("---")
 st.header("Contract Lookup")
 st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
            "(cash-secured puts) or calls (covered calls, as if you held the shares) - even ones that don't pass "

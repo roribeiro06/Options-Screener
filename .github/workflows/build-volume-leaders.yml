@@ -1,0 +1,36 @@
+name: Find high-volume tickers
+
+# Scans the S&P 500 for the tickers trading the heaviest options volume today,
+# outside your manual watchlist, and screens them with the same put criteria as
+# the main app. Writes volume_leaders.json, which app.py displays directly (no
+# live Tradier calls on page load). Runs once a day after the close.
+on:
+  schedule:
+    - cron: "15 20 * * 1-5"    # weekdays 20:15 UTC (~4:15pm ET, after close)
+  workflow_dispatch:
+
+permissions:
+  contents: write            # needed to commit the updated JSON
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Find high-volume tickers
+        env:
+          TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+          TRADIER_BASE: "https://sandbox.tradier.com/v1"
+        run: python build_volume_leaders.py
+      - name: Commit updated results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add volume_leaders.json
+          git commit -m "Update high-volume ticker scan" || echo "no changes to commit"
+          git push

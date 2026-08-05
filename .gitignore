@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 .venv/
+.streamlit/secrets.toml
+.claude/
 qualifying_contracts.xlsx
 qualifying_contracts.html
 qualifying_contracts_SAMPLE.xlsx

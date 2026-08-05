@@ -238,6 +238,17 @@ def _load_history():
 _HISTORY = _load_history()
 
 
+def load_volume_leaders():
+    """Daily background scan of high-options-volume S&P 500 tickers outside
+    PUT_TICKERS (see build_volume_leaders.py). None if the Action hasn't run yet."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "volume_leaders.json")
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _nearest(value, buckets):
     return min(buckets, key=lambda b: abs(b - value)) if buckets else value
 
