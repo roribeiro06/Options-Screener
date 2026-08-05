@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+qualifying_contracts.xlsx
+qualifying_contracts.html
+qualifying_contracts_SAMPLE.xlsx
