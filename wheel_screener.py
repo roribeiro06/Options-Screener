@@ -675,6 +675,10 @@ PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "P
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
              "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+# Discover section: puts and covered calls combined in one table, tagged by Type.
+# No CostBasis -- discovered tickers aren't real holdings, so covered calls are
+# evaluated hypothetically (same as Contract Lookup does for any ticker).
+DISCOVER_COLS = ["Type"] + PUT_COLS
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 

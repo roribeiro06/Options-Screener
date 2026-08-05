@@ -2,9 +2,11 @@
 """
 build_volume_leaders.py -- find S&P 500 tickers OUTSIDE your manual watchlist
 (PUT_TICKERS in wheel_screener.py) whose options are trading heavy volume right
-now, then screen them for cash-secured puts using the same criteria as the main
-screener. Lets a name like PG surface on its own if one of its contracts is both
-liquid and qualifies -- you don't have to add it to the watchlist first.
+now, then screen them for cash-secured puts AND covered calls (evaluated
+hypothetically, same as the app's Contract Lookup does for any ticker -- "as if
+you held the shares") using the same criteria as the main screener. Lets a name
+like PG surface on its own if one of its contracts is both liquid and qualifies
+-- you don't have to add it to the watchlist first.
 
 Tradier has no "most active options" endpoint, so this works in two cheap stages:
   1. One batched quote call per ~100 tickers across the S&P 500 (sp500_tickers.py)
@@ -89,26 +91,31 @@ def main():
     leaders = sorted(opt_vol.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
     print("Top by option volume:", leaders)
 
-    print("Stage 3: screening leaders for qualifying puts...")
-    put_rows = []
+    print("Stage 3: screening leaders for qualifying puts and calls...")
+    rows = []
     leader_meta = []
     for sym, ovol in leaders:
         leader_meta.append({"ticker": sym, "stock_volume": stock_vol.get(sym, 0),
                             "option_volume": ovol})
         try:
-            passers, _ = ws.screen_puts(sym)
-            put_rows += passers
-            print(f"{sym}: {len(passers)} qualifying")
+            put_passers, _ = ws.screen_puts(sym)
+            for r in put_passers:
+                r["Type"] = "Put"
+            call_passers, _ = ws.screen_calls(sym, None)
+            for r in call_passers:
+                r["Type"] = "Call"
+            rows += put_passers + call_passers
+            print(f"{sym}: {len(put_passers)} puts, {len(call_passers)} calls qualifying")
         except Exception as e:
             print(f"{sym}: screen ERROR {e}", file=sys.stderr)
 
     out = {"_meta": {"built": today.isoformat(),
                      "candidate_pool": CANDIDATE_POOL, "top_n": TOP_N},
            "leaders": leader_meta,
-           "puts": put_rows}
+           "contracts": rows}
     with open(OUT, "w") as f:
         json.dump(out, f, default=str)
-    print(f"wrote {OUT}: {len(leader_meta)} leaders, {len(put_rows)} qualifying puts")
+    print(f"wrote {OUT}: {len(leader_meta)} leaders, {len(rows)} qualifying contracts")
 
 
 if __name__ == "__main__":
