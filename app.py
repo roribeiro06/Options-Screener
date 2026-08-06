@@ -242,10 +242,10 @@ if ec:
 st.markdown("---")
 st.subheader("Discover: High-Volume Puts & Calls (outside your watchlist)")
 st.caption("Daily background scan of the S&P 500 for the tickers trading the heaviest options volume "
-           "today, screened with the same Puts/Calls criteria as above -- so a name you didn't add to "
-           "the watchlist can still surface if one of its contracts qualifies. Covered calls here are "
-           "hypothetical (as if you held the shares), same as Contract Lookup. Refreshed once a day "
-           "via GitHub Actions (not live).")
+           "today, screened with the same Puts/Calls criteria as above plus a higher open-interest floor "
+           "(5,000, vs 1,000 elsewhere) -- so a name you didn't add to the watchlist can still surface if "
+           "one of its most liquid contracts qualifies. Covered calls here are hypothetical (as if you "
+           "held the shares), same as Contract Lookup. Refreshed once a day via GitHub Actions (not live).")
 try:
     _vl = ws.load_volume_leaders()
     if _vl:

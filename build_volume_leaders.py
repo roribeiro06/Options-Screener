@@ -31,6 +31,9 @@ CANDIDATE_POOL = 40   # how many top-stock-volume names get a real options-chain
 TOP_N = 5             # how many of those (by actual option volume) get deep-scanned
 CHUNK = 100           # tickers per batched /markets/quotes call
 OUT = "volume_leaders.json"
+DISCOVER_MIN_OI = 5000  # OI floor for this section only (higher than the main
+                        # screener's MIN_OPEN_INTEREST) -- these are unfamiliar
+                        # tickers, so lean toward their most liquid contracts.
 
 
 def batched_stock_volume(tickers):
@@ -94,6 +97,7 @@ def main():
     print("Stage 3: screening leaders for qualifying puts and calls...")
     rows = []
     leader_meta = []
+    ws.MIN_OPEN_INTEREST = DISCOVER_MIN_OI
     for sym, ovol in leaders:
         leader_meta.append({"ticker": sym, "stock_volume": stock_vol.get(sym, 0),
                             "option_volume": ovol})
