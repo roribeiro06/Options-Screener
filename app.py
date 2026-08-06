@@ -240,13 +240,14 @@ if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
 st.markdown("---")
-st.subheader("Discover: High-Open-Interest Puts & Calls (outside your watchlist)")
+st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
 st.caption("Daily background scan of a broad US-listed universe (not limited to the S&P 500) for the "
-           "tickers carrying the heaviest options open interest today, screened with the same Puts/Calls "
-           "criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name "
-           "you didn't add to the watchlist can still surface if one of its most liquid contracts "
-           "qualifies. Covered calls here are hypothetical (as if you held the shares), same as Contract "
-           "Lookup. Refreshed once a day via GitHub Actions (not live).")
+           "tickers carrying the heaviest options open interest today, screened with the same criteria "
+           "as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name you "
+           "didn't add to the watchlist can still surface if one of its most liquid contracts qualifies. "
+           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't "
+           "hold shares of, so a spread caps the risk instead of leaving the upside uncovered. Refreshed "
+           "once a day via GitHub Actions (not live).")
 try:
     _vl = ws.load_volume_leaders()
     if _vl:
@@ -254,14 +255,25 @@ try:
         if _leaders:
             _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
             st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
-        _dv = ws._df(_vl.get("contracts", []), ws.DISCOVER_COLS,
-                     sort_by=("Type", "Ticker", "Score"), asc=(True, True, False))
-        if len(_dv):
-            st.dataframe(ws._fmt(_dv), hide_index=True, use_container_width=True)
-            st.download_button("Download discoveries (CSV)", _dv.to_csv(index=False),
-                               "volume_leaders.csv", "text/csv")
+
+        st.markdown("**Puts**")
+        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+        if len(_dp):
+            st.dataframe(ws._fmt(_dp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
+                               "volume_leaders_puts.csv", "text/csv")
         else:
-            st.write("None of today's highest-volume tickers currently qualify.")
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+
+        st.markdown("**Call Credit Spreads (defined-risk)**")
+        _dc = sp._df(_vl.get("call_spreads", []))
+        if len(_dc):
+            _disp = _dc.drop(columns=["Strategy", "Put Legs"])
+            st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
+                               "volume_leaders_call_spreads.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
     else:
         st.write("No scan yet - run the 'Find high-volume tickers' GitHub Action "
                  "(Actions tab -> Run workflow), or wait for tomorrow's scheduled run.")

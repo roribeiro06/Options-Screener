@@ -3,10 +3,10 @@
 build_volume_leaders.py -- find tickers OUTSIDE your manual watchlist
 (PUT_TICKERS in wheel_screener.py) carrying heavy options open interest right
 now -- not limited to the S&P 500, so a large but not-yet-indexed name (a
-recent IPO, for example) can still surface -- then screen them for
-cash-secured puts AND covered calls (evaluated hypothetically, same as the
-app's Contract Lookup does for any ticker -- "as if you held the shares")
-using the same criteria as the main screener.
+recent IPO, for example) can still surface -- then screens them for
+cash-secured puts AND call credit spreads (defined-risk -- these are tickers
+you don't hold shares of, so a naked/covered call would carry uncapped upside
+risk) using the same criteria as the main screener.
 
 Tradier has no "most active options" or batched-open-interest endpoint, so
 this works in two cheap stages:
@@ -31,6 +31,7 @@ import json
 import datetime as dt
 
 import wheel_screener as ws
+import spreads as sp
 from sp500_tickers import SP500_TICKERS
 
 # Mirror of Nasdaq/NYSE/etc.'s combined listed-securities directory (~7,000
@@ -123,8 +124,8 @@ def main():
     leaders = sorted(opt_oi.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
     print("Top by open interest:", leaders)
 
-    print("Stage 3: screening leaders for qualifying puts and calls...")
-    rows = []
+    print("Stage 3: screening leaders for qualifying puts and call credit spreads...")
+    put_rows, spread_rows = [], []
     leader_meta = []
     ws.MIN_OPEN_INTEREST = DISCOVER_MIN_OI
     for sym, ooi in leaders:
@@ -132,30 +133,33 @@ def main():
                             "option_open_interest": ooi})
         try:
             put_passers, _ = ws.screen_puts(sym)
-            call_passers, _ = ws.screen_calls(sym, None)
-            # Only the single highest-open-interest qualifying put and call per
-            # ticker, not every contract that passes -- keeps the table to one
-            # put row + one call row per ticker.
+            call_spreads = [r for r in sp.screen_spreads(sym) if r["Strategy"] == "Call credit spread"]
+            # Only the single highest-open-interest qualifying put, and the single
+            # highest-open-interest qualifying call credit spread, per ticker --
+            # keeps each table to one row per ticker instead of every contract
+            # that passes. Call credit spreads (not naked calls) because these
+            # are tickers you don't hold shares of -- a spread caps the risk
+            # instead of leaving the upside uncovered.
             if put_passers:
                 best_put = max(put_passers, key=lambda r: r.get("OpenInt") or 0)
-                best_put["Type"] = "Put"
-                rows.append(best_put)
-            if call_passers:
-                best_call = max(call_passers, key=lambda r: r.get("OpenInt") or 0)
-                best_call["Type"] = "Call"
-                rows.append(best_call)
-            print(f"{sym}: {len(put_passers)} puts, {len(call_passers)} calls qualifying "
-                  f"(showing top-OI each)")
+                put_rows.append(best_put)
+            if call_spreads:
+                best_spread = max(call_spreads, key=lambda r: r.get("OpenInt") or 0)
+                spread_rows.append(best_spread)
+            print(f"{sym}: {len(put_passers)} puts, {len(call_spreads)} call credit spreads "
+                  f"qualifying (showing top-OI each)")
         except Exception as e:
             print(f"{sym}: screen ERROR {e}", file=sys.stderr)
 
     out = {"_meta": {"built": today.isoformat(),
                      "candidate_pool": CANDIDATE_POOL, "top_n": TOP_N},
            "leaders": leader_meta,
-           "contracts": rows}
+           "puts": put_rows,
+           "call_spreads": spread_rows}
     with open(OUT, "w") as f:
         json.dump(out, f, default=str)
-    print(f"wrote {OUT}: {len(leader_meta)} leaders, {len(rows)} qualifying contracts")
+    print(f"wrote {OUT}: {len(leader_meta)} leaders, {len(put_rows)} qualifying puts, "
+          f"{len(spread_rows)} qualifying call credit spreads")
 
 
 if __name__ == "__main__":
