@@ -29,13 +29,17 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 - **`build_history.py`** — offline job: pulls ~1yr of Tradier stock prices, models typical put/call
   premiums per ticker by OTM%/DTE bucket (realized-vol based, reported as a low-high range),
   writes `history_premiums.json`.
-- **`build_volume_leaders.py`** — offline job: finds S&P 500 tickers OUTSIDE `PUT_TICKERS` with the
-  heaviest options volume today (batched stock-volume quotes narrow ~500 names to 40 candidates,
-  then a real options-chain lookup ranks the top 5 by actual contract volume), screens those 5 with
-  `screen_puts` using the same criteria as the main screener, writes `volume_leaders.json`. This is
-  how a ticker you never added (e.g. PG) can surface on its own if a contract is both liquid and
-  qualifying. `sp500_tickers.py` is the static candidate universe (Wikipedia snapshot; refresh
-  manually if constituents drift).
+- **`build_volume_leaders.py`** — offline job: finds tickers OUTSIDE `PUT_TICKERS`, from a broad
+  ~7,000-ticker US-listed universe (not just the S&P 500), carrying the heaviest options OPEN
+  INTEREST today (batched stock-volume quotes narrow the universe to 40 candidates, then a real
+  options-chain lookup sums actual open interest and ranks the top 5), screens those 5 with
+  `screen_puts`/`screen_calls` (calls evaluated hypothetically, no owned shares needed) using the
+  same criteria as the main screener plus a higher OI floor (`DISCOVER_MIN_OI` = 5,000), and keeps
+  only the single highest-OI qualifying put and call per ticker. Writes `volume_leaders.json`. This
+  is how a ticker you never added (e.g. PG, or a recent IPO not yet in any index) can surface on its
+  own if a contract is both liquid and qualifying. The universe comes from a community-maintained
+  GitHub mirror of Nasdaq/NYSE's listed-securities directory (`UNIVERSE_URL`); if that's unreachable
+  it falls back to the static `sp500_tickers.py` snapshot (Wikipedia; refresh manually if stale).
 - **`notify_email.py`** — headless run that emails all strategies (Gmail SMTP); market-hours guarded.
 - **`history_premiums.json`** — the precomputed premium table (committed; refreshed weekly).
 - **`volume_leaders.json`** — today's high-volume discovery results (committed; refreshed daily after close).
@@ -76,8 +80,11 @@ Max Profit / MaxLoss / ROR / AnnROR / Width.
 - "Find high-volume tickers" Action needs at least one manual "Run workflow" click after first
   deploy (Actions tab) so `volume_leaders.json` exists before its daily 20:15 UTC schedule fires;
   the app shows a friendly message in the meantime instead of erroring.
-- Discovery is puts-only for now (covered calls need owned shares, which discovered tickers don't
-  have). Could extend the same two-stage volume-ranking to multi-leg spreads later.
+- Discovery covers puts and calls (calls are hypothetical -- discovered tickers aren't real
+  holdings). Could extend the same two-stage ranking to multi-leg spreads later.
+- Discovery's candidate pool (`CANDIDATE_POOL` = 40) and final leader count (`TOP_N` = 5) are both
+  narrow by design (cost/speed tradeoff); a ticker outside the top 40 by stock volume, or outside
+  the top 5 of those by open interest, is never screened even if it would otherwise qualify.
 - Optional: index OTM floor could be tightened below 5% to surface richer index puts (safety trade-off).
 - Optional: extend AvgPremium to a paid historical-IV source for exactness (currently realized-vol estimate).
 
