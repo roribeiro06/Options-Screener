@@ -240,19 +240,20 @@ if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
 st.markdown("---")
-st.subheader("Discover: High-Volume Puts & Calls (outside your watchlist)")
-st.caption("Daily background scan of the S&P 500 for the tickers trading the heaviest options volume "
-           "today, screened with the same Puts/Calls criteria as above plus a higher open-interest floor "
-           "(5,000, vs 1,000 elsewhere) -- so a name you didn't add to the watchlist can still surface if "
-           "one of its most liquid contracts qualifies. Covered calls here are hypothetical (as if you "
-           "held the shares), same as Contract Lookup. Refreshed once a day via GitHub Actions (not live).")
+st.subheader("Discover: High-Open-Interest Puts & Calls (outside your watchlist)")
+st.caption("Daily background scan of a broad US-listed universe (not limited to the S&P 500) for the "
+           "tickers carrying the heaviest options open interest today, screened with the same Puts/Calls "
+           "criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name "
+           "you didn't add to the watchlist can still surface if one of its most liquid contracts "
+           "qualifies. Covered calls here are hypothetical (as if you held the shares), same as Contract "
+           "Lookup. Refreshed once a day via GitHub Actions (not live).")
 try:
     _vl = ws.load_volume_leaders()
     if _vl:
         _leaders = _vl.get("leaders", [])
         if _leaders:
-            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_volume']:,} contracts today)" for l in _leaders)
-            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest options volume: {_lead_txt}")
+            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
+            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
         _dv = ws._df(_vl.get("contracts", []), ws.DISCOVER_COLS,
                      sort_by=("Type", "Ticker", "Score"), asc=(True, True, False))
         if len(_dv):
