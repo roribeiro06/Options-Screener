@@ -70,9 +70,11 @@ Streamlit app Secrets need `TRADIER_TOKEN` (and optionally `TRADIER_BASE`).
 
 ## Columns on the tables
 Ticker, price, strike, expiration, DTE, OTM%, Premium ($/share + total across # of contracts),
-AvgPremium (historical low-high band), yields, Delta/POP, IV, Score, Cash/Contract (per + total),
-# of contracts (to reach CASH_TARGET), Spread_$ (bid-ask), OpenInt, Volume. Spreads also show
-Max Profit / MaxLoss / ROR / AnnROR / Width.
+AvgPremium (historical low-high band), yields, Delta/POP, IV, Score, MaxLoss ($/share + total,
+same format as Premium: strike - premium for puts, cost basis - premium for covered calls with a
+known cost basis else "-"), # of contracts (to reach CASH_TARGET), Spread_$ (bid-ask), OpenInt,
+Volume. Spreads also show Max Profit / MaxLoss (width - credit, same $/share + total format) /
+ROR / AnnROR / Width. No separate Cash/Contract column anymore -- MaxLoss covers that role.
 
 ## Recent open items / ideas
 - After changing build_history.py to add call premiums, RE-RUN the "Build history table"

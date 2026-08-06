@@ -543,7 +543,7 @@ def screen_puts(symbol):
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                    "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
-                   "Cash/Contract": round(o["strike"] * 100, 0),
+                   "MaxLoss": round(o["strike"] - premium, 2),
                    "# of contracts": contracts_for_target(o["strike"] * 100),
                    **_liq(o), **res}
             if res["PASS"]:
@@ -582,7 +582,7 @@ def screen_calls(symbol, cost_basis):
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
                    "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
-                   "Cash/Contract": round(price * 100, 0),
+                   "MaxLoss": (round(cost_basis - premium, 2) if cost_basis is not None else float("nan")),
                    "# of contracts": contracts_for_target(price * 100),
                    **_liq(o), **res}
             if res["PASS"]:
@@ -645,7 +645,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                        "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
-                       "Cash/Contract": round(k * 100, 0),
+                       "MaxLoss": round(k - premium, 2),
                        "# of contracts": contracts_for_target(k * 100),
                        **_liq(o), **res}
             else:
@@ -656,7 +656,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                        "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
-                       "Cash/Contract": round(price * 100, 0),
+                       "MaxLoss": float("nan"),  # no cost basis in Contract Lookup -- can't bound the loss
                        "# of contracts": contracts_for_target(price * 100),
                        **_liq(o), **res}
             rows.append(rec)
@@ -666,15 +666,15 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
 LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
                "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-               "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+               "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
             "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+            "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+             "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -734,17 +734,17 @@ def _fmt(df):
     for c in ("CostBasis", "CurrentPrice", "Spread_$"):
         if c in d.columns:
             d[c] = "$" + d[c].round(2).astype(str)
-    # Cash/Contract: "$/contract (total collateral across the # of contracts to reach the target)"
-    if "Cash/Contract" in d.columns and "# of contracts" in d.columns:
-        def _cash(v, n):
+    # MaxLoss: "$/share (total across the # of contracts that reach the cash target)", same as Premium
+    if "MaxLoss" in d.columns and "# of contracts" in d.columns:
+        def _mloss(v, n):
             if pd.isna(v):
                 return "-"
             if pd.isna(n):
-                return f"${v:,.0f}"
-            return f"${v:,.0f} (${v * int(n):,.0f})"
-        d["Cash/Contract"] = [_cash(v, n) for v, n in zip(d["Cash/Contract"], d["# of contracts"])]
-    elif "Cash/Contract" in d.columns:
-        d["Cash/Contract"] = d["Cash/Contract"].apply(lambda v: f"${v:,.0f}" if pd.notna(v) else "-")
+                return f"${v:.2f}"
+            return f"${v:.2f} (${v * 100 * int(n):,.0f})"
+        d["MaxLoss"] = [_mloss(v, n) for v, n in zip(d["MaxLoss"], d["# of contracts"])]
+    elif "MaxLoss" in d.columns:
+        d["MaxLoss"] = d["MaxLoss"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     return d
 
 

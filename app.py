@@ -354,10 +354,11 @@ volatility (so it runs a touch low vs actual prices) - a "$low-$high" band. Puts
 and spreads the estimated net credit (short leg minus long leg). Live Premium/Max Profit above the band = richer than normal, below =
 cheaper. Refreshed weekly; "-" means no history yet.
 
-**Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
-Premium (and Max Profit for spreads) shows $/share and, in parentheses, the total you'd collect across that many contracts.
-Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many contracts
+**Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral
 (puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
+Premium, Max Profit, and MaxLoss all show $/share and, in parentheses, the total across that many contracts.
+MaxLoss = strike - premium for puts (worst case if assigned and the stock goes to zero); cost basis - premium for covered
+calls with a known cost basis ("-" without one, e.g. Contract Lookup); width - credit for spreads.
 **Liquidity:** Spread_$ = the bid-ask spread in dollars per share (ask - bid); for multi-leg it's the combined round-trip bid-ask
 across all legs. Lower = tighter, cheaper to trade. OpenInt = open interest (contracts outstanding); Volume = contracts traded today.
 Higher OpenInt/Volume and a smaller Spread_$ mean easier fills and less slippage.

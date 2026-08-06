@@ -28,7 +28,7 @@ SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction o
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "AvgPremium", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "Score", "Cash/Contract", "# of contracts",
+               "POP_%", "IV", "Score", "# of contracts",
                "Spread_$", "OpenInt", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
@@ -127,7 +127,6 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
             "AvgPremium": (f"${avg_credit[0]:.2f}-${avg_credit[1]:.2f}" if avg_credit else "-"),
-            "Cash/Contract": round(max_loss * 100, 0),
             "# of contracts": ws.contracts_for_target(max_loss * 100),
             "Spread_$": round(leg_bidask, 2),
             "OpenInt": int(oi), "EarningsDate": earn}
@@ -268,17 +267,18 @@ def _fmt(df):
         d["Max Profit"] = [_mp(v, n) for v, n in zip(d["Max Profit"], d["# of contracts"])]
     elif "Max Profit" in d.columns:
         d["Max Profit"] = d["Max Profit"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
-    for c in ("MaxLoss", "CurrentPrice", "Width", "Spread_$"):
-        if c in d.columns:
-            d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
-    if "Cash/Contract" in d.columns and "# of contracts" in d.columns:
-        def _cash(v, n):
+    # MaxLoss: "$/share (total across the # of contracts that reach the cash target)", same as Max Profit
+    if "MaxLoss" in d.columns and "# of contracts" in d.columns:
+        def _ml(v, n):
             if pd.isna(v):
                 return "-"
             if pd.isna(n):
-                return f"${v:,.0f}"
-            return f"${v:,.0f} (${v * int(n):,.0f})"
-        d["Cash/Contract"] = [_cash(v, n) for v, n in zip(d["Cash/Contract"], d["# of contracts"])]
-    elif "Cash/Contract" in d.columns:
-        d["Cash/Contract"] = d["Cash/Contract"].apply(lambda v: f"${v:,.0f}" if pd.notna(v) else "-")
+                return f"${v:.2f}"
+            return f"${v:.2f} (${v * 100 * int(n):,.0f})"
+        d["MaxLoss"] = [_ml(v, n) for v, n in zip(d["MaxLoss"], d["# of contracts"])]
+    elif "MaxLoss" in d.columns:
+        d["MaxLoss"] = d["MaxLoss"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
+    for c in ("CurrentPrice", "Width", "Spread_$"):
+        if c in d.columns:
+            d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     return d
