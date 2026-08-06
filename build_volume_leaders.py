@@ -103,13 +103,20 @@ def main():
                             "option_volume": ovol})
         try:
             put_passers, _ = ws.screen_puts(sym)
-            for r in put_passers:
-                r["Type"] = "Put"
             call_passers, _ = ws.screen_calls(sym, None)
-            for r in call_passers:
-                r["Type"] = "Call"
-            rows += put_passers + call_passers
-            print(f"{sym}: {len(put_passers)} puts, {len(call_passers)} calls qualifying")
+            # Only the single highest-open-interest qualifying put and call per
+            # ticker, not every contract that passes -- keeps the table to one
+            # put row + one call row per ticker.
+            if put_passers:
+                best_put = max(put_passers, key=lambda r: r.get("OpenInt") or 0)
+                best_put["Type"] = "Put"
+                rows.append(best_put)
+            if call_passers:
+                best_call = max(call_passers, key=lambda r: r.get("OpenInt") or 0)
+                best_call["Type"] = "Call"
+                rows.append(best_call)
+            print(f"{sym}: {len(put_passers)} puts, {len(call_passers)} calls qualifying "
+                  f"(showing top-OI each)")
         except Exception as e:
             print(f"{sym}: screen ERROR {e}", file=sys.stderr)
 
