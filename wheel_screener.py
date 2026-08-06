@@ -665,16 +665,16 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
 LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-               "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-               "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+               "AvgPremium", "MaxLoss", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+               "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
-            "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+            "AvgPremium", "MaxLoss", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+            "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "MaxLoss", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+             "Premium", "AvgPremium", "MaxLoss", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+             "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
