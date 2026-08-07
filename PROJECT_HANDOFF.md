@@ -20,33 +20,49 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 
 ## Files
 - **`app.py`** — Streamlit UI. Sections: Cash-Secured Puts, Covered Calls, Contract Lookup
-  (sell-side, any ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Legend.
-  Loads TRADIER_TOKEN from st.secrets; 30-min market-clock auto-refresh; editable criteria panels.
+  (sell-side, any ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Discover
+  (placed last -- see below), Legend. Loads TRADIER_TOKEN from st.secrets; 30-min market-clock
+  auto-refresh; editable criteria panels.
 - **`wheel_screener.py`** — the engine. Tradier data funcs, Black-Scholes, `evaluate_put`/`evaluate_call`,
   `screen_puts`/`screen_calls`, `lookup_contracts`, the Score, liquidity, cash/target columns,
   historical AvgPremium lookup, all config constants at the top.
 - **`spreads.py`** — multi-leg engine (credit spreads + iron condors). Reuses wheel_screener.
+- **`discover.py`** — shared logic (`run_discovery()`) for finding tickers OUTSIDE `PUT_TICKERS`,
+  from a broad ~7,000-ticker US-listed universe (not just the S&P 500), carrying the heaviest
+  options OPEN INTEREST right now (batched stock-volume quotes narrow the universe to 40 candidates,
+  then a real options-chain lookup sums actual open interest and ranks the top 5), screens those 5
+  with `screen_puts`/`spreads.screen_spreads` (calls are call credit spreads -- defined risk, since
+  these aren't real holdings) using the same criteria as the main screener plus a higher OI floor
+  (`DISCOVER_MIN_OI` = 5,000), and keeps only the single highest-OI qualifying put and call spread
+  per ticker. This is how a ticker you never added (e.g. PG, or a recent IPO not yet in any index)
+  can surface on its own if a contract is both liquid and qualifying. The universe comes from a
+  community-maintained GitHub mirror of Nasdaq/NYSE's listed-securities directory (`UNIVERSE_URL`);
+  if that's unreachable it falls back to the static `sp500_tickers.py` snapshot (Wikipedia; refresh
+  manually if stale). `app.py` calls `discover.run_discovery()` **live**, cached at `ttl=600` like
+  every other scan (30-min auto-refresh / "Refresh data" on demand) -- it's placed last on the page
+  since it scans ~7,000 tickers vs. ~20 for the sections above, so it's much slower and shouldn't
+  block the rest of the page from rendering first. Measured locally: a full run takes **~170s (under
+  3 min)**. Because `st.cache_data` is shared across all users/sessions (not per-visitor), only the
+  first page load after the 10-min cache expires pays that cost -- everyone else in that window gets
+  the cached result instantly. `ws.MIN_OPEN_INTEREST` is temporarily overridden during the scan and
+  restored in a `finally` block; this matters because the code now runs inside the long-lived
+  Streamlit process, not a one-shot script -- a leftover override would corrupt the Puts/Calls
+  sections' own screening on the next script rerun. Verified: restores to 1000 correctly.
 - **`build_history.py`** — offline job: pulls ~1yr of Tradier stock prices, models typical put/call
   premiums per ticker by OTM%/DTE bucket (realized-vol based, reported as a low-high range),
   writes `history_premiums.json`.
-- **`build_volume_leaders.py`** — offline job: finds tickers OUTSIDE `PUT_TICKERS`, from a broad
-  ~7,000-ticker US-listed universe (not just the S&P 500), carrying the heaviest options OPEN
-  INTEREST today (batched stock-volume quotes narrow the universe to 40 candidates, then a real
-  options-chain lookup sums actual open interest and ranks the top 5), screens those 5 with
-  `screen_puts`/`screen_calls` (calls evaluated hypothetically, no owned shares needed) using the
-  same criteria as the main screener plus a higher OI floor (`DISCOVER_MIN_OI` = 5,000), and keeps
-  only the single highest-OI qualifying put and call per ticker. Writes `volume_leaders.json`. This
-  is how a ticker you never added (e.g. PG, or a recent IPO not yet in any index) can surface on its
-  own if a contract is both liquid and qualifying. The universe comes from a community-maintained
-  GitHub mirror of Nasdaq/NYSE's listed-securities directory (`UNIVERSE_URL`); if that's unreachable
-  it falls back to the static `sp500_tickers.py` snapshot (Wikipedia; refresh manually if stale).
+- **`build_volume_leaders.py`** — thin CLI wrapper around `discover.run_discovery()`, writing
+  `volume_leaders.json`. No longer read by the live app in the normal path (that now scans live) --
+  kept only as a **fallback snapshot**: if the live scan errors inside the app, it falls back to
+  whatever this last wrote.
 - **`notify_email.py`** — headless run that emails all strategies (Gmail SMTP); market-hours guarded.
 - **`history_premiums.json`** — the precomputed premium table (committed; refreshed weekly).
-- **`volume_leaders.json`** — today's high-volume discovery results (committed; refreshed daily after close).
+- **`volume_leaders.json`** — fallback-only snapshot for Discover (committed; refreshed daily after
+  close by the Action below). Only used if the live in-app scan fails.
 - **`.github/workflows/screener-email.yml`** — emails every 30 min during market hours (weekdays).
 - **`.github/workflows/build-history.yml`** — rebuilds history_premiums.json weekly, commits it.
-- **`.github/workflows/build-volume-leaders.yml`** — rebuilds volume_leaders.json daily after the
-  close (weekdays 20:15 UTC), commits it. Has a manual "Run workflow" button too.
+- **`.github/workflows/build-volume-leaders.yml`** — rebuilds the fallback `volume_leaders.json`
+  daily after the close (weekdays 20:15 UTC), commits it. Has a manual "Run workflow" button too.
 - **`requirements.txt`** — streamlit, streamlit-autorefresh, yfinance, scipy, pandas, curl_cffi, requests.
 
 ## GitHub Secrets (Settings -> Secrets and variables -> Actions)
@@ -79,11 +95,16 @@ ROR / AnnROR / Width. No separate Cash/Contract column anymore -- MaxLoss covers
 ## Recent open items / ideas
 - After changing build_history.py to add call premiums, RE-RUN the "Build history table"
   Action so history_premiums.json has both put and call tables (calls/spreads AvgPremium need it).
-- "Find high-volume tickers" Action needs at least one manual "Run workflow" click after first
-  deploy (Actions tab) so `volume_leaders.json` exists before its daily 20:15 UTC schedule fires;
-  the app shows a friendly message in the meantime instead of erroring.
-- Discovery covers puts and calls (calls are hypothetical -- discovered tickers aren't real
-  holdings). Could extend the same two-stage ranking to multi-leg spreads later.
+- Discover now scans live inside the app (see `discover.py` above) instead of only reading a daily
+  snapshot -- it's much slower than the other sections (a full ~7,000-ticker scan; see timing note
+  in `discover.py`'s section above) since it runs the same broad scan the old offline Action did,
+  just inside the cached Streamlit call instead of a nightly job. The "Find high-volume tickers"
+  Action still runs daily and keeps `volume_leaders.json` fresh purely as a fallback in case the
+  live scan errors (Tradier hiccup, universe source down, etc.) -- no manual run needed for the app
+  to work, but running it once after a fresh clone gives a fallback ready from day one.
+- Discovery covers puts and call credit spreads (calls are credit spreads, not naked/covered calls,
+  since discovered tickers aren't real holdings). Could extend the same two-stage ranking to put
+  credit spreads / iron condors later.
 - Discovery's candidate pool (`CANDIDATE_POOL` = 40) and final leader count (`TOP_N` = 5) are both
   narrow by design (cost/speed tradeoff); a ticker outside the top 40 by stock volume, or outside
   the top 5 of those by open interest, is never screened even if it would otherwise qualify.

@@ -155,6 +155,23 @@ def cached_vix():
     return ws.get_vix()
 
 
+@st.cache_data(ttl=600, show_spinner="Scanning the market for high-open-interest tickers...")
+def scan_discover():
+    """Live, same cadence as everything else (30-min auto-refresh / on-demand,
+    ttl=600 like the other scan_* functions). Scans a broad non-watchlist
+    universe rather than just ~20 tickers, so this is much slower than the
+    other sections -- falls back to the last committed volume_leaders.json
+    snapshot (from the daily GitHub Action) if the live scan errors."""
+    import discover
+    try:
+        return discover.run_discovery(), None
+    except Exception as e:
+        d = ws.load_volume_leaders()
+        if d:
+            return d, str(e)
+        raise
+
+
 with st.sidebar:
     st.header("Watchlist")
     puts_txt = st.text_area("Put tickers (comma-separated)",
@@ -240,47 +257,6 @@ if ec:
     st.caption("Skipped: " + " | ".join(ec))
 
 st.markdown("---")
-st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
-st.caption("Daily background scan of a broad US-listed universe (not limited to the S&P 500) for the "
-           "tickers carrying the heaviest options open interest today, screened with the same criteria "
-           "as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name you "
-           "didn't add to the watchlist can still surface if one of its most liquid contracts qualifies. "
-           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't "
-           "hold shares of, so a spread caps the risk instead of leaving the upside uncovered. Refreshed "
-           "once a day via GitHub Actions (not live).")
-try:
-    _vl = ws.load_volume_leaders()
-    if _vl:
-        _leaders = _vl.get("leaders", [])
-        if _leaders:
-            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
-            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
-
-        st.markdown("**Puts**")
-        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
-        if len(_dp):
-            st.dataframe(ws._fmt(_dp), hide_index=True, use_container_width=True)
-            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
-                               "volume_leaders_puts.csv", "text/csv")
-        else:
-            st.write("None of today's highest-open-interest tickers currently qualify.")
-
-        st.markdown("**Call Credit Spreads (defined-risk)**")
-        _dc = sp._df(_vl.get("call_spreads", []))
-        if len(_dc):
-            _disp = _dc.drop(columns=["Strategy", "Put Legs"])
-            st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
-            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
-                               "volume_leaders_call_spreads.csv", "text/csv")
-        else:
-            st.write("None of today's highest-open-interest tickers currently qualify.")
-    else:
-        st.write("No scan yet - run the 'Find high-volume tickers' GitHub Action "
-                 "(Actions tab -> Run workflow), or wait for tomorrow's scheduled run.")
-except Exception as _e:
-    st.caption(f"(discover section unavailable: {_e})")
-
-st.markdown("---")
 st.header("Contract Lookup")
 st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
            "(cash-secured puts) or calls (covered calls, as if you held the shares) - even ones that don't pass "
@@ -335,6 +311,49 @@ for _key, _title in _SPREAD_SECTIONS:
         st.write("None qualify right now.")
 if es:
     st.caption("Skipped: " + " | ".join(es))
+
+st.markdown("---")
+st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
+st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500) for the tickers "
+           "carrying the heaviest options open interest right now, screened with the same criteria as "
+           "above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name you didn't "
+           "add to the watchlist can still surface if one of its most liquid contracts qualifies. Calls "
+           "here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
+           "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
+           "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
+           "last on the page since it scans far more tickers and is slower than the sections above.")
+try:
+    _vl, _dfallback = scan_discover()
+    if _dfallback:
+        st.caption(f"Live scan failed ({_dfallback}) -- showing the last daily-Action snapshot instead.")
+    if _vl:
+        _leaders = _vl.get("leaders", [])
+        if _leaders:
+            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
+            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
+
+        st.markdown("**Puts**")
+        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+        if len(_dp):
+            st.dataframe(ws._fmt(_dp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
+                               "volume_leaders_puts.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+
+        st.markdown("**Call Credit Spreads (defined-risk)**")
+        _dc = sp._df(_vl.get("call_spreads", []))
+        if len(_dc):
+            _disp = _dc.drop(columns=["Strategy", "Put Legs"])
+            st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
+                               "volume_leaders_call_spreads.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+    else:
+        st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
+except Exception as _e:
+    st.caption(f"(discover section unavailable: {_e})")
 
 st.markdown("---")
 st.header("Legend - criteria in effect")
