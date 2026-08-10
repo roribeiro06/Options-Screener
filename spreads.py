@@ -25,6 +25,8 @@ SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 90
 SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
+SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than wheel_screener's
+                            # CASH_TARGET (40,000) since multi-leg risk is defined/capped per contract.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "AvgPremium", "MaxLoss", "ROR_%", "AnnROR_%",
@@ -127,7 +129,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
             "AvgPremium": (f"${avg_credit[0]:.2f}-${avg_credit[1]:.2f}" if avg_credit else "-"),
-            "# of contracts": ws.contracts_for_target(max_loss * 100),
+            "# of contracts": ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET),
             "Spread_$": round(leg_bidask, 2),
             "OpenInt": int(oi), "EarningsDate": earn}
 

@@ -374,7 +374,8 @@ and spreads the estimated net credit (short leg minus long leg). Live Premium/Ma
 cheaper. Refreshed weekly; "-" means no history yet.
 
 **Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral
-(puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
+for puts/covered calls (strike x 100 / shares x 100), or ${getattr(sp, "SPREAD_CASH_TARGET", 25000):,} of max loss for
+spreads (max loss x 100) -- spreads use a lower target since their risk per contract is capped/defined.
 Premium, Max Profit, and MaxLoss all show $/share and, in parentheses, the total across that many contracts.
 MaxLoss = strike - premium for puts (worst case if assigned and the stock goes to zero); cost basis - premium for covered
 calls with a known cost basis ("-" without one, e.g. Contract Lookup); width - credit for spreads.
