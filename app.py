@@ -314,11 +314,15 @@ if es:
 
 st.markdown("---")
 st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
-st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500) for the tickers "
-           "carrying the heaviest options open interest right now, screened with the same criteria as "
-           "above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name you didn't "
-           "add to the watchlist can still surface if one of its most liquid contracts qualifies. Calls "
-           "here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
+st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500), screened with the "
+           "same criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so "
+           "a name you didn't add to the watchlist can still surface if one of its most liquid contracts "
+           "qualifies. Candidates come from two pools: tickers trading well above their own normal volume "
+           "today (**surge**, screened for both sides), and tickers that moved sharply in the last day on "
+           "real volume -- **up-movers** screened for puts only, **down-movers** screened for call credit "
+           "spreads only (fading the move, with likely-richer premium from the volatility). Every candidate, "
+           "surge or mover, still needs real open interest to qualify -- a price move never skips that check. "
+           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
            "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
            "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
            "last on the page since it scans far more tickers and is slower than the sections above.")
@@ -329,7 +333,16 @@ try:
     if _vl:
         _leaders = _vl.get("leaders", [])
         if _leaders:
-            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
+            def _leader_txt(l):
+                base = f"{l['ticker']} ({l['option_open_interest']:,} OI"
+                reason = l.get("reason", "surge")
+                pct = (l.get("change_pct") or 0) * 100
+                if reason == "up":
+                    base += f", +{pct:.1f}% today"
+                elif reason == "down":
+                    base += f", {pct:.1f}% today"
+                return base + ")"
+            _lead_txt = " | ".join(_leader_txt(l) for l in _leaders)
             st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
 
         st.markdown("**Puts**")
