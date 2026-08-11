@@ -258,17 +258,51 @@ def _nearest(value, buckets):
     return min(buckets, key=lambda b: abs(b - value)) if buckets else value
 
 
+def _bracket(value, buckets):
+    """The two buckets bracketing `value`, for interpolation instead of
+    nearest-neighbor snapping -- clamped at the ends (no extrapolation beyond
+    the grid). Snapping both a spread's short and long leg to the SAME nearest
+    bucket (common when they're close in OTM% -- e.g. a 5%-wide spread against
+    a 5-point bucket grid) erases the richness gradient between them, silently
+    collapsing the modeled credit toward zero even though the real strikes are
+    genuinely different distances from the money."""
+    buckets = sorted(buckets)
+    if value <= buckets[0]:
+        return buckets[0], buckets[0]
+    if value >= buckets[-1]:
+        return buckets[-1], buckets[-1]
+    for lo, hi in zip(buckets, buckets[1:]):
+        if lo <= value <= hi:
+            return lo, hi
+    return buckets[-1], buckets[-1]
+
+
+def _lerp_band(a, b, frac):
+    """Linearly interpolates between two [low, high] bands. Falls back to
+    whichever single band is available if only one side has data."""
+    if a is None or b is None:
+        return a if b is None else b
+    return [a[0] + (b[0] - a[0]) * frac, a[1] + (b[1] - a[1]) * frac]
+
+
+def _interp_band(table, key_lo, key_hi, lo, hi, value):
+    """Linearly interpolates a [low, high] band between two bucket keys."""
+    frac = 0.0 if hi == lo else (value - lo) / (hi - lo)
+    return _lerp_band(table.get(key_lo), table.get(key_hi), frac)
+
+
 def avg_premium_range(symbol, otm, dte, kind="put", iv=None):
     """Historical typical ANNUALIZED YIELD [low, high] (fractions, e.g. 0.082 =
-    8.2%) for this ticker at the nearest OTM%/DTE bucket, from
-    history_premiums.json -- directly comparable to AnnYield_%/AnnROR_%.
-    kind is 'put' or 'call'. If `iv` is given (the live contract's IV, as a
-    fraction), also tries the band conditioned on that vol regime -- "typical
-    yield given today's vol", not averaged across every vol regime the ticker
-    saw all year -- falling back to the unconditional OTM/DTE band if that finer
-    bucket doesn't exist (either not enough historical days at that vol level,
-    or an older file built before vol-conditioning existed). None if not
-    available at all."""
+    8.2%) for this ticker at this OTM%/DTE, interpolated between the bracketing
+    buckets in history_premiums.json (not snapped to whichever single bucket is
+    nearest -- see _bracket's docstring for why that matters) -- directly
+    comparable to AnnYield_%/AnnROR_%. kind is 'put' or 'call'. If `iv` is given
+    (the live contract's IV, as a fraction), also tries the band conditioned on
+    that vol regime -- "typical yield given today's vol", not averaged across
+    every vol regime the ticker saw all year -- falling back to the
+    unconditional OTM/DTE band if that finer bucket doesn't exist (either not
+    enough historical days at that vol level, or an older file built before
+    vol-conditioning existed). None if not available at all."""
     if not _HISTORY_METRIC_OK:
         return None
     tkr = (_HISTORY.get("tickers") or {}).get(symbol)
@@ -282,14 +316,26 @@ def avg_premium_range(symbol, otm, dte, kind="put", iv=None):
     if not table:
         return None
     meta = _HISTORY.get("_meta", {})
-    ob = _nearest(otm * 100, meta.get("otm_buckets", [5, 10, 15, 20, 25, 30]))
-    db = _nearest(dte, meta.get("dte_buckets", [7, 14, 21, 30, 45, 60, 90]))
+    otm_pct, dte_val = otm * 100, dte
+    ob_lo, ob_hi = _bracket(otm_pct, meta.get("otm_buckets", [5, 10, 15, 20, 25, 30]))
+    db_lo, db_hi = _bracket(dte_val, meta.get("dte_buckets", [7, 14, 21, 30, 45, 60, 90]))
+
+    def _lookup(suffix=""):
+        # Interpolate DTE first (at each bracketing OTM bucket), then interpolate
+        # those two DTE-interpolated results across OTM -- a small bilinear
+        # interpolation across the 2D (OTM, DTE) grid.
+        def _at_otm(ob):
+            return _interp_band(table, f"{int(ob)}|{int(db_lo)}{suffix}",
+                                f"{int(ob)}|{int(db_hi)}{suffix}", db_lo, db_hi, dte_val)
+        otm_frac = 0.0 if ob_hi == ob_lo else (otm_pct - ob_lo) / (ob_hi - ob_lo)
+        return _lerp_band(_at_otm(ob_lo), _at_otm(ob_hi), otm_frac)
+
     if iv is not None and iv > 0:
         ivb = _nearest(iv * 100, meta.get("iv_buckets", [15, 25, 35, 50, 70, 90, 120]))
-        vol_conditioned = table.get(f"{int(ob)}|{int(db)}|{int(ivb)}")
+        vol_conditioned = _lookup(suffix=f"|{int(ivb)}")
         if vol_conditioned is not None:
             return vol_conditioned
-    return table.get(f"{int(ob)}|{int(db)}")
+    return _lookup()
 
 
 def contracts_for_target(cash_per_contract, target=None):
