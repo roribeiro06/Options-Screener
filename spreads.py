@@ -106,7 +106,16 @@ def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot, short_i
     now returns an ANNUALIZED YIELD fraction per leg (conditioned on that leg's own
     live IV where enough historical data exists at that vol regime), so each leg's
     yield is de-annualized and converted back to a dollar premium at its own live
-    strike (spot, for calls -- matches evaluate_call's own basis) before netting."""
+    strike (spot, for calls -- matches evaluate_call's own basis) before netting.
+
+    Pairs each leg's SAME percentile rank (low-with-low, high-with-high), not
+    opposite extremes. Both legs are driven by the same underlying's realized-vol
+    series (build_history.py computes one rv per ticker, shared by every strike),
+    so a rich-vol day tends to make BOTH legs richer together -- not one leg rich
+    while the other happens to be at its calmest, which essentially never happens
+    on any real day. Pairing opposite extremes combines day-pairs that never
+    actually co-occurred, wildly overstating the range (this produced unusable
+    bands in practice, e.g. "0.0%-8877.9%" on a live iron condor)."""
     so = (spot - short_strike) / spot if kind == "put" else (short_strike - spot) / spot
     lo = (spot - long_strike) / spot if kind == "put" else (long_strike - spot) / spot
     s_yield = ws.avg_premium_range(sym, so, dte, kind, iv=short_iv)
@@ -119,8 +128,8 @@ def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot, short_i
         basis = own_strike if kind == "put" else spot
         return y * period * basis
 
-    credit_lo = max(0.0, _prem(s_yield[0], short_strike) - _prem(l_yield[1], long_strike))
-    credit_hi = max(0.0, _prem(s_yield[1], short_strike) - _prem(l_yield[0], long_strike))
+    credit_lo = max(0.0, _prem(s_yield[0], short_strike) - _prem(l_yield[0], long_strike))
+    credit_hi = max(0.0, _prem(s_yield[1], short_strike) - _prem(l_yield[1], long_strike))
     return (credit_lo, credit_hi)
 
 
