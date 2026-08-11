@@ -317,13 +317,16 @@ st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
 st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500), screened with the "
            "same criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so "
            "a name you didn't add to the watchlist can still surface if one of its most liquid contracts "
-           "qualifies. Candidates are tickers that moved sharply in the last day on real dollar volume -- "
-           "**up-movers** screened for puts only, **down-movers** screened for call credit spreads only "
-           "(fading the move, with likely-richer premium from the volatility). Both directions require at "
-           "least \\$25M/day in dollar volume (price x volume, not just a share count -- a cheap stock can "
-           "clear a share-count bar on trivial real activity) AND a market cap of at least \\$10B, so "
-           "thinly-capitalized or speculative names don't surface just because they moved a lot. Every "
-           "candidate still needs real open interest to qualify -- a price move never skips that check. "
+           "qualifies. Candidates come from two mechanisms: tickers trading well above their own normal "
+           "volume today (**surge**), and tickers that moved sharply in the last day on real dollar volume "
+           "(**movers**). Both require at least \\$25M/day in dollar volume (price x volume, not just a "
+           "share count -- a cheap stock can clear a share-count bar on trivial real activity) AND a market "
+           "cap of at least \\$10B, so thinly-capitalized or speculative names don't surface just because "
+           "they're liquid or moved a lot. However a ticker got in, it's then routed purely by its OWN "
+           "1-day % change today -- up gets screened for puts only, down for call credit spreads only "
+           "(fading the move, with likely-richer premium from the volatility) -- so a name is never screened "
+           "for both, even a surge candidate that didn't move much either direction. Every candidate still "
+           "needs real open interest to qualify -- none of the above skips that check. "
            "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
            "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
            "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
@@ -336,14 +339,10 @@ try:
         _leaders = _vl.get("leaders", [])
         if _leaders:
             def _leader_txt(l):
-                base = f"{l['ticker']} ({l['option_open_interest']:,} OI"
-                reason = l.get("reason", "surge")
                 pct = (l.get("change_pct") or 0) * 100
-                if reason == "up":
-                    base += f", +{pct:.1f}% today"
-                elif reason == "down":
-                    base += f", {pct:.1f}% today"
-                return base + ")"
+                sign = "+" if pct >= 0 else ""
+                src = l.get("source", "mover")
+                return f"{l['ticker']} ({l['option_open_interest']:,} OI, {sign}{pct:.1f}% today, {src})"
             _lead_txt = " | ".join(_leader_txt(l) for l in _leaders)
             st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
 
