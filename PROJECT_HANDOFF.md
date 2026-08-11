@@ -27,33 +27,32 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   `screen_puts`/`screen_calls`, `lookup_contracts`, the Score, liquidity, cash/target columns,
   historical AvgPremium lookup, all config constants at the top.
 - **`spreads.py`** — multi-leg engine (credit spreads + iron condors). Reuses wheel_screener.
-- **`discover.py`** — shared logic (`run_discovery()`) for finding tickers OUTSIDE `PUT_TICKERS`,
-  from a broad ~7,000-ticker US-listed universe (not just the S&P 500), via two candidate pools built
-  from one batched-quotes pass (price, volume, average volume, 1-day % change -- all free in that same
-  call): a **surge pool** (top `CANDIDATE_POOL` = 40 tickers by volume/average-volume, so today's
-  activity relative to the ticker's OWN normal wins, not raw share count -- otherwise the same
-  mega-caps crowd out everything every day) and a **movers pool** (top `MOVER_POOL` = 10 tickers by
-  1-day % move, up and down separately). Both pools require `MIN_DOLLAR_VOLUME` = \$25M/day (price x
-  avg volume, or price x today's volume if Tradier didn't return an average) -- a liquidity floor on
-  the STOCK itself, so a thin name can't get in on a big ratio or a big % move alone; a cheap stock
-  can clear a raw SHARE-count floor on trivial real dollar activity, which is why this is priced, not
-  a share count. Both pools ALSO require a live market cap >= `MIN_MARKET_CAP` = \$10B, via yfinance
+- **`discover.py`** — shared logic (`run_discovery()`) for finding tickers OUTSIDE `PUT_TICKERS` that
+  moved sharply today, from a broad ~7,000-ticker US-listed universe (not just the S&P 500), via one
+  batched-quotes pass (price, volume, average volume, 1-day % change -- all free in that same call): a
+  **movers pool** (top `MOVER_POOL` = 10 tickers by 1-day % move, up and down separately -- there used
+  to also be a volume-surge pool screened both ways, dropped in favor of a purely mover-based design so
+  every ticker's presence is explained by a real, directional move, and a name never shows up in both
+  the Puts and Call Spreads tables at once). Both directions require `MIN_DOLLAR_VOLUME` = \$25M/day
+  (price x avg volume, or price x today's volume if Tradier didn't return an average) -- a liquidity
+  floor on the STOCK itself, so a thin name can't get in on a big % move alone; a cheap stock can clear
+  a raw SHARE-count floor on trivial real dollar activity, which is why this is priced, not a share
+  count. Both directions ALSO require a live market cap >= `MIN_MARKET_CAP` = \$10B, via yfinance
   (Tradier's quotes don't include it) -- checked only against the already-ranked candidates (up to
-  `CANDIDATE_POOL` + 2 x `MOVER_POOL` names), never the full universe, since a per-ticker cap lookup
-  isn't cheap enough to run against ~7,000 tickers. This catches thinly-capitalized/speculative names
-  that a pure liquidity floor can't -- a stock can be perfectly liquid while still being small (e.g.
-  HTZ, ~\$900M market cap, was surfacing before this existed despite clearing the old volume floor
-  easily on its low share price). Every pool candidate then gets one real options-chain lookup to sum
-  actual open interest, which ranks the surge pool's top `TOP_N` = 5 and each movers pool's top
-  `TOP_N_MOVERS` = 3 (a ticker already in the surge pool isn't double-counted). Those get screened
-  with `screen_puts`/`spreads.screen_spreads` (calls are call credit spreads --
-  defined risk, since these aren't real holdings) using the same criteria as the main screener plus a
-  higher OI floor (`DISCOVER_MIN_OI` = 5,000) applied identically regardless of pool: **surge**
-  tickers are screened for both puts and call spreads; **up-movers** for puts only (selling downside
-  protection into strength, where the move plus likely-elevated IV give more cushion); **down-movers**
-  for call spreads only (capping upside into a name that just sold off, IV often still elevated). Keeps
-  only the single highest-OI qualifying put and call spread per ticker. This is how a ticker you never
-  added (e.g. PG, a recent IPO, or a name that just moved hard on real volume) can surface on its own.
+  2 x `MOVER_POOL` names), never the full universe, since a per-ticker cap lookup isn't cheap enough to
+  run against ~7,000 tickers. This catches thinly-capitalized/speculative names that a pure liquidity
+  floor can't -- a stock can be perfectly liquid while still being small (e.g. HTZ, ~\$900M market cap,
+  was surfacing before this existed despite clearing the old volume floor easily on its low share
+  price). Every surviving candidate then gets one real options-chain lookup to sum actual open
+  interest, which ranks each direction's top `TOP_N_MOVERS` = 3. Those get screened with
+  `screen_puts`/`spreads.screen_spreads` (calls are call credit spreads -- defined risk, since these
+  aren't real holdings) using the same criteria as the main screener plus a higher OI floor
+  (`DISCOVER_MIN_OI` = 5,000): **up-movers** for puts only (selling downside protection into strength,
+  where the move plus likely-elevated IV give more cushion); **down-movers** for call spreads only
+  (capping upside into a name that just sold off, IV often still elevated). A ticker can't move both up
+  and down the same day, so there's no overlap to dedup between the two. Keeps only the single
+  highest-OI qualifying put and call spread per ticker. This is how a ticker you never added (e.g. a
+  name that just moved hard on real volume) can surface on its own.
   The universe comes from a community-maintained GitHub mirror of Nasdaq/NYSE's listed-securities
   directory (`UNIVERSE_URL`); if that's unreachable it falls back to the static `sp500_tickers.py`
   snapshot (Wikipedia; refresh manually if stale). `app.py` calls `discover.run_discovery()` **live**,
@@ -148,18 +147,19 @@ Cash/Contract column anymore (MaxLoss covers that role) and no separate Spread_$
   since discovered tickers aren't real holdings). Could extend the same up/down-mover routing to put
   credit spreads / iron condors later (currently only single-leg puts and call spreads are routed by
   mover direction).
-- Discovery's pools are all narrow by design (cost/speed/liquidity tradeoff): `CANDIDATE_POOL` = 40
-  surge names, `MOVER_POOL` = 10 per direction, `TOP_N` = 5 and `TOP_N_MOVERS` = 3 by open interest,
-  `MIN_DOLLAR_VOLUME` = \$25M/day and `MIN_MARKET_CAP` = \$10B as the liquidity/size floors on every
-  pool. A ticker outside these is never screened even if it would otherwise qualify. If the movers
-  idea (or the surge pool) doesn't surface much (markets have quiet days), consider loosening
-  `MIN_DOLLAR_VOLUME`/`MIN_MARKET_CAP` or widening `MOVER_POOL` before removing either floor entirely
-  -- they're there specifically to keep illiquid or thinly-capitalized names out (see `discover.py`'s
-  section above for the HTZ example that prompted adding `MIN_MARKET_CAP`).
-- The market-cap filter costs one yfinance call per surviving candidate (up to `CANDIDATE_POOL` + 2 x
-  `MOVER_POOL` = 60 in the worst case), adding real time to an already-slow scan on top of the movers
-  pools' extra options-chain lookups -- worth re-timing a live run and updating the timing note above
-  if it's grown enough to matter.
+- Discovery's pools are narrow by design (cost/speed/liquidity tradeoff): `MOVER_POOL` = 10 per
+  direction, `TOP_N_MOVERS` = 3 by open interest, `MIN_DOLLAR_VOLUME` = \$25M/day and
+  `MIN_MARKET_CAP` = \$10B as the liquidity/size floors on both directions. A ticker outside these is
+  never screened even if it would otherwise qualify. If it doesn't surface much (markets have quiet
+  days), consider loosening `MIN_DOLLAR_VOLUME`/`MIN_MARKET_CAP` or widening `MOVER_POOL` before
+  removing either floor entirely -- they're there specifically to keep illiquid or thinly-capitalized
+  names out (see `discover.py`'s section above for the HTZ example that prompted adding
+  `MIN_MARKET_CAP`). There used to also be a volume-surge pool (screened both puts and call spreads
+  regardless of direction); it was dropped in favor of a purely mover-based design so every result is
+  explained by an actual directional move, and a ticker never shows up in both tables at once.
+- The market-cap filter costs one yfinance call per surviving candidate (up to 2 x `MOVER_POOL` = 20
+  in the worst case), adding real time to an already-slow scan on top of the options-chain lookups --
+  worth re-timing a live run and updating the timing note above if it's grown enough to matter.
 - Optional: index OTM floor could be tightened below 5% to surface richer index puts (safety trade-off).
 - Optional: extend AvgPremium to a paid historical-IV source for exactness (currently realized-vol estimate).
 
