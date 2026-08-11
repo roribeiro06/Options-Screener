@@ -69,7 +69,13 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   lookback year the way raw dollar premiums would be, and it's directly comparable to the live
   AnnYield_%/AnnROR_% columns. `_meta.metric` in the JSON marks this format (`"ann_yield"`); the
   screener treats an older $-format file (or one missing that marker) as unavailable rather than
-  misreading it.
+  misreading it. Also conditions each OTM/DTE band on the realized-vol regime that was in effect
+  (`IV_BUCKETS`), stored as extra `"otm|dte|volbucket"` keys alongside the plain `"otm|dte"` one --
+  a live lookup with an IV to condition on (`avg_premium_range(..., iv=...)`) gets "typical yield
+  given today's vol", not averaged across every vol regime the ticker saw all year, PROVIDED that
+  vol bucket had enough historical days (`MIN_VOL_BUCKET_SAMPLES` = 20) to trust the percentile;
+  otherwise it falls back to the unconditional band automatically. Purely additive -- a file built
+  before this existed just lacks the vol-conditioned keys and every lookup falls back cleanly.
 - **`build_volume_leaders.py`** — thin CLI wrapper around `discover.run_discovery()`, writing
   `volume_leaders.json`. No longer read by the live app in the normal path (that now scans live) --
   kept only as a **fallback snapshot**: if the live scan errors inside the app, it falls back to
@@ -117,11 +123,12 @@ Cash/Contract column anymore (MaxLoss covers that role) and no separate Spread_$
 (the bid-ask range on Premium/Max Profit conveys the same info).
 
 ## Recent open items / ideas
-- **AvgPremium's format just changed from $ to annualized yield %** (see `build_history.py`) --
-  `history_premiums.json` needs a fresh run of the "Build history table" Action to be regenerated
-  in the new format. Until that runs, `avg_premium_range()` will correctly show "-" everywhere
-  (the `_meta.metric` schema check makes the old $-format file read as unavailable rather than
-  being misinterpreted as yields) -- safe, but AvgPremium is blank until the Action runs.
+- AvgPremium's format changed from $ to annualized yield % (see `build_history.py`) -- the "Build
+  history table" Action has already been re-run once for this, so `history_premiums.json` is in
+  the new format. It just picked up a SECOND enhancement (IV-conditioned buckets, same file) which
+  is purely additive -- no rebuild is strictly required (falls back to the unconditional band
+  automatically), but re-running the Action again gets the vol-conditioned bands populated so
+  AvgPremium reflects the ticker's current vol regime instead of its whole-year average.
 - Discover now scans live inside the app (see `discover.py` above) instead of only reading a daily
   snapshot -- it's much slower than the other sections (a full ~7,000-ticker scan; see timing note
   in `discover.py`'s section above) since it runs the same broad scan the old offline Action did,

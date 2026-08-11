@@ -258,11 +258,17 @@ def _nearest(value, buckets):
     return min(buckets, key=lambda b: abs(b - value)) if buckets else value
 
 
-def avg_premium_range(symbol, otm, dte, kind="put"):
+def avg_premium_range(symbol, otm, dte, kind="put", iv=None):
     """Historical typical ANNUALIZED YIELD [low, high] (fractions, e.g. 0.082 =
     8.2%) for this ticker at the nearest OTM%/DTE bucket, from
     history_premiums.json -- directly comparable to AnnYield_%/AnnROR_%.
-    kind is 'put' or 'call'. None if not available."""
+    kind is 'put' or 'call'. If `iv` is given (the live contract's IV, as a
+    fraction), also tries the band conditioned on that vol regime -- "typical
+    yield given today's vol", not averaged across every vol regime the ticker
+    saw all year -- falling back to the unconditional OTM/DTE band if that finer
+    bucket doesn't exist (either not enough historical days at that vol level,
+    or an older file built before vol-conditioning existed). None if not
+    available at all."""
     if not _HISTORY_METRIC_OK:
         return None
     tkr = (_HISTORY.get("tickers") or {}).get(symbol)
@@ -278,6 +284,11 @@ def avg_premium_range(symbol, otm, dte, kind="put"):
     meta = _HISTORY.get("_meta", {})
     ob = _nearest(otm * 100, meta.get("otm_buckets", [5, 10, 15, 20, 25, 30]))
     db = _nearest(dte, meta.get("dte_buckets", [7, 14, 21, 30, 45, 60, 90]))
+    if iv is not None and iv > 0:
+        ivb = _nearest(iv * 100, meta.get("iv_buckets", [15, 25, 35, 50, 70, 90, 120]))
+        vol_conditioned = table.get(f"{int(ob)}|{int(db)}|{int(ivb)}")
+        if vol_conditioned is not None:
+            return vol_conditioned
     return table.get(f"{int(ob)}|{int(db)}")
 
 
@@ -546,7 +557,7 @@ def screen_puts(symbol):
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol),
                                is_index=(symbol in INDEX_TICKERS))
-            _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte)
+            _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte, iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                    "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
@@ -584,7 +595,7 @@ def screen_calls(symbol, cost_basis):
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
                                  "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                 cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
-            _apr = avg_premium_range(symbol, (o["strike"] - price) / price, dte, "call")
+            _apr = avg_premium_range(symbol, (o["strike"] - price) / price, dte, "call", iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
@@ -648,7 +659,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 res = evaluate_put({"strike": k, "premium": float(premium),
                                     "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                    delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx)
-                _apr = avg_premium_range(symbol, (price - k) / price, dte, "put")
+                _apr = avg_premium_range(symbol, (price - k) / price, dte, "put", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                        "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
@@ -659,7 +670,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 res = evaluate_call({"strike": k, "premium": float(premium),
                                      "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                     None, delta=o["delta"], otm_min=otm_min_for(symbol))
-                _apr = avg_premium_range(symbol, (k - price) / price, dte, "call")
+                _apr = avg_premium_range(symbol, (k - price) / price, dte, "call", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
                        "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),

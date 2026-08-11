@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 build_history.py -- precompute a lookup of TYPICAL annualized yield per ticker,
-bucketed by OTM% and DTE, from ~1 year of Tradier historical STOCK prices.
+bucketed by OTM%, DTE, and (where enough data exists) the volatility regime that
+was in effect, from ~1 year of Tradier historical STOCK prices.
 
 We only have stock-price history (free via Tradier), so we estimate yields from
 REALIZED volatility. Realized vol runs a bit below the implied vol that actually
@@ -21,6 +22,21 @@ with "expensive because the price level was just higher that month". It's also
 simpler: the yield ratio doesn't depend on the daily price series at all, only on
 the trailing realized-vol path, so there's no need to pair prices with vols.
 
+Vol-conditioned buckets: for each (OTM%, DTE) combo, the plain "otm|dte" band is
+computed from every day's yield regardless of what volatility that day had --
+mixing calm-market days with turbulent ones. We ALSO compute the same band
+conditioned on the day's own realized vol falling in one of IV_BUCKETS (e.g.
+"5|45|50" = 5% OTM, 45 DTE, ~50% vol regime), so a live lookup can ask for the
+typical yield GIVEN the vol environment right now, not averaged across every vol
+environment the ticker saw all year. This needs enough days in that vol bucket to
+be a reliable percentile estimate (MIN_VOL_BUCKET_SAMPLES) -- calm ETFs may never
+see a 60%+ vol day, volatile growth names may rarely see a sub-25% one, so most
+tickers only get vol-conditioned data across the vol range they actually trade in.
+Below that threshold, or when the live caller doesn't have an IV to condition on,
+avg_premium_range() falls back to the plain "otm|dte" band -- this is purely
+additive, an older file (or one that hasn't been rebuilt since this was added)
+just lacks the "otm|dte|vol" keys and every lookup falls back automatically.
+
 Output: history_premiums.json (committed to the repo; the screener reads it).
 Run weekly via GitHub Actions. Needs TRADIER_TOKEN in the environment.
 """
@@ -38,6 +54,9 @@ RV_WINDOW     = 30            # rolling trading days for realized volatility
 IV_UPLIFT     = 1.25         # lift realized-vol yield toward implied-vol level (~25% VRP)
 OTM_BUCKETS   = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
 DTE_BUCKETS   = [7, 14, 21, 30, 45, 60, 90]
+IV_BUCKETS    = [0.15, 0.25, 0.35, 0.50, 0.70, 0.90, 1.20]  # realized-vol regimes
+MIN_VOL_BUCKET_SAMPLES = 20   # below this many days in a vol bucket, the percentile
+                              # is too noisy to trust -- fall back to the unconditional band
 OUT           = "history_premiums.json"
 METRIC        = "ann_yield"   # schema marker -- lets the screener detect and ignore
                               # an older $-premium-format file rather than misread it
@@ -108,11 +127,28 @@ def percentile(sorted_vals, p):
     return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (k - lo)
 
 
+def _band(yields):
+    ys = sorted(yields)
+    return [round(percentile(ys, 0.25), 4), round(percentile(ys, 0.75) * IV_UPLIFT, 4)]
+
+
 def build_ticker(symbol):
     closes = daily_closes(symbol)
     if len(closes) < RV_WINDOW + 20:
         return None
     rv = rolling_rv(closes, RV_WINDOW)
+
+    # Group the days by which vol bucket their OWN realized vol falls nearest to,
+    # once per ticker (not per OTM/DTE -- vol-bucket membership doesn't depend on
+    # either). Buckets a calm ticker never visits (or a volatile one rarely visits
+    # at the low end) simply stay empty and get skipped below.
+    by_vol_bucket = {}
+    for sigma in rv:
+        vb = ws._nearest(sigma, IV_BUCKETS)
+        by_vol_bucket.setdefault(vb, []).append(sigma)
+    usable_buckets = {vb: sigs for vb, sigs in by_vol_bucket.items()
+                      if len(sigs) >= MIN_VOL_BUCKET_SAMPLES}
+
     put_t, call_t = {}, {}
     for otm in OTM_BUCKETS:
         for dte in DTE_BUCKETS:
@@ -121,10 +157,12 @@ def build_ticker(symbol):
             key = f"{int(otm * 100)}|{dte}"
             # Yield ratio depends only on OTM%, T, and that day's vol -- not on the
             # stock's price level -- so we only need the vol series, not the prices.
-            puts = sorted(put_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
-            calls = sorted(call_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
-            put_t[key] = [round(percentile(puts, 0.25), 4), round(percentile(puts, 0.75) * IV_UPLIFT, 4)]
-            call_t[key] = [round(percentile(calls, 0.25), 4), round(percentile(calls, 0.75) * IV_UPLIFT, 4)]
+            put_t[key] = _band(put_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
+            call_t[key] = _band(call_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
+            for vb, sigs in usable_buckets.items():
+                vkey = f"{key}|{int(round(vb * 100))}"
+                put_t[vkey] = _band(put_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in sigs)
+                call_t[vkey] = _band(call_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in sigs)
     return {"put": put_t, "call": call_t}
 
 
@@ -137,6 +175,7 @@ def main():
                      "metric": METRIC,
                      "otm_buckets": [int(o * 100) for o in OTM_BUCKETS],
                      "dte_buckets": DTE_BUCKETS,
+                     "iv_buckets": [int(round(b * 100)) for b in IV_BUCKETS],
                      "iv_uplift": IV_UPLIFT,
                      "lookback_days": LOOKBACK_DAYS},
            "tickers": {}}

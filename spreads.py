@@ -100,16 +100,17 @@ def _leg_liquidity(*legs):
     return min(ois) if ois else 0
 
 
-def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot):
+def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot, short_iv=None, long_iv=None):
     """Estimated typical PERIOD (not yet annualized) net credit [low, high] in
     dollars for one side (put or call) of a spread. wheel_screener.avg_premium_range
-    now returns an ANNUALIZED YIELD fraction per leg, so each leg's yield is
-    de-annualized and converted back to a dollar premium at its own live strike
-    (spot, for calls -- matches evaluate_call's own basis) before netting."""
+    now returns an ANNUALIZED YIELD fraction per leg (conditioned on that leg's own
+    live IV where enough historical data exists at that vol regime), so each leg's
+    yield is de-annualized and converted back to a dollar premium at its own live
+    strike (spot, for calls -- matches evaluate_call's own basis) before netting."""
     so = (spot - short_strike) / spot if kind == "put" else (short_strike - spot) / spot
     lo = (spot - long_strike) / spot if kind == "put" else (long_strike - spot) / spot
-    s_yield = ws.avg_premium_range(sym, so, dte, kind)
-    l_yield = ws.avg_premium_range(sym, lo, dte, kind)
+    s_yield = ws.avg_premium_range(sym, so, dte, kind, iv=short_iv)
+    l_yield = ws.avg_premium_range(sym, lo, dte, kind, iv=long_iv)
     if not (s_yield and l_yield) or dte <= 0:
         return None
     period = dte / 365.0
@@ -192,7 +193,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             else:
                 strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
             oi = _leg_liquidity(s["short"], s["long"])
-            _acd = _avg_credit_dollars(sym, dte, opt_type, sk, s["long_strike"], spot)
+            _acd = _avg_credit_dollars(sym, dte, opt_type, sk, s["long_strike"], spot,
+                                       short_iv=s["short"].get("iv"), long_iv=s["long"].get("iv"))
             acr = _ann_ror_range(_acd, s["width"], dte)
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
                              s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
@@ -231,8 +233,10 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             continue
         iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
         oi = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
-        _pcd = _avg_credit_dollars(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot)
-        _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot)
+        _pcd = _avg_credit_dollars(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot,
+                                   short_iv=ps["short"].get("iv"), long_iv=ps["long"].get("iv"))
+        _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot,
+                                   short_iv=cs["short"].get("iv"), long_iv=cs["long"].get("iv"))
         if _pcd and _ccd:
             _combined_credit = (_pcd[0] + _ccd[0], _pcd[1] + _ccd[1])
             acr = _ann_ror_range(_combined_credit, width, dte)

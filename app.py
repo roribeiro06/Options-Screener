@@ -384,8 +384,10 @@ MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR a
 **AvgPremium** = the typical ANNUALIZED YIELD this ticker has carried at that OTM%/DTE over the past year (not a dollar amount),
 estimated from realized volatility (so it runs a touch low vs actual implied vol) - a "low%-high%" band, directly comparable to
 **AnnYield_%** (puts/calls) or **AnnROR_%** (spreads, built from each leg's yield band converted back to a credit at the live
-strikes/width). Live AnnYield_%/AnnROR_% above the band = richer than normal right now, below = cheaper. Refreshed weekly;
-"-" means no history yet.
+strikes/width). Where there's enough history at the ticker's CURRENT vol level, the band is also conditioned on live IV - "typical
+yield when vol was around what it is right now", not averaged across every vol regime the ticker saw all year - falling back to
+the OTM/DTE-only band otherwise. Live AnnYield_%/AnnROR_% above the band = richer than normal right now, below = cheaper.
+Refreshed weekly; "-" means no history yet.
 
 **Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral
 for puts/covered calls (strike x 100 / shares x 100), or \${getattr(sp, "SPREAD_CASH_TARGET", 25000):,} of max loss for
