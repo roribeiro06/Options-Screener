@@ -100,16 +100,42 @@ def _leg_liquidity(*legs):
     return min(ois) if ois else 0
 
 
-def _avg_credit_range(sym, dte, kind, short_strike, long_strike, spot):
-    """Estimated typical net credit [low, high] for one credit spread, from the
-    historical per-leg premium table (short premium minus long premium)."""
+def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot):
+    """Estimated typical PERIOD (not yet annualized) net credit [low, high] in
+    dollars for one side (put or call) of a spread. wheel_screener.avg_premium_range
+    now returns an ANNUALIZED YIELD fraction per leg, so each leg's yield is
+    de-annualized and converted back to a dollar premium at its own live strike
+    (spot, for calls -- matches evaluate_call's own basis) before netting."""
     so = (spot - short_strike) / spot if kind == "put" else (short_strike - spot) / spot
     lo = (spot - long_strike) / spot if kind == "put" else (long_strike - spot) / spot
-    s = ws.avg_premium_range(sym, so, dte, kind)
-    l = ws.avg_premium_range(sym, lo, dte, kind)
-    if not (s and l):
+    s_yield = ws.avg_premium_range(sym, so, dte, kind)
+    l_yield = ws.avg_premium_range(sym, lo, dte, kind)
+    if not (s_yield and l_yield) or dte <= 0:
         return None
-    return (max(0.0, s[0] - l[1]), max(0.0, s[1] - l[0]))
+    period = dte / 365.0
+
+    def _prem(y, own_strike):
+        basis = own_strike if kind == "put" else spot
+        return y * period * basis
+
+    credit_lo = max(0.0, _prem(s_yield[0], short_strike) - _prem(l_yield[1], long_strike))
+    credit_hi = max(0.0, _prem(s_yield[1], short_strike) - _prem(l_yield[0], long_strike))
+    return (credit_lo, credit_hi)
+
+
+def _ann_ror_range(credit_range, width, dte):
+    """Converts a period $ credit range into an annualized ROR range against
+    `width` -- same math the live Max Profit/AnnROR_% uses (ROR = credit /
+    (width - credit), annualized by 365/dte). Directly comparable to AnnROR_%."""
+    if not credit_range or width <= 0 or dte <= 0:
+        return None
+    credit_lo, credit_hi = credit_range
+    max_loss_lo = width - credit_lo   # low credit -> high max loss -> worst (lowest) ROR
+    max_loss_hi = width - credit_hi   # high credit -> low max loss -> best (highest) ROR
+    if max_loss_lo <= 0 or max_loss_hi <= 0:
+        return None
+    ann = 365.0 / dte
+    return ((credit_lo / max_loss_lo) * ann, (credit_hi / max_loss_hi) * ann)
 
 
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
@@ -128,7 +154,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
-            "AvgPremium": (f"${avg_credit[0]:.2f}-${avg_credit[1]:.2f}" if avg_credit else "-"),
+            "AvgPremium": (f"{avg_credit[0]*100:.1f}%-{avg_credit[1]*100:.1f}%" if avg_credit else "-"),
             "# of contracts": ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET),
             "OpenInt": int(oi), "EarningsDate": earn}
 
@@ -166,7 +192,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             else:
                 strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
             oi = _leg_liquidity(s["short"], s["long"])
-            acr = _avg_credit_range(sym, dte, opt_type, sk, s["long_strike"], spot)
+            _acd = _avg_credit_dollars(sym, dte, opt_type, sk, s["long_strike"], spot)
+            acr = _ann_ror_range(_acd, s["width"], dte)
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
                              s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
                              s["short"].get("iv") or 0, otm, oi, acr)
@@ -204,9 +231,13 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             continue
         iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
         oi = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
-        _pac = _avg_credit_range(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot)
-        _cac = _avg_credit_range(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot)
-        acr = (_pac[0] + _cac[0], _pac[1] + _cac[1]) if (_pac and _cac) else None
+        _pcd = _avg_credit_dollars(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot)
+        _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot)
+        if _pcd and _ccd:
+            _combined_credit = (_pcd[0] + _ccd[0], _pcd[1] + _ccd[1])
+            acr = _ann_ror_range(_combined_credit, width, dte)
+        else:
+            acr = None
         r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",

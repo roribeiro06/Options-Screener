@@ -61,14 +61,21 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   Streamlit process, not a one-shot script -- a leftover override would corrupt the Puts/Calls
   sections' own screening on the next script rerun.
 - **`build_history.py`** — offline job: pulls ~1yr of Tradier stock prices, models typical put/call
-  premiums per ticker by OTM%/DTE bucket (realized-vol based, reported as a low-high range),
-  writes `history_premiums.json`.
+  **annualized yield** (not dollar premium) per ticker by OTM%/DTE bucket, reported as a low-high
+  range (realized-vol basis, 25th-75th percentile, high end nudged up by `IV_UPLIFT` toward implied
+  vol), writes `history_premiums.json`. Yield, not dollars, because a Black-Scholes premium as a
+  fraction of strike (puts) or spot (calls) is scale-invariant -- it depends only on OTM%/time/vol,
+  never the stock's price level -- so it isn't distorted by the stock having trended over the
+  lookback year the way raw dollar premiums would be, and it's directly comparable to the live
+  AnnYield_%/AnnROR_% columns. `_meta.metric` in the JSON marks this format (`"ann_yield"`); the
+  screener treats an older $-format file (or one missing that marker) as unavailable rather than
+  misreading it.
 - **`build_volume_leaders.py`** — thin CLI wrapper around `discover.run_discovery()`, writing
   `volume_leaders.json`. No longer read by the live app in the normal path (that now scans live) --
   kept only as a **fallback snapshot**: if the live scan errors inside the app, it falls back to
   whatever this last wrote.
 - **`notify_email.py`** — headless run that emails all strategies (Gmail SMTP); market-hours guarded.
-- **`history_premiums.json`** — the precomputed premium table (committed; refreshed weekly).
+- **`history_premiums.json`** — the precomputed annualized-yield table (committed; refreshed weekly).
 - **`volume_leaders.json`** — fallback-only snapshot for Discover (committed; refreshed daily after
   close by the Action below). Only used if the live in-app scan fails.
 - **`.github/workflows/screener-email.yml`** — emails every 30 min during market hours (weekdays).
@@ -100,17 +107,21 @@ Streamlit app Secrets need `TRADIER_TOKEN` (and optionally `TRADIER_BASE`).
 ## Columns on the tables
 Ticker, price, strike, expiration, DTE, OTM%, Premium (shown as a $worst-$best bid-ask range,
 i.e. sell-at-bid/buy-at-ask vs sell-at-ask/buy-at-bid, with the total across # of contracts in
-parentheses for each end), AvgPremium (historical low-high band), yields, Delta/POP, IV, Score,
-MaxLoss ($/share + total, same format: strike - premium for puts, cost basis - premium for covered
-calls with a known cost basis else "-", width - credit for spreads), # of contracts (to reach
+parentheses for each end), AvgPremium (historical ANNUALIZED YIELD as a low%-high% band, directly
+comparable to AnnYield_%/AnnROR_% -- NOT a dollar amount, see `build_history.py`), yields, Delta/POP,
+IV, Score, MaxLoss ($/share + total, same format: strike - premium for puts, cost basis - premium for
+covered calls with a known cost basis else "-", width - credit for spreads), # of contracts (to reach
 CASH_TARGET for puts/calls, SPREAD_CASH_TARGET for spreads), OpenInt, Volume. Spreads show Max
 Profit the same way as Premium (as a $worst-$best range) plus ROR / AnnROR / Width. No separate
 Cash/Contract column anymore (MaxLoss covers that role) and no separate Spread_$ liquidity column
 (the bid-ask range on Premium/Max Profit conveys the same info).
 
 ## Recent open items / ideas
-- After changing build_history.py to add call premiums, RE-RUN the "Build history table"
-  Action so history_premiums.json has both put and call tables (calls/spreads AvgPremium need it).
+- **AvgPremium's format just changed from $ to annualized yield %** (see `build_history.py`) --
+  `history_premiums.json` needs a fresh run of the "Build history table" Action to be regenerated
+  in the new format. Until that runs, `avg_premium_range()` will correctly show "-" everywhere
+  (the `_meta.metric` schema check makes the old $-format file read as unavailable rather than
+  being misinterpreted as yields) -- safe, but AvgPremium is blank until the Action runs.
 - Discover now scans live inside the app (see `discover.py` above) instead of only reading a daily
   snapshot -- it's much slower than the other sections (a full ~7,000-ticker scan; see timing note
   in `discover.py`'s section above) since it runs the same broad scan the old offline Action did,

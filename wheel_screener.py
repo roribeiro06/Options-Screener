@@ -236,6 +236,11 @@ def _load_history():
 
 
 _HISTORY = _load_history()
+# build_history.py switched from storing a $ premium band to an annualized-yield
+# fraction band (comparable to AnnYield_%/AnnROR_% directly). A file built before
+# that change (or missing this marker) is treated as unavailable rather than
+# misread -- a $8.23 read as a 823% yield would be a silent, dangerous error.
+_HISTORY_METRIC_OK = _HISTORY.get("_meta", {}).get("metric") == "ann_yield"
 
 
 def load_volume_leaders():
@@ -254,9 +259,12 @@ def _nearest(value, buckets):
 
 
 def avg_premium_range(symbol, otm, dte, kind="put"):
-    """Historical typical option premium [low, high] for this ticker at the nearest
-    OTM%/DTE bucket, from history_premiums.json. kind is 'put' or 'call'.
-    None if not available."""
+    """Historical typical ANNUALIZED YIELD [low, high] (fractions, e.g. 0.082 =
+    8.2%) for this ticker at the nearest OTM%/DTE bucket, from
+    history_premiums.json -- directly comparable to AnnYield_%/AnnROR_%.
+    kind is 'put' or 'call'. None if not available."""
+    if not _HISTORY_METRIC_OK:
+        return None
     tkr = (_HISTORY.get("tickers") or {}).get(symbol)
     if not tkr:
         return None
@@ -541,7 +549,7 @@ def screen_puts(symbol):
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte)
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                   "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                   "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
                    "MaxLoss": round(o["strike"] - premium, 2),
                    "# of contracts": contracts_for_target(o["strike"] * 100),
                    **_liq(o), **res}
@@ -580,7 +588,7 @@ def screen_calls(symbol, cost_basis):
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
-                   "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                   "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
                    "MaxLoss": (round(cost_basis - premium, 2) if cost_basis is not None else float("nan")),
                    "# of contracts": contracts_for_target(price * 100),
                    **_liq(o), **res}
@@ -643,7 +651,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 _apr = avg_premium_range(symbol, (price - k) / price, dte, "put")
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                       "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                       "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
                        "MaxLoss": round(k - premium, 2),
                        "# of contracts": contracts_for_target(k * 100),
                        **_liq(o), **res}
@@ -654,7 +662,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 _apr = avg_premium_range(symbol, (k - price) / price, dte, "call")
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                       "AvgPremium": (f"${_apr[0]:.2f}-${_apr[1]:.2f}" if _apr else "-"),
+                       "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
                        "MaxLoss": float("nan"),  # no cost basis in Contract Lookup -- can't bound the loss
                        "# of contracts": contracts_for_target(price * 100),
                        **_liq(o), **res}

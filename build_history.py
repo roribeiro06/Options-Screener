@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
 """
-build_history.py -- precompute a lookup of TYPICAL put premiums per ticker,
+build_history.py -- precompute a lookup of TYPICAL annualized yield per ticker,
 bucketed by OTM% and DTE, from ~1 year of Tradier historical STOCK prices.
 
-We only have stock-price history (free via Tradier), so we estimate premiums from
+We only have stock-price history (free via Tradier), so we estimate yields from
 REALIZED volatility. Realized vol runs a bit below the implied vol that actually
-prices options, so a single number would understate the true premium. Instead we
+prices options, so a single number would understate the true yield. Instead we
 report a RANGE:
-    low  = 25th-percentile modeled premium over the year (realized-vol basis)
-    high = 75th-percentile modeled premium x IV_UPLIFT (nudged toward implied vol)
+    low  = 25th-percentile modeled annualized yield over the year (realized-vol basis)
+    high = 75th-percentile modeled yield x IV_UPLIFT (nudged toward implied vol)
+
+Yield, not dollar premium: a Black-Scholes premium as a fraction of strike (puts)
+or spot (calls) -- the same "per_yld" convention evaluate_put/evaluate_call use --
+depends ONLY on OTM%, time, and volatility, never on the stock's actual price
+level (options pricing is scale-invariant in spot/strike). Percentile-ing yields
+therefore isn't distorted by the stock having trended up or down over the lookback
+year, the way percentile-ing raw dollar premiums would be -- a name that ran from
+$50 to $150 over the year would otherwise mix "expensive because vol was high"
+with "expensive because the price level was just higher that month". It's also
+simpler: the yield ratio doesn't depend on the daily price series at all, only on
+the trailing realized-vol path, so there's no need to pair prices with vols.
 
 Output: history_premiums.json (committed to the repo; the screener reads it).
 Run weekly via GitHub Actions. Needs TRADIER_TOKEN in the environment.
@@ -24,31 +35,44 @@ import wheel_screener as ws
 
 LOOKBACK_DAYS = 365
 RV_WINDOW     = 30            # rolling trading days for realized volatility
-IV_UPLIFT     = 1.25         # lift realized-vol premium toward implied-vol level (~25% VRP)
+IV_UPLIFT     = 1.25         # lift realized-vol yield toward implied-vol level (~25% VRP)
 OTM_BUCKETS   = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
 DTE_BUCKETS   = [7, 14, 21, 30, 45, 60, 90]
 OUT           = "history_premiums.json"
+METRIC        = "ann_yield"   # schema marker -- lets the screener detect and ignore
+                              # an older $-premium-format file rather than misread it
 
 _N = NormalDist()
 
 
-def _d12(S, K, T, sigma, r):
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+def _d12_ratio(K_over_S, T, sigma, r):
+    """d1, d2 for a given strike/spot RATIO -- independent of the actual price
+    level, since only ln(S/K) = ln(1/K_over_S) matters, not S or K individually."""
+    d1 = (math.log(1.0 / K_over_S) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
     return d1, d1 - sigma * math.sqrt(T)
 
 
-def bs_put(S, K, T, sigma, r):
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+def put_yield(otm, T, sigma, r):
+    """BS put premium as a fraction of STRIKE -- matches evaluate_put's own
+    per_yld = premium / strike convention, so this is directly comparable to
+    the live AnnYield_% column."""
+    if T <= 0 or sigma <= 0 or otm >= 1:
         return 0.0
-    d1, d2 = _d12(S, K, T, sigma, r)
-    return K * math.exp(-r * T) * _N.cdf(-d2) - S * _N.cdf(-d1)
+    K_over_S = 1.0 - otm
+    d1, d2 = _d12_ratio(K_over_S, T, sigma, r)
+    p_over_s = K_over_S * math.exp(-r * T) * _N.cdf(-d2) - _N.cdf(-d1)
+    return max(0.0, p_over_s / K_over_S)
 
 
-def bs_call(S, K, T, sigma, r):
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+def call_yield(otm, T, sigma, r):
+    """BS call premium as a fraction of SPOT -- matches evaluate_call's own
+    per_yld = premium / spot convention."""
+    if T <= 0 or sigma <= 0:
         return 0.0
-    d1, d2 = _d12(S, K, T, sigma, r)
-    return S * _N.cdf(d1) - K * math.exp(-r * T) * _N.cdf(d2)
+    K_over_S = 1.0 + otm
+    d1, d2 = _d12_ratio(K_over_S, T, sigma, r)
+    c_over_s = _N.cdf(d1) - K_over_S * math.exp(-r * T) * _N.cdf(d2)
+    return max(0.0, c_over_s)
 
 
 def daily_closes(symbol):
@@ -89,18 +113,18 @@ def build_ticker(symbol):
     if len(closes) < RV_WINDOW + 20:
         return None
     rv = rolling_rv(closes, RV_WINDOW)
-    prices = closes[RV_WINDOW:RV_WINDOW + len(rv)]
     put_t, call_t = {}, {}
     for otm in OTM_BUCKETS:
         for dte in DTE_BUCKETS:
             T = dte / 365.0
+            ann = 365.0 / dte
             key = f"{int(otm * 100)}|{dte}"
-            puts = sorted(bs_put(S, S * (1 - otm), T, sigma, ws.RISK_FREE)
-                          for S, sigma in zip(prices, rv))
-            calls = sorted(bs_call(S, S * (1 + otm), T, sigma, ws.RISK_FREE)
-                           for S, sigma in zip(prices, rv))
-            put_t[key] = [round(percentile(puts, 0.25), 2), round(percentile(puts, 0.75) * IV_UPLIFT, 2)]
-            call_t[key] = [round(percentile(calls, 0.25), 2), round(percentile(calls, 0.75) * IV_UPLIFT, 2)]
+            # Yield ratio depends only on OTM%, T, and that day's vol -- not on the
+            # stock's price level -- so we only need the vol series, not the prices.
+            puts = sorted(put_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
+            calls = sorted(call_yield(otm, T, sigma, ws.RISK_FREE) * ann for sigma in rv)
+            put_t[key] = [round(percentile(puts, 0.25), 4), round(percentile(puts, 0.75) * IV_UPLIFT, 4)]
+            call_t[key] = [round(percentile(calls, 0.25), 4), round(percentile(calls, 0.75) * IV_UPLIFT, 4)]
     return {"put": put_t, "call": call_t}
 
 
@@ -110,6 +134,7 @@ def main():
         sys.exit(1)
     tickers = list(dict.fromkeys(list(ws.PUT_TICKERS) + list(ws.HOLDINGS.keys())))
     out = {"_meta": {"built": dt.date.today().isoformat(),
+                     "metric": METRIC,
                      "otm_buckets": [int(o * 100) for o in OTM_BUCKETS],
                      "dte_buckets": DTE_BUCKETS,
                      "iv_uplift": IV_UPLIFT,
