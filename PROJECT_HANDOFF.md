@@ -55,10 +55,12 @@ Streamlit app Secrets need `TRADIER_TOKEN` (and optionally `TRADIER_BASE`).
 - Watchlist (PUT_TICKERS) and holdings (HOLDINGS with cost bases) are lists at the top.
 
 ## Columns on the tables
-Ticker, price, strike, expiration, DTE, OTM%, Premium ($/share + total across # of contracts),
-AvgPremium (historical low-high band), yields, Delta/POP, IV, Score, Cash/Contract (per + total),
-# of contracts (to reach CASH_TARGET), Spread_$ (bid-ask), OpenInt, Volume. Spreads also show
-Max Profit / MaxLoss / ROR / AnnROR / Width.
+Ticker, price, strike, expiration, DTE, OTM%, Premium (shown as a $worst-$best bid-ask range,
+i.e. sell-at-bid/buy-at-ask vs sell-at-ask/buy-at-bid, with the total across # of contracts in
+parentheses for each end), AvgPremium (historical low-high band), yields, Delta/POP, IV, Score,
+Cash/Contract (per + total), # of contracts (to reach CASH_TARGET), OpenInt, Volume. Spreads show
+Max Profit the same way (as a range) plus MaxLoss / ROR / AnnROR / Width. There's no separate
+Spread_$ liquidity column anymore - the bid-ask range on Premium/Max Profit conveys the same info.
 
 ## Recent open items / ideas
 - After changing build_history.py to add call premiums, RE-RUN the "Build history table"

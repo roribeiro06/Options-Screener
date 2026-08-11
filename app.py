@@ -309,18 +309,18 @@ try:
 For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
 MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
 **AvgPremium** = the typical premium range this ticker has carried at that OTM%/DTE over the past year, estimated from realized
-volatility (so it runs a touch low vs actual prices) - a "$low-$high" band. Puts use the put premium, covered calls the call premium,
+volatility (so it runs a touch low vs actual prices) - a "\$low-\$high" band. Puts use the put premium, covered calls the call premium,
 and spreads the estimated net credit (short leg minus long leg). Live Premium/Max Profit above the band = richer than normal, below =
 cheaper. Refreshed weekly; "-" means no history yet.
 
-**Capital:** **# of contracts** = whole contracts needed to reach at least ${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
-Premium (and Max Profit for spreads) shows $/share and, in parentheses, the total you'd collect across that many contracts.
-Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many contracts
-(puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
-**Liquidity:** Spread_$ = the bid-ask spread in dollars per share (ask - bid); for multi-leg it's the combined round-trip bid-ask
-across all legs. Lower = tighter, cheaper to trade. OpenInt = open interest (contracts outstanding); Volume = contracts traded today.
-Higher OpenInt/Volume and a smaller Spread_$ mean easier fills and less slippage.
-Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
+**Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
+**Premium** (puts/calls) and **Max Profit** (spreads) show a **\$worst-\$best range** - worst case is selling the short leg(s) at the
+bid and buying any long leg(s) at the ask, best case is the reverse (ask on shorts, bid on longs) - with the total across your
+# of contracts in parentheses for each end of the range. A wide range means a wide bid-ask spread (costly to trade); narrow means
+a tight, liquid market. Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many
+contracts (puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
+**Liquidity:** OpenInt = open interest (contracts outstanding); Volume = contracts traded today. Higher OpenInt/Volume mean easier
+fills and less slippage. Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
 **Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
 yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
 Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.
@@ -330,7 +330,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%} for stocks, {getattr(ws, "MIN_ANN_YIELD_INDEX", ws.MIN_ANN_YIELD):.0%} for broad indexes (SPY/QQQ/DIA, which also skip the per-share premium floors since they're lower risk)
 - OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
-- **Puts only** extra filters: {("premium >= $%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
+- **Puts only** extra filters: {("premium >= \$%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
 - **Covered calls** extra filter: OTM >= {getattr(ws, "CALL_MIN_OTM_OVER_IV", 0):.0%} of IV (same volatility-scaled cushion as puts)
 - **Score** (all strategies) = (AnnYield / IV^{getattr(ws, "SCORE_IV_EXP", 1.0):g}) x POP^{getattr(ws, "SCORE_POP_EXP", 1.0):g} x (365/DTE)^{getattr(ws, "SCORE_DTE_EXP", 0.5):g}. For spreads, annualized ROR replaces AnnYield. Dividing by IV stops high-volatility names from dominating on richer premium; higher POP and shorter DTE break ties. Every table is ranked by Score (highest first) within each ticker.
 - **Puts diversity:** {"best-Score contract per expiration only (collapses each ticker's strike ladder)" if getattr(ws, "PUT_BEST_PER_EXPIRATION", False) else "showing all qualifying strikes"}

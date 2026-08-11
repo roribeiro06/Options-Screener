@@ -27,9 +27,9 @@ SPREAD_DTE_MAX   = 90
 SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
-               "OTM_%", "Width", "Width_%", "Max Profit", "AvgPremium", "MaxLoss", "ROR_%", "AnnROR_%",
-               "POP_%", "IV", "Score", "Cash/Contract", "# of contracts",
-               "Spread_$", "OpenInt", "EarningsDate"]
+               "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "AvgPremium", "MaxLoss",
+               "ROR_%", "AnnROR_%", "POP_%", "IV", "Score", "Cash/Contract", "# of contracts",
+               "OpenInt", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
@@ -80,7 +80,8 @@ def _credit_spread(chain, opt_type, target_delta, tol):
         for leg in (short, lng):
             if (leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST:
                 return None
-    credit = (short["bid"] or 0) - (lng["ask"] or 0)
+    credit = (short["bid"] or 0) - (lng["ask"] or 0)          # worst case: sell at bid, buy at ask
+    credit_best = (short["ask"] or 0) - (lng["bid"] or 0)      # best case: sell at ask, buy at bid
     width = abs(short["strike"] - ls)
     if credit < MIN_CREDIT or width <= 0:
         return None
@@ -88,15 +89,13 @@ def _credit_spread(chain, opt_type, target_delta, tol):
     if max_loss <= 0:
         return None
     return {"short": short, "long": lng, "long_strike": ls, "credit": credit,
-            "width": width, "max_loss": max_loss}
+            "credit_best": credit_best, "width": width, "max_loss": max_loss}
 
 
 def _leg_liquidity(*legs):
-    """Combined liquidity for a spread: min open interest across legs, and total
-    round-trip bid-ask across legs (illiquidity cost you pay to get in and out)."""
+    """Minimum open interest across a spread's legs."""
     ois = [int(l.get("oi") or 0) for l in legs]
-    bidask = sum((l.get("ask") or 0) - (l.get("bid") or 0) for l in legs)
-    return (min(ois) if ois else 0), bidask
+    return min(ois) if ois else 0
 
 
 def _avg_credit_range(sym, dte, kind, short_strike, long_strike, spot):
@@ -112,7 +111,7 @@ def _avg_credit_range(sym, dte, kind, short_strike, long_strike, spot):
 
 
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
-                 credit, width, max_loss, pop, iv, otm, oi=0, leg_bidask=0.0, avg_credit=None):
+                 credit, credit_best, width, max_loss, pop, iv, otm, oi=0, avg_credit=None):
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
@@ -123,13 +122,13 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Put Legs": put_legs, "Call Legs": call_legs,
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
-            "Max Profit": round(credit, 2), "MaxLoss": round(max_loss, 2),
+            "Max Profit": round(credit, 2), "Max Profit (Best)": round(credit_best, 2),
+            "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
             "AvgPremium": (f"${avg_credit[0]:.2f}-${avg_credit[1]:.2f}" if avg_credit else "-"),
             "Cash/Contract": round(max_loss * 100, 0),
             "# of contracts": ws.contracts_for_target(max_loss * 100),
-            "Spread_$": round(leg_bidask, 2),
             "OpenInt": int(oi), "EarningsDate": earn}
 
 
@@ -165,11 +164,11 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                 strat, pl, cl = "Put credit spread", f"sell {sk:g}P / buy {s['long_strike']:g}P", ""
             else:
                 strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
-            oi, ba = _leg_liquidity(s["short"], s["long"])
+            oi = _leg_liquidity(s["short"], s["long"])
             acr = _avg_credit_range(sym, dte, opt_type, sk, s["long_strike"], spot)
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
-                             s["credit"], s["width"], s["max_loss"], pop,
-                             s["short"].get("iv") or 0, otm, oi, ba, acr)
+                             s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
+                             s["short"].get("iv") or 0, otm, oi, acr)
             if r["AnnROR_%"] >= ROR_ANN_MIN:
                 seen.add(key)
                 out.append(r)
@@ -191,6 +190,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                (c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv):
                 continue
         credit = ps["credit"] + cs["credit"]
+        credit_best = ps["credit_best"] + cs["credit_best"]
         width = max(ps["width"], cs["width"])
         max_loss = width - credit
         if max_loss <= 0:
@@ -202,14 +202,14 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         if key in seen:
             continue
         iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
-        oi, ba = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
+        oi = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
         _pac = _avg_credit_range(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot)
         _cac = _avg_credit_range(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot)
         acr = (_pac[0] + _cac[0], _pac[1] + _cac[1]) if (_pac and _cac) else None
         r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                         credit, width, max_loss, pop, iv, min(p_otm, c_otm), oi, ba, acr)
+                         credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr)
         if r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
             out.append(r)
@@ -257,18 +257,25 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
-    # Max Profit: "$/share (total credit across the # of contracts that reach the cash target)"
+    # Max Profit: "$worst-$best (total credit range across the # of contracts that reach the
+    # cash target)". worst = sell short at bid / buy long at ask; best = sell short at ask /
+    # buy long at bid -- this range folds in what the old separate Spread_$ liquidity column
+    # used to convey, so that column is gone.
     if "Max Profit" in d.columns and "# of contracts" in d.columns:
-        def _mp(v, n):
-            if pd.isna(v):
+        def _mp(lo, hi, n):
+            if pd.isna(lo):
                 return "-"
+            hi = hi if pd.notna(hi) else lo
             if pd.isna(n):
-                return f"${v:.2f}"
-            return f"${v:.2f} (${v * 100 * int(n):,.0f})"
-        d["Max Profit"] = [_mp(v, n) for v, n in zip(d["Max Profit"], d["# of contracts"])]
+                return f"${lo:.2f}-${hi:.2f}"
+            return f"${lo:.2f}-${hi:.2f} (${lo * 100 * int(n):,.0f}-${hi * 100 * int(n):,.0f})"
+        hi_col = d["Max Profit (Best)"] if "Max Profit (Best)" in d.columns else d["Max Profit"]
+        d["Max Profit"] = [_mp(v, h, n) for v, h, n in zip(d["Max Profit"], hi_col, d["# of contracts"])]
+        if "Max Profit (Best)" in d.columns:
+            d = d.drop(columns=["Max Profit (Best)"])
     elif "Max Profit" in d.columns:
         d["Max Profit"] = d["Max Profit"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
-    for c in ("MaxLoss", "CurrentPrice", "Width", "Spread_$"):
+    for c in ("MaxLoss", "CurrentPrice", "Width"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     if "Cash/Contract" in d.columns and "# of contracts" in d.columns:

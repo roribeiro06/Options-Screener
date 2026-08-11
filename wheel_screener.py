@@ -271,10 +271,9 @@ def contracts_for_target(cash_per_contract, target=None):
 
 
 def _liq(o):
-    """Liquidity snapshot for one option: bid-ask spread in $ per share, open interest, volume."""
-    bid = o.get("bid") or 0
-    ask = o.get("ask") or 0
-    return {"Spread_$": round((ask - bid), 2),
+    """Liquidity snapshot for one option: raw ask (Premium is shown as a bid-ask
+    range, so no separate Spread_$ column), open interest, volume."""
+    return {"Ask": o.get("ask") or 0,
             "OpenInt": int(o.get("oi") or 0),
             "Volume": int(o.get("volume") or 0)}
 
@@ -653,17 +652,17 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 
 
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
-LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
                "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-               "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+               "Cash/Contract", "# of contracts", "OpenInt", "Volume", "EarningsDate"]
 
 
-PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium",
+PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
             "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-            "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+            "Cash/Contract", "# of contracts", "OpenInt", "Volume", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
-             "Premium", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
-             "Cash/Contract", "# of contracts", "Spread_$", "OpenInt", "Volume", "EarningsDate"]
+             "Premium", "Ask", "AvgPremium", "PeriodYield_%", "AnnYield_%", "Delta_%", "IV", "Score",
+             "Cash/Contract", "# of contracts", "OpenInt", "Volume", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -709,18 +708,24 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
-    # Premium: "$/share (total premium across the # of contracts that reach the cash target)"
+    # Premium: "$bid-$ask (total range across the # of contracts that reach the cash target)".
+    # Showing the live bid-ask spread here folds in what the old separate Spread_$
+    # liquidity column used to convey, so that column is gone.
     if "Premium" in d.columns and "# of contracts" in d.columns:
-        def _prem(p, n):
-            if pd.isna(p):
+        def _prem(bid, ask, n):
+            if pd.isna(bid):
                 return "-"
+            ask = ask if pd.notna(ask) else bid
             if pd.isna(n):
-                return f"${p:.2f}"
-            return f"${p:.2f} (${p * 100 * int(n):,.0f})"
-        d["Premium"] = [_prem(p, n) for p, n in zip(d["Premium"], d["# of contracts"])]
+                return f"${bid:.2f}-${ask:.2f}"
+            return f"${bid:.2f}-${ask:.2f} (${bid * 100 * int(n):,.0f}-${ask * 100 * int(n):,.0f})"
+        ask_col = d["Ask"] if "Ask" in d.columns else d["Premium"]
+        d["Premium"] = [_prem(p, a, n) for p, a, n in zip(d["Premium"], ask_col, d["# of contracts"])]
+        if "Ask" in d.columns:
+            d = d.drop(columns=["Ask"])
     elif "Premium" in d.columns:
         d["Premium"] = "$" + d["Premium"].round(2).astype(str)
-    for c in ("CostBasis", "CurrentPrice", "Spread_$"):
+    for c in ("CostBasis", "CurrentPrice"):
         if c in d.columns:
             d[c] = "$" + d[c].round(2).astype(str)
     # Cash/Contract: "$/contract (total collateral across the # of contracts to reach the target)"
