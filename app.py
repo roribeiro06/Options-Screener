@@ -155,6 +155,23 @@ def cached_vix():
     return ws.get_vix()
 
 
+@st.cache_data(ttl=600, show_spinner="Scanning the market for high-open-interest tickers...")
+def scan_discover():
+    """Live, same cadence as everything else (30-min auto-refresh / on-demand,
+    ttl=600 like the other scan_* functions). Scans a broad non-watchlist
+    universe rather than just ~20 tickers, so this is much slower than the
+    other sections -- falls back to the last committed volume_leaders.json
+    snapshot (from the daily GitHub Action) if the live scan errors."""
+    import discover
+    try:
+        return discover.run_discovery(), None
+    except Exception as e:
+        d = ws.load_volume_leaders()
+        if d:
+            return d, str(e)
+        raise
+
+
 with st.sidebar:
     st.header("Watchlist")
     puts_txt = st.text_area("Put tickers (comma-separated)",
@@ -296,6 +313,49 @@ if es:
     st.caption("Skipped: " + " | ".join(es))
 
 st.markdown("---")
+st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
+st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500) for the tickers "
+           "carrying the heaviest options open interest right now, screened with the same criteria as "
+           "above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so a name you didn't "
+           "add to the watchlist can still surface if one of its most liquid contracts qualifies. Calls "
+           "here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
+           "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
+           "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
+           "last on the page since it scans far more tickers and is slower than the sections above.")
+try:
+    _vl, _dfallback = scan_discover()
+    if _dfallback:
+        st.caption(f"Live scan failed ({_dfallback}) -- showing the last daily-Action snapshot instead.")
+    if _vl:
+        _leaders = _vl.get("leaders", [])
+        if _leaders:
+            _lead_txt = " | ".join(f"{l['ticker']} ({l['option_open_interest']:,} OI)" for l in _leaders)
+            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
+
+        st.markdown("**Puts**")
+        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+        if len(_dp):
+            st.dataframe(ws._fmt(_dp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
+                               "volume_leaders_puts.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+
+        st.markdown("**Call Credit Spreads (defined-risk)**")
+        _dc = sp._df(_vl.get("call_spreads", []))
+        if len(_dc):
+            _disp = _dc.drop(columns=["Strategy", "Put Legs"])
+            st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
+            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
+                               "volume_leaders_call_spreads.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+    else:
+        st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
+except Exception as _e:
+    st.caption(f"(discover section unavailable: {_e})")
+
+st.markdown("---")
 st.header("Legend - criteria in effect")
 try:
     def _on(b):
@@ -313,14 +373,17 @@ volatility (so it runs a touch low vs actual prices) - a "\$low-\$high" band. Pu
 and spreads the estimated net credit (short leg minus long leg). Live Premium/Max Profit above the band = richer than normal, below =
 cheaper. Refreshed weekly; "-" means no history yet.
 
-**Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral.
-**Premium** (puts/calls) and **Max Profit** (spreads) show a **\$worst-\$best range** - worst case is selling the short leg(s) at the
-bid and buying any long leg(s) at the ask, best case is the reverse (ask on shorts, bid on longs) - with the total across your
-# of contracts in parentheses for each end of the range. A wide range means a wide bid-ask spread (costly to trade); narrow means
-a tight, liquid market. Cash/Contract shows per-contract collateral and, in parentheses, the total collateral across that many
-contracts (puts: strike x 100; covered calls: shares x 100; spreads: max loss x 100).
-**Liquidity:** OpenInt = open interest (contracts outstanding); Volume = contracts traded today. Higher OpenInt/Volume mean easier
-fills and less slippage. Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
+**Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral
+for puts/covered calls (strike x 100 / shares x 100), or \${getattr(sp, "SPREAD_CASH_TARGET", 25000):,} of max loss for
+spreads (max loss x 100) -- spreads use a lower target since their risk per contract is capped/defined.
+**Premium** (puts/calls) and **Max Profit** (spreads) show a **\$worst-\$best range** - worst case is selling the short leg(s) at
+the bid and buying any long leg(s) at the ask, best case is the reverse (ask on shorts, bid on longs) - with the total across
+your # of contracts in parentheses for each end of the range. A wide range means a wide bid-ask spread (costly to trade);
+narrow means a tight, liquid market. **MaxLoss** shows the same \$/share (+ total) format: strike - premium for puts (worst
+case if assigned and the stock goes to zero); cost basis - premium for covered calls with a known cost basis ("-" without
+one, e.g. Contract Lookup); width - credit for spreads.
+**Liquidity:** OpenInt = open interest (contracts outstanding); Volume = contracts traded today. Higher OpenInt/Volume mean
+easier fills and less slippage. Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
 **Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
 yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
 Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.
