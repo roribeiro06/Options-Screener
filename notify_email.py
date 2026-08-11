@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 notify_email.py -- run the FULL screener headlessly and email the results
-(cash-secured puts, covered calls, and multi-leg spreads).
+(cash-secured puts, covered calls, multi-leg spreads, and Discover -- the
+live scan for high-open-interest tickers outside the watchlist, see
+discover.py). Discover's live scan is by far the slowest part of this
+script (a broad ~7,000-ticker universe plus a yfinance market-cap check
+per surviving candidate) -- expect this to noticeably lengthen every run,
+which happens every 30 min during market hours per the schedule below.
 
 Designed to be run on a schedule by GitHub Actions (see .github/workflows/screener-email.yml).
 Only emails during US market hours (9:30-16:00 ET, weekdays); silently exits otherwise, so
@@ -26,6 +31,7 @@ from email.mime.multipart import MIMEMultipart
 
 import wheel_screener as ws
 import spreads as sp
+import discover
 
 _SPREAD_SECTIONS = [
     ("Put credit spread",  "Put Credit Spreads (bullish, defined risk)"),
@@ -81,6 +87,21 @@ def build_spreads():
     return sp._df(rows)
 
 
+def build_discover():
+    """Live scan of tickers outside the watchlist (see discover.py); falls back
+    to the daily-Action snapshot if the live scan errors, same as app.py."""
+    try:
+        d = discover.run_discovery()
+    except Exception as e:
+        print(f"DISCOVER: live scan ERROR {e}", file=sys.stderr)
+        d = ws.load_volume_leaders()
+    if not d:
+        return ws._df([], ws.PUT_COLS), sp._df([])
+    dp = ws._df(d.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+    dspreads = sp._df(d.get("call_spreads", []))
+    return dp, dspreads
+
+
 def _table(df, fmt):
     return fmt(df).to_html(index=False, border=0)
 
@@ -99,7 +120,18 @@ def _spreads_html(ds):
     return out
 
 
-def html_email(puts, calls, spreads, now_et):
+def _discover_html(dp, dspreads):
+    def _section(title, df, fmt):
+        if not len(df):
+            return f"<h3>{title}</h3><p class='empty'>None qualify right now.</p>"
+        return f"<h3>{title}</h3>{_table(df, fmt)}"
+
+    disp = dspreads.drop(columns=["Strategy", "Put Legs"]) if len(dspreads) else dspreads
+    return (_section("Puts", dp, ws._fmt)
+            + _section("Call Credit Spreads (defined-risk)", disp, sp._fmt))
+
+
+def html_email(puts, calls, spreads, discover_puts, discover_spreads, now_et):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
              "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
              "h3{margin:16px 0 4px}"
@@ -115,6 +147,7 @@ def html_email(puts, calls, spreads, now_et):
         return f"<h2>{title}</h2>{_table(df, fmt)}"
 
     spreads_body = _spreads_html(spreads) if len(spreads) else "<p class='empty'>None qualify right now.</p>"
+    discover_body = _discover_html(discover_puts, discover_spreads)
 
     return (f"<html><head>{style}</head><body>"
             f"<h1>Options Screener</h1>"
@@ -123,6 +156,7 @@ def html_email(puts, calls, spreads, now_et):
             f"{section('Cash-Secured Puts', puts, ws._fmt)}"
             f"{section('Covered Calls', calls, ws._fmt)}"
             f"<h2>Multi-Leg Strategies</h2>{spreads_body}"
+            f"<h2>Discover: High-Open-Interest Contracts (outside your watchlist)</h2>{discover_body}"
             "</body></html>")
 
 
@@ -157,17 +191,18 @@ def main():
         print("EMAIL_USER / EMAIL_APP_PASSWORD not set; cannot send.", file=sys.stderr)
         sys.exit(1)
 
-    puts    = build_puts()
-    calls   = build_calls()
-    spreads = build_spreads()
-    total   = len(puts) + len(calls) + len(spreads)
+    puts     = build_puts()
+    calls    = build_calls()
+    spreads  = build_spreads()
+    d_puts, d_spreads = build_discover()
+    total    = len(puts) + len(calls) + len(spreads) + len(d_puts) + len(d_spreads)
     if total == 0 and not send_if_empty:
         print("Nothing qualifies anywhere; not sending (set SEND_IF_EMPTY=1 to override).")
         return
 
-    subject = (f"Screener: {len(puts)} puts, {len(calls)} calls, {len(spreads)} spreads "
-               f"- {now_et:%b %d %I:%M %p ET}")
-    send(subject, html_email(puts, calls, spreads, now_et), user, pw, to)
+    subject = (f"Screener: {len(puts)} puts, {len(calls)} calls, {len(spreads)} spreads, "
+               f"{len(d_puts) + len(d_spreads)} discovered - {now_et:%b %d %I:%M %p ET}")
+    send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, now_et), user, pw, to)
     print(f"Sent: {subject} -> {to}")
 
 
