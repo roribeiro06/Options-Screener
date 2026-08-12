@@ -393,6 +393,8 @@ try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
         st.dataframe(positions._fmt(_dpos), hide_index=True, use_container_width=True)
+        _tot_unreal = _dpos["UnrealizedGL_$"].sum()
+        st.markdown(f"**Total Unrealized G/L: {'+' if _tot_unreal >= 0 else '-'}${abs(_tot_unreal):,.2f}**")
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
     else:
@@ -413,6 +415,8 @@ try:
     _dclosed, _eclosed = scan_closed_positions()
     if len(_dclosed):
         st.dataframe(positions._fmt(_dclosed), hide_index=True, use_container_width=True)
+        _tot_real = _dclosed["RealizedGL_$"].sum()
+        st.markdown(f"**Total Realized G/L: {'+' if _tot_real >= 0 else '-'}${abs(_tot_real):,.2f}**")
         st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
                            "closed_positions.csv", "text/csv")
     else:
