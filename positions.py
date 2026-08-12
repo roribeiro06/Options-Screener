@@ -64,12 +64,14 @@ def _strikes_display(pos):
 
 
 def _max_loss_per_share(pos):
-    """The real cash on the line for this position, not a stock-to-zero
-    worst case -- except for covered calls, where stock-to-zero against your
-    actual cost basis genuinely is the worst case.
-      - put: the full cash-secured collateral (the strike) -- what you'd
-        need on hand to buy the shares if assigned, not netted by the
-        premium already collected
+    """The real net worst-case loss for this position -- premium already
+    collected always reduces it, since you keep that regardless of what the
+    stock does. Stock-to-zero is only assumed for covered calls, where it's
+    genuinely the worst case against a known cost basis.
+      - put: strike - premium -- assigned, then stock to zero, net of the
+        premium you already banked (NOT the raw cash-secured collateral,
+        which would be the strike alone -- this column is the worst-case
+        loss, not the collateral requirement)
       - call (covered): cost basis - premium (needs the ticker in
         wheel_screener.HOLDINGS, else NaN -- undefined/unbounded risk, same
         as a naked call in Contract Lookup)
@@ -79,7 +81,7 @@ def _max_loss_per_share(pos):
     kind = pos["type"]
     credit = pos["entry_credit"]
     if kind == "put":
-        return pos["strike"]
+        return pos["strike"] - credit
     if kind == "call":
         cost_basis = ws.HOLDINGS.get(pos["ticker"])
         return (cost_basis - credit) if cost_basis is not None else float("nan")
