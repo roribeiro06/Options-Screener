@@ -260,8 +260,8 @@ def _fmt_pct_pair(potential_num, actual_num, denom):
 
 
 def _peak_concurrent_loss(intervals):
-    """intervals: list of (start_date, end_date_inclusive, loss_dollars) --
-    the total dollar Max Loss "at risk" between when each position opened
+    """intervals: list of (start_date, end_date_inclusive, loss_dollars, kind)
+    -- the total dollar Max Loss "at risk" between when each position opened
     and when it closed (or today, if still open). Returns the largest sum of
     loss_dollars among positions simultaneously open on the same day -- e.g.
     if 4 positions were open together on one day, their combined loss is one
@@ -269,11 +269,32 @@ def _peak_concurrent_loss(intervals):
     running total can only increase right after a position opens (adding a
     position never decreases the sum for that instant). NaN entries
     (undefined max loss, e.g. a covered call with no cost basis on file) are
-    excluded from every day's sum -- can't bound an unknown risk."""
-    valid = [(s, e, v) for s, e, v in intervals if v == v]
+    excluded from every day's sum -- can't bound an unknown risk. `kind` is
+    carried through but unused here (only the accumulated-loss helpers care,
+    to compute an ex-calls total)."""
+    valid = [(s, e, v) for s, e, v, _k in intervals if v == v]
     if not valid:
         return float("nan")
     return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
+
+
+def _loss_accum(intervals, exclude_calls=False):
+    """Flat sum of every interval's loss_dollars -- no date overlap involved,
+    unlike _peak_concurrent_loss. With exclude_calls=True, covered calls
+    (type "call") are left out: their MaxLoss assumes the stock goes to $0,
+    a scenario unlikely enough that including it skews the accumulated
+    total, unlike puts/spreads whose MaxLoss is a real, boundable worst
+    case."""
+    return sum(v for _, _, v, k in intervals if v == v and not (exclude_calls and k == "call"))
+
+
+def _ex_calls_premium(positions_list):
+    """Premium collected across every non-covered-call position -- the
+    numerator to pair with _loss_accum(..., exclude_calls=True), so the
+    "-Calls" Return on Risk is a fully self-consistent ex-calls view, not
+    the full portfolio's premium against a reduced loss figure."""
+    return sum(pos["entry_credit"] * 100 * pos["contracts"]
+              for pos in positions_list if pos["type"] != "call")
 
 
 TYPE_BUCKETS = {"Put": "Put Contracts", "Covered Call": "Call Contracts",
@@ -299,8 +320,10 @@ def _risk_raw(positions_list, end_date_fn, today):
     """positions_list: raw OPEN_POSITIONS/CLOSED_POSITIONS dicts.
     end_date_fn(pos) -> the date this position's risk interval ends (today
     for open, exit_date for closed). Returns (premium_total, intervals,
-    unbounded) ready for _peak_concurrent_loss -- pure config arithmetic, no
-    live quotes needed (MaxLoss/entry_credit don't depend on the market)."""
+    unbounded) ready for _peak_concurrent_loss/_loss_accum -- pure config
+    arithmetic, no live quotes needed (MaxLoss/entry_credit don't depend on
+    the market). Each interval carries the position's type too, so an
+    ex-calls view can filter it out downstream."""
     premium_total, unbounded = 0.0, False
     intervals = []
     for pos in positions_list:
@@ -309,7 +332,7 @@ def _risk_raw(positions_list, end_date_fn, today):
         loss_total = loss * 100 * pos["contracts"] if loss == loss else float("nan")
         unbounded = unbounded or (loss_total != loss_total)
         entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
-        intervals.append((entry, end_date_fn(pos), loss_total))
+        intervals.append((entry, end_date_fn(pos), loss_total, pos["type"]))
     return premium_total, intervals, unbounded
 
 
@@ -330,21 +353,31 @@ def build_open_financials(dpos_df):
     premium collected, accumulated/peak-day MaxLoss, and Return on Risk shown
     two ways -- against the Potential (premium collected, i.e. the max if
     every position captured its full credit) and, in parentheses, against
-    the actual Unrealized G/L (today's real mark-to-market)."""
+    the actual Unrealized G/L (today's real mark-to-market). Max Loss
+    Accumulated also gets a "- Calls" companion row/ROR%: covered calls'
+    MaxLoss assumes the stock goes to $0, unlikely enough to skew the raw
+    accumulated total, so this repeats the same figures as if calls weren't
+    part of the portfolio at all (both numerator and denominator)."""
     import pandas as pd
     today = dt.date.today()
     bucket_unreal = _bucket_gl(dpos_df, "UnrealizedGL_$")
     total_unreal = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
+    total_unreal_ex_calls = sum(v for b, v in bucket_unreal.items() if b != "Call Contracts")
     premium_total, intervals, unbounded = _risk_raw(ws.OPEN_POSITIONS, lambda pos: today, today)
-    loss_accum = sum(v for _, _, v in intervals if v == v)
+    premium_total_ex_calls = _ex_calls_premium(ws.OPEN_POSITIONS)
+    loss_accum = _loss_accum(intervals)
+    loss_accum_ex_calls = _loss_accum(intervals, exclude_calls=True)
     peak_loss = _peak_concurrent_loss(intervals)
 
     rows = [(f"{b} -- Unrealized G/L", _fmt_dollar_signed(bucket_unreal[b])) for b in BUCKET_ORDER]
     rows += [
         ("Total Unrealized G/L", _fmt_dollar_signed(total_unreal)),
-        ("Max Profit Accumulated ($)", _fmt_dollar(premium_total)),
+        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
         ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
+        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
         ("Max Loss Accumulated (ROR%)", _fmt_pct_pair(premium_total, total_unreal, loss_accum)),
+        ("Max Loss Accumulated - Calls (ROR%)",
+         _fmt_pct_pair(premium_total_ex_calls, total_unreal_ex_calls, loss_accum_ex_calls)),
         ("Max Loss 1D ($)", _fmt_dollar(peak_loss)),
         ("Max Loss 1D (ROR%)", _fmt_pct_pair(premium_total, total_unreal, peak_loss)),
     ]
@@ -356,24 +389,32 @@ def build_closed_financials(dclosed_df, window_days=30):
     """Financials for CLOSED_POSITIONS within `window_days` only: G/L by
     strategy type (realized), premium collected, accumulated/peak-day
     MaxLoss, and Return on Risk -- against the actual Realized G/L (what you
-    really walked away with), not the theoretical premium collected."""
+    really walked away with), not the theoretical premium collected. Max
+    Loss Accumulated also gets a "- Calls" companion, same rationale as
+    Open Positions (covered calls' stock-to-zero MaxLoss skews the total)."""
     import pandas as pd
     today = dt.date.today()
+    closed_list = _closed_in_window(window_days, today)
     bucket_real = _bucket_gl(dclosed_df, "RealizedGL_$")
     total_real = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
+    total_real_ex_calls = sum(v for b, v in bucket_real.items() if b != "Call Contracts")
     premium_total, intervals, unbounded = _risk_raw(
-        _closed_in_window(window_days, today), lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
-    loss_accum = sum(v for _, _, v in intervals if v == v)
+        closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
+    loss_accum = _loss_accum(intervals)
+    loss_accum_ex_calls = _loss_accum(intervals, exclude_calls=True)
     peak_loss = _peak_concurrent_loss(intervals)
     ror_accum = (total_real / loss_accum) if loss_accum else float("nan")
+    ror_accum_ex_calls = (total_real_ex_calls / loss_accum_ex_calls) if loss_accum_ex_calls else float("nan")
     ror_peak = (total_real / peak_loss) if peak_loss else float("nan")
 
     rows = [(f"{b} -- Realized G/L", _fmt_dollar_signed(bucket_real[b])) for b in BUCKET_ORDER]
     rows += [
         ("Total Realized G/L", _fmt_dollar_signed(total_real)),
-        ("Max Profit Accumulated ($)", _fmt_dollar(premium_total)),
+        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
         ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
+        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
         ("Max Loss Accumulated (ROR%)", _fmt_pct(ror_accum)),
+        ("Max Loss Accumulated - Calls (ROR%)", _fmt_pct(ror_accum_ex_calls)),
         ("Max Loss 1D ($)", _fmt_dollar(peak_loss)),
         ("Max Loss 1D (ROR%)", _fmt_pct(ror_peak)),
     ]
@@ -383,11 +424,12 @@ def build_closed_financials(dclosed_df, window_days=30):
 
 def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     """The Open and Closed Financials tables above, summed row-for-row into
-    one: per-bucket Total G/L, Max Profit Accumulated, Max Loss Accumulated,
-    and Max Loss 1D (the two tables' peak-day figures added together, not a
-    fresh sweep across the combined interval set). Return on Risk is shown
-    the same "Potential (Actual)" way as Open Positions, using the summed
-    premium collected and the summed actual Unrealized+Realized G/L."""
+    one: per-bucket Total G/L, Potential Profit Accumulated, Max Loss
+    Accumulated (plus its "- Calls" companion), and Max Loss 1D (the two
+    tables' peak-day figures added together, not a fresh sweep across the
+    combined interval set). Return on Risk is shown the same "Potential
+    (Actual)" way as Open Positions, using the summed premium collected and
+    the summed actual Unrealized+Realized G/L."""
     import pandas as pd
     today = dt.date.today()
 
@@ -396,23 +438,31 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     total_unreal = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
     total_real = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
     actual_total = total_unreal + total_real
+    actual_total_ex_calls = (sum(v for b, v in bucket_unreal.items() if b != "Call Contracts")
+                             + sum(v for b, v in bucket_real.items() if b != "Call Contracts"))
 
+    closed_list = _closed_in_window(window_days, today)
     open_premium, open_intervals, open_unbounded = _risk_raw(ws.OPEN_POSITIONS, lambda pos: today, today)
     closed_premium, closed_intervals, closed_unbounded = _risk_raw(
-        _closed_in_window(window_days, today), lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
+        closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
 
     premium_total = open_premium + closed_premium
-    loss_accum = (sum(v for _, _, v in open_intervals if v == v)
-                 + sum(v for _, _, v in closed_intervals if v == v))
+    premium_total_ex_calls = _ex_calls_premium(ws.OPEN_POSITIONS) + _ex_calls_premium(closed_list)
+    loss_accum = _loss_accum(open_intervals) + _loss_accum(closed_intervals)
+    loss_accum_ex_calls = (_loss_accum(open_intervals, exclude_calls=True)
+                           + _loss_accum(closed_intervals, exclude_calls=True))
     peak_open, peak_closed = _peak_concurrent_loss(open_intervals), _peak_concurrent_loss(closed_intervals)
     peak_sum = (peak_open if peak_open == peak_open else 0.0) + (peak_closed if peak_closed == peak_closed else 0.0)
 
     rows = [(f"{b} -- Total G/L", _fmt_dollar_signed(bucket_unreal[b] + bucket_real[b])) for b in BUCKET_ORDER]
     rows += [
         ("Total G/L (Unrealized + Realized)", _fmt_dollar_signed(actual_total)),
-        ("Max Profit Accumulated ($)", _fmt_dollar(premium_total)),
+        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
         ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
+        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
         ("Max Loss Accumulated (ROR%)", _fmt_pct_pair(premium_total, actual_total, loss_accum)),
+        ("Max Loss Accumulated - Calls (ROR%)",
+         _fmt_pct_pair(premium_total_ex_calls, actual_total_ex_calls, loss_accum_ex_calls)),
         ("Max Loss 1D ($)", _fmt_dollar(peak_sum)),
         ("Max Loss 1D (ROR%)", _fmt_pct_pair(premium_total, actual_total, peak_sum)),
     ]

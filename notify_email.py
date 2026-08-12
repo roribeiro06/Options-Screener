@@ -3,7 +3,8 @@
 notify_email.py -- run the FULL screener headlessly and email the results
 (cash-secured puts, covered calls, multi-leg spreads, Discover -- the live
 scan for high-open-interest tickers outside the watchlist, see discover.py
--- and your Open/Closed Positions, see positions.py). Discover's live scan
+-- and your Open/Closed Positions plus their Financials tables, see
+positions.py). Discover's live scan
 is by far the slowest part of this script (a broad ~7,000-ticker universe
 plus a yfinance market-cap check per surviving candidate) -- expect this to
 noticeably lengthen every run, which happens every 30 min during market
@@ -175,6 +176,15 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             return f"<h2>{title}</h2><p class='empty'>{empty_msg}</p>"
         return f"<h2>{title}</h2>{_table(df, fmt)}"
 
+    def financials_html(title, df):
+        if df is None or not len(df):
+            return f"<h3>{title}</h3><p class='empty'>No data.</p>"
+        return f"<h3>{title}</h3>{df.to_html(index=False, border=0)}"
+
+    open_fin = positions.build_open_financials(open_pos)
+    closed_fin = positions.build_closed_financials(closed_pos)
+    combined_fin = positions.build_combined_financials(open_pos, closed_pos)
+
     return (f"<html><head>{style}</head><body>"
             f"<h1>Options Screener</h1>"
             f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. Educational only, not financial advice. "
@@ -184,7 +194,10 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"<h2>Multi-Leg Strategies</h2>{spreads_body}"
             f"<h2>Discover: High-Open-Interest Contracts (outside your watchlist)</h2>{discover_body}"
             f"{empty_section('Open Positions', open_pos, positions._fmt, 'No open positions tracked.')}"
+            f"{financials_html('Financials (unrealized)', open_fin)}"
             f"{empty_section('Closed Positions (last 30 days)', closed_pos, positions._fmt, 'No closed positions in the last 30 days.')}"
+            f"{financials_html('Financials (realized)', closed_fin)}"
+            f"<h2>Financials (Open + Closed combined)</h2>{combined_fin.to_html(index=False, border=0)}"
             "</body></html>")
 
 

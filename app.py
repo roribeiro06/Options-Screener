@@ -403,7 +403,10 @@ try:
         st.markdown("**Financials** (unrealized)")
         st.caption("G/L by strategy type, premium collected, accumulated/peak-day MaxLoss, and Return on "
                    "Risk shown two ways: against the Potential (full premium collected, as if every "
-                   "position captured max profit) with the actual Unrealized G/L ROR% in parentheses.")
+                   "position captured max profit) with the actual Unrealized G/L ROR% in parentheses. "
+                   "**Max Loss Accumulated - Calls** repeats the accumulated $/ROR% as if covered calls "
+                   "weren't in the portfolio at all -- their MaxLoss assumes the stock goes to \\$0, "
+                   "unlikely enough to skew the raw accumulated total.")
         st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
@@ -431,7 +434,8 @@ try:
         st.markdown("**Financials** (realized)")
         st.caption("G/L by strategy type, premium collected, accumulated/peak-day MaxLoss, and Return on "
                    "Risk against the actual Realized G/L (what you really walked away with), not the "
-                   "theoretical premium collected.")
+                   "theoretical premium collected. **Max Loss Accumulated - Calls** repeats the "
+                   "accumulated $/ROR% excluding covered calls, same rationale as Open Positions.")
         st.dataframe(positions.build_closed_financials(_dclosed), hide_index=True, use_container_width=True)
     else:
         st.write("No closed positions in the last 30 days.")
@@ -442,10 +446,11 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Financials (Open + Closed combined)")
-st.caption("The two Financials tables above, summed row-for-row: per-strategy Total G/L, Max Profit "
-           "Accumulated, Max Loss Accumulated, and Max Loss 1D (the two tables' peak-day figures added "
-           "together). **ROR%** is shown the same Potential (Actual) way as Open Positions, using the "
-           "summed premium collected and the summed actual Unrealized + Realized G/L.")
+st.caption("The two Financials tables above, summed row-for-row: per-strategy Total G/L, Potential Profit "
+           "Accumulated, Max Loss Accumulated (plus its **- Calls** companion, excluding covered calls), "
+           "and Max Loss 1D (the two tables' peak-day figures added together). **ROR%** is shown the same "
+           "Potential (Actual) way as Open Positions, using the summed premium collected and the summed "
+           "actual Unrealized + Realized G/L.")
 try:
     _dpos_fin, _ = scan_positions()
     _dclosed_fin, _ = scan_closed_positions()
