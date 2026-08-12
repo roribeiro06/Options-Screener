@@ -38,6 +38,30 @@ HOLDINGS = {
     "SMH": 573.6451,
 }
 
+# Open positions you've SOLD to open (cash-secured puts, covered calls, credit
+# spreads) -- tracked at the bottom of the app: entry price, current cost to
+# close, day $/%, and unrealized G/L. All assumed short (you collected a
+# credit); G/L = entry_credit - current cost to buy back. "type" is one of
+# "put", "call", "put_spread", "call_spread". Single-leg entries need "strike";
+# spreads need "short_strike" and "long_strike" instead. See positions.py.
+OPEN_POSITIONS = [
+    # {"ticker": "AVGO", "type": "put", "strike": 300, "expiration": "2026-09-18",
+    #  "contracts": 1, "entry_credit": 7.23, "entry_date": "2026-08-05"},
+    # {"ticker": "SPY", "type": "put_spread", "short_strike": 711, "long_strike": 675,
+    #  "expiration": "2026-10-16", "contracts": 1, "entry_credit": 2.15, "entry_date": "2026-08-01"},
+]
+
+# Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
+# to buy it back -- 0 if it expired worthless / hit max profit) and "exit_date".
+# Shown at the bottom of the app for a rolling window (default 30 days) after
+# exit_date -- pure arithmetic against the recorded exit price, no live quotes
+# needed since the trade is already settled. See positions.py.
+CLOSED_POSITIONS = [
+    # {"ticker": "AVGO", "type": "put", "strike": 300, "expiration": "2026-09-18",
+    #  "contracts": 1, "entry_credit": 7.23, "entry_date": "2026-08-05",
+    #  "exit_cost": 2.10, "exit_date": "2026-08-20"},
+]
+
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
 POP_MIN           = 0.70     # at least 70% POP (delta <= ~0.30); higher POP is fine too
 POP_MAX           = 1.0      # no upper cap
@@ -144,6 +168,7 @@ def td_chain(symbol, expiration):
                     "strike": float(o.get("strike")),
                     "bid": o.get("bid") or 0,
                     "ask": o.get("ask") or 0,
+                    "prevclose": o.get("prevclose") or 0,
                     "delta": g.get("delta"),
                     "iv": g.get("mid_iv") or g.get("smv_vol") or 0,
                     "oi": o.get("open_interest") or 0,

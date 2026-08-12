@@ -20,13 +20,26 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 
 ## Files
 - **`app.py`** — Streamlit UI. Sections: Cash-Secured Puts, Covered Calls, Contract Lookup
-  (sell-side, any ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Discover
-  (placed last -- see below), Legend. Loads TRADIER_TOKEN from st.secrets; 30-min market-clock
-  auto-refresh; editable criteria panels.
+  (sell-side, any ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Discover,
+  Legend, then Open Positions and Closed Positions (last 30 days) at the very bottom -- see below.
+  Loads TRADIER_TOKEN from st.secrets; 30-min market-clock auto-refresh; editable criteria panels.
 - **`wheel_screener.py`** — the engine. Tradier data funcs, Black-Scholes, `evaluate_put`/`evaluate_call`,
   `screen_puts`/`screen_calls`, `lookup_contracts`, the Score, liquidity, cash/target columns,
-  historical AvgPremium lookup, all config constants at the top.
+  historical AvgPremium lookup, all config constants at the top (including `OPEN_POSITIONS` and
+  `CLOSED_POSITIONS`, see `positions.py`).
 - **`spreads.py`** — multi-leg engine (credit spreads + iron condors). Reuses wheel_screener.
+- **`positions.py`** — tracks `OPEN_POSITIONS`/`CLOSED_POSITIONS` (top of `wheel_screener.py`), all
+  assumed sold-to-open (matches everything else in this app). Single-leg entries (`"put"`/`"call"`)
+  need a `"strike"`; spreads (`"put_spread"`/`"call_spread"`) need `"short_strike"`/`"long_strike"`
+  instead. **Open** positions get live-quoted (reuses `spreads.py`'s `_leg_at()` to find each exact
+  contract) to compute cost to close (the ASK -- conservative, what you'd actually pay to buy back),
+  Day \$/% (live mid vs. the contract's own `prevclose`, now captured by `wheel_screener.td_chain()`),
+  and Unrealized G/L (entry credit minus the ASK cost to close). **Closed** positions (add `exit_cost`
+  and `exit_date` to a copy of the entry -- `exit_cost` = 0 if it expired worthless / hit max profit)
+  are pure arithmetic against the recorded exit price, no live quotes needed, and only show for a
+  rolling 30-day window past `exit_date` (the config entry itself is permanent, only the display
+  filters). Edited the same way as `PUT_TICKERS`/`HOLDINGS` -- tell Claude Code your positions, or
+  edit the lists on GitHub directly; not editable from the app itself, so they survive redeploys.
 - **`discover.py`** — shared logic (`run_discovery()`) for finding tickers OUTSIDE `PUT_TICKERS`, from
   a broad ~7,000-ticker US-listed universe (not just the S&P 500), via one batched-quotes pass (price,
   volume, average volume, 1-day % change -- all free in that same call) feeding TWO candidate-selection
@@ -174,8 +187,8 @@ Cash/Contract column anymore (MaxLoss covers that role) and no separate Spread_$
 - Optional: extend AvgPremium to a paid historical-IV source for exactness (currently realized-vol estimate).
 
 ## Workflow reminders
-- Always commit `wheel_screener.py`, `spreads.py`, `app.py` together when a change spans them
-  (a "module has no attribute X" error = files out of sync).
+- Always commit `wheel_screener.py`, `spreads.py`, `app.py`, `discover.py`, `positions.py` together
+  when a change spans them (a "module has no attribute X" error = files out of sync).
 - The .yml workflow files must contain YAML, not Python (a past mistake). They start with `name:`.
 - GitHub scheduled runs can be delayed/dropped; the email workflow also has a manual "Run workflow".
 

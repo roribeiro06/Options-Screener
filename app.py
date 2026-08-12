@@ -19,6 +19,7 @@ except Exception:
 
 import wheel_screener as ws
 import spreads as sp
+import positions
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
@@ -153,6 +154,16 @@ def scan_lookup(ticker, kind, smin, smax, estart, eend):
 @st.cache_data(ttl=600)
 def cached_vix():
     return ws.get_vix()
+
+
+@st.cache_data(ttl=600, show_spinner=True)
+def scan_positions():
+    return positions.build_positions_table()
+
+
+@st.cache_data(ttl=600, show_spinner=True)
+def scan_closed_positions():
+    return positions.build_closed_positions_table()
 
 
 @st.cache_data(ttl=600, show_spinner="Scanning the market for high-open-interest tickers...")
@@ -432,3 +443,45 @@ Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - n
 """)
 except Exception as _e:
     st.caption(f"(legend unavailable: {_e})")
+
+st.markdown("---")
+st.header("Open Positions")
+st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
+           "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
+           "defaults), not from this page, so they survive redeploys. **CostToClose** = the live ASK to "
+           "buy the position back right now (conservative -- what you'd actually pay). **Day $/%** = "
+           "today's move using the live mid-price vs. the contract's own previous close. "
+           "**UnrealizedGL** = EntryCredit minus CostToClose, i.e. what you'd realize if you closed now. "
+           "Same refresh cadence as the rest of the app.")
+try:
+    _dpos, _epos = scan_positions()
+    if len(_dpos):
+        st.dataframe(positions._fmt(_dpos), hide_index=True, use_container_width=True)
+        st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
+                           "open_positions.csv", "text/csv")
+    else:
+        st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
+    if _epos:
+        st.caption("Skipped: " + " | ".join(_epos))
+except Exception as _e:
+    st.caption(f"(positions unavailable: {_e})")
+
+st.markdown("---")
+st.header("Closed Positions (last 30 days)")
+st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of wheel_screener.py -- add "
+           "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
+           "`exit_date` to a copy of the position's entry. Pure arithmetic against the recorded exit price "
+           "-- no live quotes needed since the trade is already settled. Automatically rolls off this list "
+           "30 days after the exit date (the entry stays in the config either way, just stops showing here).")
+try:
+    _dclosed, _eclosed = scan_closed_positions()
+    if len(_dclosed):
+        st.dataframe(positions._fmt(_dclosed), hide_index=True, use_container_width=True)
+        st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
+                           "closed_positions.csv", "text/csv")
+    else:
+        st.write("No closed positions in the last 30 days.")
+    if _eclosed:
+        st.caption("Skipped: " + " | ".join(_eclosed))
+except Exception as _e:
+    st.caption(f"(closed positions unavailable: {_e})")
