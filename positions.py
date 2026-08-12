@@ -6,16 +6,21 @@ screens for).
 
 OPEN positions: live-quotes the exact contract(s) and computes
   - current cost to close (buy back the short leg(s), at the ASK -- the real,
-    conservative price you'd actually pay right now)
-  - Day $/% -- today's move using MID (bid+ask)/2 vs. the contract's own
-    prevclose, matching how a brokerage shows daily P&L (not a worst-case
-    execution price, just "did this get cheaper or richer today")
+    conservative price you'd actually pay right now), and the live MID price
+    shown next to each strike in the Strikes column
   - Unrealized G/L -- entry credit minus the ASK cost to close, the number
     you'd actually realize if you closed right now
 
 CLOSED positions: pure arithmetic against the recorded exit price (no live
 quotes -- the trade is already settled), shown for a rolling window (default
 30 days) after the exit date so the list doesn't grow forever.
+
+Both tables also carry a MaxLoss column -- same convention as the rest of
+the app (wheel_screener.py/spreads.py): strike - premium for puts, cost
+basis - premium for covered calls (needs the ticker in wheel_screener.HOLDINGS,
+else undefined/"-"), width - credit for spreads -- used to roll up each
+section's Total Potential Gain/Loss and Return on Risk (see
+build_open_financials/build_closed_financials).
 
 Single-leg positions ("put"/"call") need a "strike"; spreads ("put_spread"/
 "call_spread") need "short_strike" and "long_strike" instead -- the short
@@ -33,10 +38,10 @@ TYPE_LABELS = {"put": "Put", "call": "Covered Call",
               "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
 
 POSITIONS_COLS = ["Ticker", "Type", "Strikes", "Expiration", "DTE", "Opened", "Contracts",
-                  "EntryCredit", "CostToClose", "Day_$", "Day_%", "UnrealizedGL_$", "UnrealizedGL_%"]
+                  "MaxLoss", "EntryCredit", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%"]
 CLOSED_COLS = ["Ticker", "Type", "Strikes", "Expiration", "Opened", "Closed", "DaysHeld",
-              "Contracts", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%"]
-PCT_COLS = {"Day_%", "UnrealizedGL_%", "RealizedGL_%"}
+              "Contracts", "MaxLoss", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%"]
+PCT_COLS = {"UnrealizedGL_%", "RealizedGL_%"}
 
 
 def _leg_prices(chain, kind, strike):
@@ -48,12 +53,42 @@ def _leg_prices(chain, kind, strike):
     return (leg.get("bid") or 0, leg.get("ask") or 0, leg.get("prevclose") or 0)
 
 
-def _strikes_display(pos):
+def _strikes_display(pos, live=None):
+    """`live` (only passed for OPEN positions) is the current MID price to
+    show next to the strike -- a single float for put/call, or a
+    (short_mid, long_mid) pair for spreads."""
     kind = pos["type"]
     if kind in ("put", "call"):
-        return f"{pos['strike']:g}"
+        s = f"{pos['strike']:g}"
+        if live is not None:
+            s += f" (now ${live:.2f})"
+        return s
     if kind in ("put_spread", "call_spread"):
-        return f"{pos['short_strike']:g}/{pos['long_strike']:g}"
+        short_s, long_s = f"{pos['short_strike']:g}", f"{pos['long_strike']:g}"
+        if live is not None:
+            short_mid, long_mid = live
+            short_s += f" (now ${short_mid:.2f})"
+            long_s += f" (now ${long_mid:.2f})"
+        return f"{short_s}/{long_s}"
+    raise RuntimeError(f"unknown position type {kind!r} for {pos.get('ticker', '?')}")
+
+
+def _max_loss_per_share(pos):
+    """Same convention as wheel_screener.py/spreads.py: strike - premium for
+    puts (assigned, stock to zero); cost basis - premium for covered calls
+    (needs the ticker in wheel_screener.HOLDINGS, else NaN -- undefined/
+    unbounded risk, same as a naked call in Contract Lookup); width - credit
+    for spreads (always defined-risk)."""
+    kind = pos["type"]
+    credit = pos["entry_credit"]
+    if kind == "put":
+        return pos["strike"] - credit
+    if kind == "call":
+        cost_basis = ws.HOLDINGS.get(pos["ticker"])
+        return (cost_basis - credit) if cost_basis is not None else float("nan")
+    if kind in ("put_spread", "call_spread"):
+        width = abs(pos["short_strike"] - pos["long_strike"])
+        return width - credit
     raise RuntimeError(f"unknown position type {kind!r} for {pos.get('ticker', '?')}")
 
 
@@ -72,16 +107,15 @@ def evaluate_position(pos, today):
     if not chain:
         raise RuntimeError(f"no option chain for {ticker} {exp} (expired or invalid expiration?)")
 
-    strikes_display = _strikes_display(pos)
     if kind in ("put", "call"):
         strike = pos["strike"]
         leg = _leg_prices(chain, kind, strike)
         if not leg:
             raise RuntimeError(f"contract not found: {ticker} {strike:g}{kind[0].upper()} {exp}")
-        bid, ask, prevclose = leg
+        bid, ask, _prevclose = leg
         cost_to_close = ask
         mid_now = (bid + ask) / 2
-        prev_mid = prevclose
+        strikes_display = _strikes_display(pos, live=mid_now)
     else:  # put_spread / call_spread
         opt_type = "put" if kind == "put_spread" else "call"
         short_strike, long_strike = pos["short_strike"], pos["long_strike"]
@@ -89,23 +123,19 @@ def evaluate_position(pos, today):
         long_leg = _leg_prices(chain, opt_type, long_strike)
         if not (short_leg and long_leg):
             raise RuntimeError(f"leg(s) not found: {ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}")
-        s_bid, s_ask, s_prev = short_leg
-        l_bid, l_ask, l_prev = long_leg
+        s_bid, s_ask, _s_prev = short_leg
+        l_bid, l_ask, _l_prev = long_leg
         cost_to_close = s_ask - l_bid                       # buy back short, sell long
-        mid_now = (s_bid + s_ask) / 2 - (l_bid + l_ask) / 2
-        prev_mid = (s_prev - l_prev) if (s_prev and l_prev) else 0
+        short_mid, long_mid = (s_bid + s_ask) / 2, (l_bid + l_ask) / 2
+        strikes_display = _strikes_display(pos, live=(short_mid, long_mid))
 
     unrealized_pl = entry_credit - cost_to_close
     unrealized_pl_pct = (unrealized_pl / entry_credit) if entry_credit else float("nan")
 
-    day_pl = (prev_mid - mid_now) if prev_mid else float("nan")   # cheaper today = gain on a short position
-    day_pl_pct = (day_pl / prev_mid) if prev_mid else float("nan")
-
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strikes": strikes_display,
             "Expiration": exp, "DTE": dte, "Opened": pos.get("entry_date", "-"),
-            "Contracts": contracts, "EntryCredit": entry_credit, "CostToClose": round(cost_to_close, 2),
-            "Day_$": (round(day_pl * 100 * contracts, 2) if day_pl == day_pl else float("nan")),
-            "Day_%": day_pl_pct,
+            "Contracts": contracts, "MaxLoss": round(_max_loss_per_share(pos), 2),
+            "EntryCredit": entry_credit, "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
             "UnrealizedGL_%": unrealized_pl_pct}
 
@@ -147,6 +177,7 @@ def evaluate_closed_position(pos):
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strikes": _strikes_display(pos),
             "Expiration": pos["expiration"], "Opened": pos["entry_date"], "Closed": pos["exit_date"],
             "DaysHeld": (exit_date - entry_date).days, "Contracts": contracts,
+            "MaxLoss": round(_max_loss_per_share(pos), 2),
             "EntryCredit": entry_credit, "ExitCost": exit_cost,
             "RealizedGL_$": round(realized_pl * 100 * contracts, 2),
             "RealizedGL_%": realized_pl_pct}
@@ -171,7 +202,7 @@ def build_closed_positions_table(window_days=30):
             print(f"CLOSED POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=CLOSED_COLS), errs
-    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Opened", ascending=False)
+    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Opened", ascending=True)
     return df, errs
 
 
@@ -180,10 +211,117 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if v == v else "-")
-    for c in ("EntryCredit", "CostToClose", "ExitCost"):
+    # EntryCredit: "$/share (total premium across Contracts)", same convention as Premium/MaxLoss elsewhere.
+    if "EntryCredit" in d.columns and "Contracts" in d.columns:
+        d["EntryCredit"] = [f"${v:.2f} (${v * 100 * int(n):,.2f})" if v == v else "-"
+                            for v, n in zip(d["EntryCredit"], d["Contracts"])]
+    elif "EntryCredit" in d.columns:
+        d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
+    for c in ("CostToClose", "ExitCost"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if v == v else "-")
-    for c in ("Day_$", "UnrealizedGL_$", "RealizedGL_$"):
+    # MaxLoss: "$/share (total across Contracts)", same convention as wheel_screener.py/spreads.py.
+    if "MaxLoss" in d.columns and "Contracts" in d.columns:
+        d["MaxLoss"] = [f"${v:.2f} (${v * 100 * int(n):,.2f})" if v == v else "-"
+                        for v, n in zip(d["MaxLoss"], d["Contracts"])]
+    elif "MaxLoss" in d.columns:
+        d["MaxLoss"] = d["MaxLoss"].apply(lambda v: f"${v:.2f}" if v == v else "-")
+    for c in ("UnrealizedGL_$", "RealizedGL_$"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: (f"+${v:,.2f}" if v > 0 else f"-${abs(v):,.2f}") if v == v else "-")
     return d
+
+
+FINANCIALS_COLS = ["Metric", "Value"]
+
+
+def _fmt_dollar_signed(v):
+    if v != v:
+        return "-"
+    return f"+${v:,.2f}" if v > 0 else (f"-${abs(v):,.2f}" if v < 0 else "$0.00")
+
+
+def _fmt_dollar(v):
+    return f"${v:,.2f}" if v == v else "-"
+
+
+def _fmt_pct(v):
+    return f"{v*100:.1f}%" if v == v else "-"
+
+
+def _peak_concurrent_loss(intervals):
+    """intervals: list of (start_date, end_date_inclusive, loss_dollars) --
+    the total dollar Max Loss "at risk" between when each position opened
+    and when it closed (or today, if still open). Returns the largest sum of
+    loss_dollars among positions simultaneously open on the same day -- e.g.
+    if 4 positions were open together on one day, their combined loss is one
+    candidate. Only every interval's OWN start date needs checking, since the
+    running total can only increase right after a position opens (adding a
+    position never decreases the sum for that instant). NaN entries
+    (undefined max loss, e.g. a covered call with no cost basis on file) are
+    excluded from every day's sum -- can't bound an unknown risk."""
+    valid = [(s, e, v) for s, e, v in intervals if v == v]
+    if not valid:
+        return float("nan")
+    return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
+
+
+def _financials_table(realized_label, realized_total, intervals, premium_total, unbounded):
+    import pandas as pd
+    loss_total = sum(v for _, _, v in intervals if v == v)
+    peak_loss = _peak_concurrent_loss(intervals)
+    ror_total = (premium_total / loss_total) if loss_total else float("nan")
+    ror_peak = (premium_total / peak_loss) if peak_loss else float("nan")
+    rows = [
+        (realized_label, _fmt_dollar_signed(realized_total)),
+        ("Total Potential Gain (premium collected)", _fmt_dollar(premium_total)),
+        ("Total Potential Loss / Money On Hold", _fmt_dollar(loss_total)),
+        ("Max Loss of Contracts Open Simultaneously (1D)", _fmt_dollar(peak_loss)),
+        ("Return on Risk (vs Total Potential Loss)", _fmt_pct(ror_total)),
+        ("Return on Risk (vs Max Loss 1D)", _fmt_pct(ror_peak)),
+    ]
+    if unbounded:
+        rows.append(("Note", "One or more positions have no cost basis in wheel_screener.HOLDINGS -- "
+                             "excluded from Potential Loss / Return on Risk above (risk undefined)."))
+    return pd.DataFrame(rows, columns=FINANCIALS_COLS)
+
+
+def build_open_financials(dpos_df):
+    """dpos_df is the already-live-quoted Open Positions dataframe (from
+    build_positions_table) -- its UnrealizedGL_$ is summed here rather than
+    re-quoting every contract a second time. Every OPEN_POSITIONS entry is
+    still open today, so its risk interval always runs from entry_date to
+    today."""
+    today = dt.date.today()
+    premium_total, unbounded = 0.0, False
+    intervals = []
+    for pos in ws.OPEN_POSITIONS:
+        premium_total += pos["entry_credit"] * 100 * pos["contracts"]
+        loss = _max_loss_per_share(pos)
+        loss_total = loss * 100 * pos["contracts"] if loss == loss else float("nan")
+        unbounded = unbounded or (loss_total != loss_total)
+        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
+        intervals.append((entry, today, loss_total))
+    realized_total = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
+    return _financials_table("Total Unrealized G/L", realized_total, intervals, premium_total, unbounded)
+
+
+def build_closed_financials(dclosed_df, window_days=30):
+    """dclosed_df is the already-window-filtered Closed Positions dataframe
+    (from build_closed_positions_table) -- its RealizedGL_$ is summed here;
+    every metric here is scoped to the same rolling window."""
+    today = dt.date.today()
+    premium_total, unbounded = 0.0, False
+    intervals = []
+    for pos in ws.CLOSED_POSITIONS:
+        exit_date = dt.date.fromisoformat(pos["exit_date"])
+        if (today - exit_date).days > window_days:
+            continue
+        premium_total += pos["entry_credit"] * 100 * pos["contracts"]
+        loss = _max_loss_per_share(pos)
+        loss_total = loss * 100 * pos["contracts"] if loss == loss else float("nan")
+        unbounded = unbounded or (loss_total != loss_total)
+        entry = dt.date.fromisoformat(pos["entry_date"])
+        intervals.append((entry, exit_date, loss_total))
+    realized_total = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
+    return _financials_table("Total Realized G/L", realized_total, intervals, premium_total, unbounded)

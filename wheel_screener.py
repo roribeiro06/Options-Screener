@@ -36,6 +36,7 @@ HOLDINGS = {
     "GOOG": 359.91,
     "NVDA": 203.925,
     "SMH": 573.6451,
+    "MSFT": 424.7193,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
@@ -46,21 +47,21 @@ HOLDINGS = {
 # spreads need "short_strike" and "long_strike" instead. See positions.py.
 OPEN_POSITIONS = [
     {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
-     "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.41},
+     "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.41, "entry_date": "2026-08-07"},
     {"ticker": "AVGO", "type": "call", "strike": 415, "expiration": "2026-08-21",
-     "contracts": 1, "entry_credit": 12.05},
+     "contracts": 1, "entry_credit": 12.05, "entry_date": "2026-07-21"},
     {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
-     "contracts": 8, "entry_credit": 1.55},
+     "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
     {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
-     "contracts": 30, "entry_credit": 2.50},
+     "contracts": 30, "entry_credit": 2.50, "entry_date": "2026-07-29"},
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
-     "contracts": 3, "entry_credit": 9.75},
+     "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
     {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
-     "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13},
+     "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13, "entry_date": "2026-08-10"},
     {"ticker": "MRVL", "type": "put_spread", "short_strike": 185, "long_strike": 175,
-     "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27},
+     "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27, "entry_date": "2026-08-11"},
     {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
-     "contracts": 1, "entry_credit": 10.35},
+     "contracts": 1, "entry_credit": 10.35, "entry_date": "2026-07-30"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid

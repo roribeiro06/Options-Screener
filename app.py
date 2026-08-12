@@ -384,19 +384,22 @@ st.markdown("---")
 st.header("Open Positions")
 st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
            "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
-           "defaults), not from this page, so they survive redeploys. **CostToClose** = the live ASK to "
-           "buy the position back right now (conservative -- what you'd actually pay). **Day $/%** = "
-           "today's move using the live mid-price vs. the contract's own previous close. "
+           "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
+           "first). **Strikes** shows each leg's live MID price next to it. **CostToClose** = the live "
+           "ASK to buy the position back right now (conservative -- what you'd actually pay). "
+           "**MaxLoss**/**EntryCredit** show \\$/share with the total across Contracts in parentheses -- "
+           "MaxLoss is strike - premium for puts, cost basis - premium for covered calls (needs the "
+           "ticker in `HOLDINGS`, else undefined), width - credit for spreads. "
            "**UnrealizedGL** = EntryCredit minus CostToClose, i.e. what you'd realize if you closed now. "
            "Same refresh cadence as the rest of the app.")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
         st.dataframe(positions._fmt(_dpos), hide_index=True, use_container_width=True)
-        _tot_unreal = _dpos["UnrealizedGL_$"].sum()
-        st.markdown(f"**Total Unrealized G/L: {'+' if _tot_unreal >= 0 else '-'}${abs(_tot_unreal):,.2f}**")
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
+        st.markdown("**Financials**")
+        st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
     if _epos:
@@ -408,17 +411,19 @@ st.markdown("---")
 st.header("Closed Positions (last 30 days)")
 st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of wheel_screener.py -- add "
            "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
-           "`exit_date` to a copy of the position's entry. Pure arithmetic against the recorded exit price "
-           "-- no live quotes needed since the trade is already settled. Automatically rolls off this list "
-           "30 days after the exit date (the entry stays in the config either way, just stops showing here).")
+           "`exit_date` to a copy of the position's entry. Sorted by Date Opened (oldest first). Pure "
+           "arithmetic against the recorded exit price -- no live quotes needed since the trade is already "
+           "settled. **MaxLoss**/**EntryCredit** show \\$/share with the total across Contracts in "
+           "parentheses, same convention as Open Positions. Automatically rolls off this list 30 days "
+           "after the exit date (the entry stays in the config either way, just stops showing here).")
 try:
     _dclosed, _eclosed = scan_closed_positions()
     if len(_dclosed):
         st.dataframe(positions._fmt(_dclosed), hide_index=True, use_container_width=True)
-        _tot_real = _dclosed["RealizedGL_$"].sum()
-        st.markdown(f"**Total Realized G/L: {'+' if _tot_real >= 0 else '-'}${abs(_tot_real):,.2f}**")
         st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
                            "closed_positions.csv", "text/csv")
+        st.markdown("**Financials**")
+        st.dataframe(positions.build_closed_financials(_dclosed), hide_index=True, use_container_width=True)
     else:
         st.write("No closed positions in the last 30 days.")
     if _eclosed:
