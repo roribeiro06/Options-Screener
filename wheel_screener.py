@@ -78,6 +78,14 @@ CLOSED_POSITIONS = [
     {"ticker": "EWY", "type": "put", "strike": 135, "expiration": "2026-08-21",
      "contracts": 3, "entry_credit": 3.4999, "entry_date": "2026-07-31",
      "exit_cost": 0.40, "exit_date": "2026-08-10"},
+    # MRVL 250C -- two separate tax lots (opened/closed at different times), kept
+    # as two entries rather than combined so each reconciles individually.
+    {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-08-21",
+     "contracts": 2, "entry_credit": 7.7999, "entry_date": "2026-08-04",
+     "exit_cost": 1.30, "exit_date": "2026-08-11"},
+    {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-08-21",
+     "contracts": 2, "entry_credit": 10.2998, "entry_date": "2026-07-21",
+     "exit_cost": 1.65, "exit_date": "2026-07-28"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
