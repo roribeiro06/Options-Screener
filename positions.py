@@ -16,12 +16,13 @@ CLOSED positions: pure arithmetic against the recorded exit price (no live
 quotes -- the trade is already settled), shown for a rolling window (default
 30 days) after the exit date so the list doesn't grow forever.
 
-Both tables also carry a MaxLoss column -- same convention as the rest of
-the app (wheel_screener.py/spreads.py): strike - premium for puts, cost
-basis - premium for covered calls (needs the ticker in wheel_screener.HOLDINGS,
-else undefined/"-"), width - credit for spreads -- used to roll up each
-section's Total Potential Gain/Loss and Return on Risk (see
-build_open_financials/build_closed_financials).
+Both tables also carry a MaxLoss column (last column in both) -- same
+convention as the rest of the app (wheel_screener.py/spreads.py): strike -
+premium for puts, cost basis - premium for covered calls (needs the ticker
+in wheel_screener.HOLDINGS, else undefined/"-"), width - credit for spreads
+-- rolled up across every OPEN + recently-CLOSED position into one combined
+Financials table (see build_combined_financials): G/L broken out by
+strategy type, accumulated risk/premium, and Return on Risk.
 
 Single-leg positions ("put"/"call") need a "strike"; spreads ("put_spread"/
 "call_spread") need "short_strike" and "long_strike" instead -- the short
@@ -38,10 +39,10 @@ import spreads as sp
 TYPE_LABELS = {"put": "Put", "call": "Covered Call",
               "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
 
-POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "Opened",
-                  "Contracts", "EntryCredit", "MaxLoss", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%"]
+POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "DaysHeld", "Opened",
+                  "Contracts", "EntryCredit", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%", "MaxLoss"]
 CLOSED_COLS = ["Ticker", "Type", "Strike", "Expiration", "Opened", "Closed", "DaysHeld",
-              "Contracts", "EntryCredit", "MaxLoss", "ExitCost", "RealizedGL_$", "RealizedGL_%"]
+              "Contracts", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%", "MaxLoss"]
 PCT_COLS = {"UnrealizedGL_%", "RealizedGL_%"}
 
 
@@ -101,6 +102,8 @@ def evaluate_position(pos, today):
     dte = (exp_date - today).days
     contracts = pos["contracts"]
     entry_credit = pos["entry_credit"]
+    entry_date_str = pos.get("entry_date")
+    days_held = (today - dt.date.fromisoformat(entry_date_str)).days if entry_date_str else float("nan")
 
     chain = ws.td_chain(ticker, exp)
     if not chain:
@@ -131,11 +134,10 @@ def evaluate_position(pos, today):
 
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "CurrentPrice": (round(current_price, 2) if current_price else float("nan")),
-            "Expiration": exp, "DTE": dte, "Opened": pos.get("entry_date", "-"),
-            "Contracts": contracts, "EntryCredit": entry_credit, "MaxLoss": round(_max_loss_per_share(pos), 2),
-            "CostToClose": round(cost_to_close, 2),
+            "Expiration": exp, "DTE": dte, "DaysHeld": days_held, "Opened": entry_date_str or "-",
+            "Contracts": contracts, "EntryCredit": entry_credit, "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
-            "UnrealizedGL_%": unrealized_pl_pct}
+            "UnrealizedGL_%": unrealized_pl_pct, "MaxLoss": round(_max_loss_per_share(pos), 2)}
 
 
 def build_positions_table():
@@ -175,9 +177,9 @@ def evaluate_closed_position(pos):
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "Expiration": pos["expiration"], "Opened": pos["entry_date"], "Closed": pos["exit_date"],
             "DaysHeld": (exit_date - entry_date).days, "Contracts": contracts,
-            "EntryCredit": entry_credit, "MaxLoss": round(_max_loss_per_share(pos), 2), "ExitCost": exit_cost,
+            "EntryCredit": entry_credit, "ExitCost": exit_cost,
             "RealizedGL_$": round(realized_pl * 100 * contracts, 2),
-            "RealizedGL_%": realized_pl_pct}
+            "RealizedGL_%": realized_pl_pct, "MaxLoss": round(_max_loss_per_share(pos), 2)}
 
 
 def build_closed_positions_table(window_days=30):
@@ -263,33 +265,52 @@ def _peak_concurrent_loss(intervals):
     return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
 
 
-def _financials_table(realized_label, realized_total, intervals, premium_total, unbounded):
+TYPE_BUCKETS = {"Put": "Put Contracts", "Covered Call": "Call Contracts",
+                "Put Credit Spread": "Put Spread Contracts", "Call Credit Spread": "Call Spread Contracts",
+                "Iron Condor": "Iron Condor Contracts"}
+BUCKET_ORDER = ["Put Contracts", "Call Contracts", "Put Spread Contracts",
+               "Call Spread Contracts", "Iron Condor Contracts"]
+
+
+def build_combined_financials(dpos_df, dclosed_df, window_days=30):
+    """One Financials table covering every OPEN_POSITIONS entry plus every
+    CLOSED_POSITIONS entry within `window_days` (matching what's actually
+    shown in the two tables above it):
+      - G/L by strategy type (Put/Call/Put Spread/Call Spread/Iron Condor
+        Contracts), unrealized (open) and realized (closed) separately
+      - Max Profit Accumulated -- total premium collected across every one
+        of those positions, plus the actual Unrealized/Realized G/L totals
+      - Max Loss Accumulated -- the summed MaxLoss across every position
+        (their combined worst case, if every single one hit simultaneously)
+      - Max Loss 1D -- the highest that combined MaxLoss actually got on any
+        ONE day, via an interval-overlap sweep across every position's
+        entry-to-exit (or entry-to-today, if still open) window
+      - Return on Risk (ROR%) for both loss figures -- premium collected
+        divided by each
+    dpos_df/dclosed_df are the already-computed tables from
+    build_positions_table()/build_closed_positions_table(window_days) --
+    reused here for their G/L sums rather than re-quoting every contract."""
     import pandas as pd
-    loss_total = sum(v for _, _, v in intervals if v == v)
-    peak_loss = _peak_concurrent_loss(intervals)
-    ror_total = (premium_total / loss_total) if loss_total else float("nan")
-    ror_peak = (premium_total / peak_loss) if peak_loss else float("nan")
-    rows = [
-        (realized_label, _fmt_dollar_signed(realized_total)),
-        ("Total Potential Gain (premium collected)", _fmt_dollar(premium_total)),
-        ("Total Potential Loss / Money On Hold", _fmt_dollar(loss_total)),
-        ("Max Loss of Contracts Open Simultaneously (1D)", _fmt_dollar(peak_loss)),
-        ("Return on Risk (vs Total Potential Loss)", _fmt_pct(ror_total)),
-        ("Return on Risk (vs Max Loss 1D)", _fmt_pct(ror_peak)),
-    ]
-    if unbounded:
-        rows.append(("Note", "One or more positions have no cost basis in wheel_screener.HOLDINGS -- "
-                             "excluded from Potential Loss / Return on Risk above (risk undefined)."))
-    return pd.DataFrame(rows, columns=FINANCIALS_COLS)
-
-
-def build_open_financials(dpos_df):
-    """dpos_df is the already-live-quoted Open Positions dataframe (from
-    build_positions_table) -- its UnrealizedGL_$ is summed here rather than
-    re-quoting every contract a second time. Every OPEN_POSITIONS entry is
-    still open today, so its risk interval always runs from entry_date to
-    today."""
     today = dt.date.today()
+
+    unreal_by_bucket = {b: 0.0 for b in BUCKET_ORDER}
+    real_by_bucket = {b: 0.0 for b in BUCKET_ORDER}
+    if len(dpos_df):
+        for t, grp in dpos_df.groupby("Type"):
+            b = TYPE_BUCKETS.get(t)
+            if b:
+                unreal_by_bucket[b] += grp["UnrealizedGL_$"].sum()
+    if len(dclosed_df):
+        for t, grp in dclosed_df.groupby("Type"):
+            b = TYPE_BUCKETS.get(t)
+            if b:
+                real_by_bucket[b] += grp["RealizedGL_$"].sum()
+
+    rows = []
+    for b in BUCKET_ORDER:
+        rows.append((f"{b} -- Unrealized G/L", _fmt_dollar_signed(unreal_by_bucket[b])))
+        rows.append((f"{b} -- Realized G/L", _fmt_dollar_signed(real_by_bucket[b])))
+
     premium_total, unbounded = 0.0, False
     intervals = []
     for pos in ws.OPEN_POSITIONS:
@@ -299,17 +320,6 @@ def build_open_financials(dpos_df):
         unbounded = unbounded or (loss_total != loss_total)
         entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
         intervals.append((entry, today, loss_total))
-    realized_total = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
-    return _financials_table("Total Unrealized G/L", realized_total, intervals, premium_total, unbounded)
-
-
-def build_closed_financials(dclosed_df, window_days=30):
-    """dclosed_df is the already-window-filtered Closed Positions dataframe
-    (from build_closed_positions_table) -- its RealizedGL_$ is summed here;
-    every metric here is scoped to the same rolling window."""
-    today = dt.date.today()
-    premium_total, unbounded = 0.0, False
-    intervals = []
     for pos in ws.CLOSED_POSITIONS:
         exit_date = dt.date.fromisoformat(pos["exit_date"])
         if (today - exit_date).days > window_days:
@@ -320,5 +330,25 @@ def build_closed_financials(dclosed_df, window_days=30):
         unbounded = unbounded or (loss_total != loss_total)
         entry = dt.date.fromisoformat(pos["entry_date"])
         intervals.append((entry, exit_date, loss_total))
-    realized_total = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
-    return _financials_table("Total Realized G/L", realized_total, intervals, premium_total, unbounded)
+
+    loss_accumulated = sum(v for _, _, v in intervals if v == v)
+    peak_loss = _peak_concurrent_loss(intervals)
+    ror_accum = (premium_total / loss_accumulated) if loss_accumulated else float("nan")
+    ror_peak = (premium_total / peak_loss) if peak_loss else float("nan")
+
+    total_unrealized = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
+    total_realized = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
+
+    rows += [
+        ("Max Profit Accumulated ($)", _fmt_dollar(premium_total)),
+        ("Max Profit -- Unrealized G/L (Open)", _fmt_dollar_signed(total_unrealized)),
+        ("Max Profit -- Realized G/L (Closed)", _fmt_dollar_signed(total_realized)),
+        ("Max Loss Accumulated ($)", _fmt_dollar(loss_accumulated)),
+        ("Max Loss Accumulated (ROR%)", _fmt_pct(ror_accum)),
+        ("Max Loss 1D ($)", _fmt_dollar(peak_loss)),
+        ("Max Loss 1D (ROR%)", _fmt_pct(ror_peak)),
+    ]
+    if unbounded:
+        rows.append(("Note", "One or more positions have no cost basis in wheel_screener.HOLDINGS -- "
+                             "excluded from Max Loss Accumulated/1D above (risk undefined)."))
+    return pd.DataFrame(rows, columns=FINANCIALS_COLS)

@@ -386,23 +386,20 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
            "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
-           "to **Strike**. **CostToClose** = the live ASK to buy the position back right now "
-           "(conservative -- what you'd actually pay). **EntryCredit**/**MaxLoss** show \\$/share with "
-           "the total across Contracts in parentheses -- MaxLoss is the net worst-case loss (premium "
-           "already collected always reduces it): strike - premium for puts (assigned, stock to zero), "
-           "cost basis - premium for covered calls (needs the ticker in `HOLDINGS`, else undefined), "
-           "width - credit "
-           "for spreads (already capped by the long leg, no stock-to-zero assumption needed). "
-           "**UnrealizedGL** = EntryCredit minus CostToClose, i.e. what you'd realize if you closed now. "
-           "Same refresh cadence as the rest of the app.")
+           "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live ASK to buy the "
+           "position back right now (conservative -- what you'd actually pay). **EntryCredit** shows "
+           "\\$/share with the total across Contracts in parentheses. **UnrealizedGL** = EntryCredit "
+           "minus CostToClose, i.e. what you'd realize if you closed now. **MaxLoss** (last column) is "
+           "the net worst-case loss (premium already collected always reduces it): strike - premium for "
+           "puts (assigned, stock to zero), cost basis - premium for covered calls (needs the ticker in "
+           "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
+           "stock-to-zero assumption needed). Same refresh cadence as the rest of the app.")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
         st.dataframe(positions._fmt(_dpos), hide_index=True, use_container_width=True)
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
-        st.markdown("**Financials**")
-        st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
     if _epos:
@@ -416,23 +413,40 @@ st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of 
            "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
            "`exit_date` to a copy of the position's entry. Sorted by Date Opened (oldest first). Pure "
            "arithmetic against the recorded exit price -- no live quotes needed since the trade is already "
-           "settled. **EntryCredit**/**MaxLoss** show \\$/share with the total across Contracts in "
-           "parentheses, same convention as Open Positions. Automatically rolls off this list 30 days "
-           "after the exit date (the entry stays in the config either way, just stops showing here).")
+           "settled. **EntryCredit** shows \\$/share with the total across Contracts in parentheses, same "
+           "convention as Open Positions. **MaxLoss** (last column) uses the same convention as Open "
+           "Positions too. Automatically rolls off this list 30 days after the exit date (the entry stays "
+           "in the config either way, just stops showing here).")
 try:
     _dclosed, _eclosed = scan_closed_positions()
     if len(_dclosed):
         st.dataframe(positions._fmt(_dclosed), hide_index=True, use_container_width=True)
         st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
                            "closed_positions.csv", "text/csv")
-        st.markdown("**Financials**")
-        st.dataframe(positions.build_closed_financials(_dclosed), hide_index=True, use_container_width=True)
     else:
         st.write("No closed positions in the last 30 days.")
     if _eclosed:
         st.caption("Skipped: " + " | ".join(_eclosed))
 except Exception as _e:
     st.caption(f"(closed positions unavailable: {_e})")
+
+st.markdown("---")
+st.header("Financials")
+st.caption("Rolls up every Open Position plus every Closed Position shown above (last 30 days) into one "
+           "summary. G/L is broken out by strategy type (unrealized from Open Positions, realized from "
+           "Closed Positions). **Max Profit Accumulated** = total premium collected across all of them. "
+           "**Max Loss Accumulated** = their combined MaxLoss, i.e. the worst case if every position hit "
+           "simultaneously. **Max Loss 1D** = the highest that combined MaxLoss actually reached on any "
+           "single day, found by sweeping each position's entry-to-exit (or entry-to-today, if still "
+           "open) window for the day with the most overlapping risk. **ROR%** = Max Profit Accumulated "
+           "divided by each of those loss figures.")
+try:
+    _dpos_fin, _ = scan_positions()
+    _dclosed_fin, _ = scan_closed_positions()
+    st.dataframe(positions.build_combined_financials(_dpos_fin, _dclosed_fin),
+                hide_index=True, use_container_width=True)
+except Exception as _e:
+    st.caption(f"(financials unavailable: {_e})")
 
 st.markdown("---")
 st.header("Legend - criteria in effect")
