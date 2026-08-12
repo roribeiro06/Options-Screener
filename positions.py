@@ -64,15 +64,22 @@ def _strikes_display(pos):
 
 
 def _max_loss_per_share(pos):
-    """Same convention as wheel_screener.py/spreads.py: strike - premium for
-    puts (assigned, stock to zero); cost basis - premium for covered calls
-    (needs the ticker in wheel_screener.HOLDINGS, else NaN -- undefined/
-    unbounded risk, same as a naked call in Contract Lookup); width - credit
-    for spreads (always defined-risk)."""
+    """The real cash on the line for this position, not a stock-to-zero
+    worst case -- except for covered calls, where stock-to-zero against your
+    actual cost basis genuinely is the worst case.
+      - put: the full cash-secured collateral (the strike) -- what you'd
+        need on hand to buy the shares if assigned, not netted by the
+        premium already collected
+      - call (covered): cost basis - premium (needs the ticker in
+        wheel_screener.HOLDINGS, else NaN -- undefined/unbounded risk, same
+        as a naked call in Contract Lookup)
+      - put_spread/call_spread: width - credit -- already the true worst
+        case for a defined-risk spread, capped by the long leg regardless
+        of how far the stock moves, so no stock-to-zero assumption applies"""
     kind = pos["type"]
     credit = pos["entry_credit"]
     if kind == "put":
-        return pos["strike"] - credit
+        return pos["strike"]
     if kind == "call":
         cost_basis = ws.HOLDINGS.get(pos["ticker"])
         return (cost_basis - credit) if cost_basis is not None else float("nan")
