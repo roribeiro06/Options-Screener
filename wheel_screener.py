@@ -45,10 +45,22 @@ HOLDINGS = {
 # "put", "call", "put_spread", "call_spread". Single-leg entries need "strike";
 # spreads need "short_strike" and "long_strike" instead. See positions.py.
 OPEN_POSITIONS = [
-    # {"ticker": "AVGO", "type": "put", "strike": 300, "expiration": "2026-09-18",
-    #  "contracts": 1, "entry_credit": 7.23, "entry_date": "2026-08-05"},
-    # {"ticker": "SPY", "type": "put_spread", "short_strike": 711, "long_strike": 675,
-    #  "expiration": "2026-10-16", "contracts": 1, "entry_credit": 2.15, "entry_date": "2026-08-01"},
+    {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
+     "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.41},
+    {"ticker": "AVGO", "type": "call", "strike": 415, "expiration": "2026-08-21",
+     "contracts": 1, "entry_credit": 12.05},
+    {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
+     "contracts": 8, "entry_credit": 1.55},
+    {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
+     "contracts": 30, "entry_credit": 2.50},
+    {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
+     "contracts": 3, "entry_credit": 9.75},
+    {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
+     "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13},
+    {"ticker": "MRVL", "type": "put_spread", "short_strike": 185, "long_strike": 175,
+     "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27},
+    {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
+     "contracts": 1, "entry_credit": 10.35},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -57,9 +69,15 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
-    # {"ticker": "AVGO", "type": "put", "strike": 300, "expiration": "2026-09-18",
-    #  "contracts": 1, "entry_credit": 7.23, "entry_date": "2026-08-05",
-    #  "exit_cost": 2.10, "exit_date": "2026-08-20"},
+    {"ticker": "DKNG", "type": "call", "strike": 25, "expiration": "2026-08-21",
+     "contracts": 11, "entry_credit": 1.77, "entry_date": "2026-07-17",
+     "exit_cost": 0.3795, "exit_date": "2026-08-06"},
+    {"ticker": "KHC", "type": "call", "strike": 25, "expiration": "2026-07-31",
+     "contracts": 30, "entry_credit": 0.445, "entry_date": "2026-06-17",
+     "exit_cost": 2.65, "exit_date": "2026-07-29"},
+    {"ticker": "EWY", "type": "put", "strike": 135, "expiration": "2026-08-21",
+     "contracts": 3, "entry_credit": 3.4999, "entry_date": "2026-07-31",
+     "exit_cost": 0.40, "exit_date": "2026-08-10"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
