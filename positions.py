@@ -126,7 +126,8 @@ def build_positions_table():
             print(f"POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=POSITIONS_COLS), errs
-    return pd.DataFrame(rows)[POSITIONS_COLS], errs
+    df = pd.DataFrame(rows)[POSITIONS_COLS].sort_values("DTE", ascending=True)
+    return df, errs
 
 
 def evaluate_closed_position(pos):
@@ -170,7 +171,7 @@ def build_closed_positions_table(window_days=30):
             print(f"CLOSED POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=CLOSED_COLS), errs
-    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Closed", ascending=False)
+    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Opened", ascending=False)
     return df, errs
 
 
