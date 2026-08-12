@@ -29,8 +29,8 @@ SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than 
                             # CASH_TARGET (40,000) since multi-leg risk is defined/capped per contract.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
-               "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "AvgPremium", "MaxLoss",
-               "ROR_%", "AnnROR_%", "POP_%", "IV", "Score", "# of contracts",
+               "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "AvgPremium",
+               "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
                "OpenInt", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
