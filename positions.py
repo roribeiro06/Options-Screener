@@ -6,8 +6,9 @@ screens for).
 
 OPEN positions: live-quotes the exact contract(s) and computes
   - current cost to close (buy back the short leg(s), at the ASK -- the real,
-    conservative price you'd actually pay right now), and the live MID price
-    shown next to each strike in the Strikes column
+    conservative price you'd actually pay right now)
+  - CurrentPrice -- the underlying STOCK's live price (not the option's),
+    via wheel_screener.td_quote, shown next to Strike
   - Unrealized G/L -- entry credit minus the ASK cost to close, the number
     you'd actually realize if you closed right now
 
@@ -37,10 +38,10 @@ import spreads as sp
 TYPE_LABELS = {"put": "Put", "call": "Covered Call",
               "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
 
-POSITIONS_COLS = ["Ticker", "Type", "Strikes", "Expiration", "DTE", "Opened", "Contracts",
-                  "MaxLoss", "EntryCredit", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%"]
-CLOSED_COLS = ["Ticker", "Type", "Strikes", "Expiration", "Opened", "Closed", "DaysHeld",
-              "Contracts", "MaxLoss", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%"]
+POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "Opened",
+                  "Contracts", "EntryCredit", "MaxLoss", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%"]
+CLOSED_COLS = ["Ticker", "Type", "Strike", "Expiration", "Opened", "Closed", "DaysHeld",
+              "Contracts", "EntryCredit", "MaxLoss", "ExitCost", "RealizedGL_$", "RealizedGL_%"]
 PCT_COLS = {"UnrealizedGL_%", "RealizedGL_%"}
 
 
@@ -53,23 +54,12 @@ def _leg_prices(chain, kind, strike):
     return (leg.get("bid") or 0, leg.get("ask") or 0, leg.get("prevclose") or 0)
 
 
-def _strikes_display(pos, live=None):
-    """`live` (only passed for OPEN positions) is the current MID price to
-    show next to the strike -- a single float for put/call, or a
-    (short_mid, long_mid) pair for spreads."""
+def _strikes_display(pos):
     kind = pos["type"]
     if kind in ("put", "call"):
-        s = f"{pos['strike']:g}"
-        if live is not None:
-            s += f" (now ${live:.2f})"
-        return s
+        return f"{pos['strike']:g}"
     if kind in ("put_spread", "call_spread"):
-        short_s, long_s = f"{pos['short_strike']:g}", f"{pos['long_strike']:g}"
-        if live is not None:
-            short_mid, long_mid = live
-            short_s += f" (now ${short_mid:.2f})"
-            long_s += f" (now ${long_mid:.2f})"
-        return f"{short_s}/{long_s}"
+        return f"{pos['short_strike']:g}/{pos['long_strike']:g}"
     raise RuntimeError(f"unknown position type {kind!r} for {pos.get('ticker', '?')}")
 
 
@@ -112,10 +102,8 @@ def evaluate_position(pos, today):
         leg = _leg_prices(chain, kind, strike)
         if not leg:
             raise RuntimeError(f"contract not found: {ticker} {strike:g}{kind[0].upper()} {exp}")
-        bid, ask, _prevclose = leg
+        _bid, ask, _prevclose = leg
         cost_to_close = ask
-        mid_now = (bid + ask) / 2
-        strikes_display = _strikes_display(pos, live=mid_now)
     else:  # put_spread / call_spread
         opt_type = "put" if kind == "put_spread" else "call"
         short_strike, long_strike = pos["short_strike"], pos["long_strike"]
@@ -123,19 +111,20 @@ def evaluate_position(pos, today):
         long_leg = _leg_prices(chain, opt_type, long_strike)
         if not (short_leg and long_leg):
             raise RuntimeError(f"leg(s) not found: {ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}")
-        s_bid, s_ask, _s_prev = short_leg
-        l_bid, l_ask, _l_prev = long_leg
+        _s_bid, s_ask, _s_prev = short_leg
+        l_bid, _l_ask, _l_prev = long_leg
         cost_to_close = s_ask - l_bid                       # buy back short, sell long
-        short_mid, long_mid = (s_bid + s_ask) / 2, (l_bid + l_ask) / 2
-        strikes_display = _strikes_display(pos, live=(short_mid, long_mid))
+
+    current_price = ws.td_quote(ticker)   # the underlying stock's live price, not the option's
 
     unrealized_pl = entry_credit - cost_to_close
     unrealized_pl_pct = (unrealized_pl / entry_credit) if entry_credit else float("nan")
 
-    return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strikes": strikes_display,
+    return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
+            "CurrentPrice": (round(current_price, 2) if current_price else float("nan")),
             "Expiration": exp, "DTE": dte, "Opened": pos.get("entry_date", "-"),
-            "Contracts": contracts, "MaxLoss": round(_max_loss_per_share(pos), 2),
-            "EntryCredit": entry_credit, "CostToClose": round(cost_to_close, 2),
+            "Contracts": contracts, "EntryCredit": entry_credit, "MaxLoss": round(_max_loss_per_share(pos), 2),
+            "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
             "UnrealizedGL_%": unrealized_pl_pct}
 
@@ -174,11 +163,10 @@ def evaluate_closed_position(pos):
     realized_pl = entry_credit - exit_cost
     realized_pl_pct = (realized_pl / entry_credit) if entry_credit else float("nan")
 
-    return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strikes": _strikes_display(pos),
+    return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "Expiration": pos["expiration"], "Opened": pos["entry_date"], "Closed": pos["exit_date"],
             "DaysHeld": (exit_date - entry_date).days, "Contracts": contracts,
-            "MaxLoss": round(_max_loss_per_share(pos), 2),
-            "EntryCredit": entry_credit, "ExitCost": exit_cost,
+            "EntryCredit": entry_credit, "MaxLoss": round(_max_loss_per_share(pos), 2), "ExitCost": exit_cost,
             "RealizedGL_$": round(realized_pl * 100 * contracts, 2),
             "RealizedGL_%": realized_pl_pct}
 
@@ -217,7 +205,7 @@ def _fmt(df):
                             for v, n in zip(d["EntryCredit"], d["Contracts"])]
     elif "EntryCredit" in d.columns:
         d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
-    for c in ("CostToClose", "ExitCost"):
+    for c in ("CostToClose", "ExitCost", "CurrentPrice"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if v == v else "-")
     # MaxLoss: "$/share (total across Contracts)", same convention as wheel_screener.py/spreads.py.

@@ -385,11 +385,12 @@ st.header("Open Positions")
 st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
            "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
-           "first). **Strikes** shows each leg's live MID price next to it. **CostToClose** = the live "
-           "ASK to buy the position back right now (conservative -- what you'd actually pay). "
-           "**MaxLoss**/**EntryCredit** show \\$/share with the total across Contracts in parentheses -- "
-           "MaxLoss is strike - premium for puts, cost basis - premium for covered calls (needs the "
-           "ticker in `HOLDINGS`, else undefined), width - credit for spreads. "
+           "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
+           "to **Strike**. **CostToClose** = the live ASK to buy the position back right now "
+           "(conservative -- what you'd actually pay). **EntryCredit**/**MaxLoss** show \\$/share with "
+           "the total across Contracts in parentheses -- MaxLoss is strike - premium for puts, cost "
+           "basis - premium for covered calls (needs the ticker in `HOLDINGS`, else undefined), width - "
+           "credit for spreads. "
            "**UnrealizedGL** = EntryCredit minus CostToClose, i.e. what you'd realize if you closed now. "
            "Same refresh cadence as the rest of the app.")
 try:
@@ -413,7 +414,7 @@ st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of 
            "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
            "`exit_date` to a copy of the position's entry. Sorted by Date Opened (oldest first). Pure "
            "arithmetic against the recorded exit price -- no live quotes needed since the trade is already "
-           "settled. **MaxLoss**/**EntryCredit** show \\$/share with the total across Contracts in "
+           "settled. **EntryCredit**/**MaxLoss** show \\$/share with the total across Contracts in "
            "parentheses, same convention as Open Positions. Automatically rolls off this list 30 days "
            "after the exit date (the entry stays in the config either way, just stops showing here).")
 try:
