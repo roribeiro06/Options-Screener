@@ -404,10 +404,12 @@ try:
         st.caption("Columns split by strategy: **Put**, **Call** (covered), **Multi-Leg** (all spreads/"
                    "condors), **Total**. Max Loss here is NOT the same figure as the MaxLoss column above "
                    "-- Puts use a scaled-down, more realistic estimate (20% of the usual strike-minus-"
-                   "premium worst case, plus the premium itself); Calls show \"-\" (no max loss at all -- "
-                   "a covered call going to \\$0 is unrealistic enough that it's excluded outright, not "
-                   "just discounted); Multi-Leg is unchanged (width - credit, already a real defined-risk "
-                   "worst case). **ROR %** is against Potential Profit Acc. (the premium collected).")
+                   "premium worst case, minus the premium -- you're getting that back regardless of what "
+                   "the stock does); Calls show \"-\" (no max loss at all -- a covered call going to "
+                   "\\$0 is unrealistic enough that it's excluded outright, not just discounted); "
+                   "Multi-Leg is unchanged (width - credit, same subtract-the-premium-back logic as puts, "
+                   "already a real defined-risk worst case). **ROR %** is against the actual Unrealized "
+                   "G/L, not the theoretical Potential Profit Acc. (premium collected).")
         st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
@@ -452,7 +454,7 @@ st.caption("Every OPEN_POSITIONS entry plus every CLOSED_POSITIONS entry in the 
            "just the two tables' 1D figures added together) -- a still-open position and an already-closed "
            "one can genuinely have overlapped on the same real day, so this can differ meaningfully from "
            "Max Loss Accumulated even when nothing in either table alone would suggest it. **ROR %** is "
-           "against the summed Potential Profit Acc. (premium collected across both tables).")
+           "against the summed actual Unrealized + Realized G/L, not the theoretical premium collected.")
 try:
     _dpos_fin, _ = scan_positions()
     _dclosed_fin, _ = scan_closed_positions()

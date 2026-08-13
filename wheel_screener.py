@@ -93,7 +93,7 @@ CLOSED_POSITIONS = [
 POP_MIN           = 0.70     # at least 70% POP (delta <= ~0.30); higher POP is fine too
 POP_MAX           = 1.0      # no upper cap
 DTE_MIN           = 7      # include short weeklies
-DTE_MAX           = 90     # Options Alpha: longer duration allowed
+DTE_MAX           = 40     # no long-dated contracts
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
 MIN_ANN_YIELD_INDEX = 0.10   # broad indexes (SPY/QQQ/DIA) are lower risk -> lower yield floor is OK

@@ -262,16 +262,18 @@ def _pivot_max_loss_per_share(pos):
     tables -- deliberately different from the MaxLoss column shown in the
     Open/Closed Positions tables above them:
       - put: scaled to a more realistic tail-risk estimate -- 20% of the
-        existing strike-minus-premium worst case, plus the premium itself
-        (you keep that regardless of what the stock does)
+        existing strike-minus-premium worst case, minus the premium (you're
+        getting that back regardless of what the stock does, same
+        subtract-the-premium-you-collected logic as spreads below)
       - call (covered): NaN -- no max loss at all. A covered call's
         stock-to-zero worst case is unrealistic enough that these tables
         exclude it outright (shows "-"), not just discount it
       - put_spread/call_spread/iron_condor ("Multi-Leg"): unchanged --
-        width - credit is already a real, defined-risk worst case"""
+        width - credit is already the max loss minus the premium you're
+        getting back, exactly the same principle as puts above"""
     kind = pos["type"]
     if kind == "put":
-        return _max_loss_per_share(pos) * 0.20 + pos["entry_credit"]
+        return _max_loss_per_share(pos) * 0.20 - pos["entry_credit"]
     if kind == "call":
         return float("nan")
     return _max_loss_per_share(pos)
@@ -323,17 +325,15 @@ def _pivot_peak(entries, bucket=None):
     return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
 
 
-def _pivot_table(gl_row_label, gl_by_bucket, entries, ror_numerator="premium"):
+def _pivot_table(gl_row_label, gl_by_bucket, entries):
     """One Put/Call/Multi-Leg/Total pivoted Financials table. `gl_by_bucket`
     is the row-1 G/L figure (Unrealized, Realized, or their sum) per bucket,
     already live-quoted/computed elsewhere. `entries` comes from
-    _pivot_entries(). `ror_numerator` picks what ROR% is measured against:
-    "premium" (Open/Combined -- Potential Profit Acc., the theoretical max
-    if every position captured its full credit) or "gl" (Closed -- the
-    actual Realized G/L, not the theoretical premium collected). The Call
-    column's Max Loss/ROR% is always "-" (see _pivot_max_loss_per_share) --
-    Total still nets out correctly since NaN entries are skipped, not
-    zeroed."""
+    _pivot_entries(). ROR% is measured against that same G/L figure -- the
+    real money made/lost, not the theoretical Potential Profit Acc. (premium
+    collected). The Call column's Max Loss/ROR% is always "-" (see
+    _pivot_max_loss_per_share) -- Total still nets out correctly since NaN
+    entries are skipped, not zeroed."""
     import pandas as pd
     cols = PIVOT_COLS + ["Total"]
 
@@ -346,9 +346,8 @@ def _pivot_table(gl_row_label, gl_by_bucket, entries, ror_numerator="premium"):
     loss_accum["Call"] = float("nan")   # no max loss for covered calls -- always "-"
     loss_1d["Call"] = float("nan")
 
-    numer = premium if ror_numerator == "premium" else gl
     def _ror(loss):
-        return {c: _fmt_pct((numer[c] / loss[c]) if loss[c] == loss[c] and loss[c] else float("nan"))
+        return {c: _fmt_pct((gl[c] / loss[c]) if loss[c] == loss[c] and loss[c] else float("nan"))
                for c in cols}
     ror_accum, ror_1d = _ror(loss_accum), _ror(loss_1d)
 
@@ -364,24 +363,23 @@ def _pivot_table(gl_row_label, gl_by_bucket, entries, ror_numerator="premium"):
 
 
 def build_open_financials(dpos_df):
-    """Pivoted Financials for OPEN_POSITIONS only (row 1 = Unrealized G/L).
-    See _pivot_table/_pivot_max_loss_per_share for the Put/Call/Multi-Leg
-    breakdown and the per-type Max Loss adjustment."""
+    """Pivoted Financials for OPEN_POSITIONS only (row 1 = Unrealized G/L,
+    also ROR%'s basis). See _pivot_table/_pivot_max_loss_per_share for the
+    Put/Call/Multi-Leg breakdown and the per-type Max Loss adjustment."""
     today = dt.date.today()
     gl = _pivot_gl(dpos_df, "UnrealizedGL_$")
     entries = _pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
-    return _pivot_table("G/L (Unrealized)", gl, entries, ror_numerator="premium")
+    return _pivot_table("G/L (Unrealized)", gl, entries)
 
 
 def build_closed_financials(dclosed_df, window_days=30):
     """Pivoted Financials for CLOSED_POSITIONS within `window_days` (row 1 =
-    Realized G/L). ROR% is against the actual Realized G/L, not premium
-    collected -- see _pivot_table."""
+    Realized G/L, also ROR%'s basis) -- see _pivot_table."""
     today = dt.date.today()
     closed_list = _closed_in_window(window_days, today)
     gl = _pivot_gl(dclosed_df, "RealizedGL_$")
     entries = _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
-    return _pivot_table("G/L (Realized)", gl, entries, ror_numerator="gl")
+    return _pivot_table("G/L (Realized)", gl, entries)
 
 
 def build_combined_financials(dpos_df, dclosed_df, window_days=30):
@@ -398,4 +396,4 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     gl = {b: gl_open[b] + gl_closed[b] for b in PIVOT_COLS}
     entries = (_pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
               + _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today))
-    return _pivot_table("G/L (Unrealized + Realized)", gl, entries, ror_numerator="premium")
+    return _pivot_table("G/L (Unrealized + Realized)", gl, entries)
