@@ -17,7 +17,9 @@ All anchored at Options Alpha's 70% POP:
     it -- a catalyst trade should concentrate exposure around the event, not scatter near-duplicate
     candidates across every weekly that comes after it. That expiration search isn't bounded by
     SPREAD_DTE_MIN/MAX like every other strategy here -- a ticker whose earnings falls further out
-    than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it.
+    than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it -- but it is
+    capped at LONG_DTE_MAX (90 days): an earnings date further out than that is too far away to be
+    worth tying up capital in a long-premium position waiting for it.
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -49,6 +51,8 @@ SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/cal
 SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
 SPREAD_DTE_MAX   = 40      # no long-dated contracts
+LONG_DTE_MAX     = 90      # long strangle/straddle's earnings-catalyst expiration can run past
+                           # SPREAD_DTE_MAX (see screen_spreads), but not indefinitely
 SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
 SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than wheel_screener's
                             # CASH_TARGET (40,000) since multi-leg risk is defined/capped per contract.
@@ -488,14 +492,16 @@ def screen_spreads(symbol):
     # (on or after) a confirmed earnings date -- the standard way to actually
     # play an earnings move (concentrate IV-crush/gamma exposure right around
     # the event), not every later expiration that also happens to span it.
-    # Searched across EVERY listed expiration, not just the SPREAD_DTE_MIN/MAX
-    # window above -- a ticker whose earnings falls further than
-    # SPREAD_DTE_MAX out should still get a long candidate at the nearest
-    # expiration after that date, even though every other strategy here stays
-    # capped at SPREAD_DTE_MAX. No known catalyst -> no expiration qualifies.
+    # Searched past the SPREAD_DTE_MIN/MAX window above -- a ticker whose
+    # earnings falls further than SPREAD_DTE_MAX out still gets a long
+    # candidate at the nearest expiration after that date, even though every
+    # other strategy here stays capped at SPREAD_DTE_MAX -- but only up to
+    # LONG_DTE_MAX; an earnings date beyond THAT is too far out to be worth
+    # tying up capital in a long-premium position waiting for it. No known
+    # catalyst -> no expiration qualifies either way.
     long_exp = None
     if earnings is not None:
-        candidates = [c for c in all_exps if today <= earnings <= c[1]]
+        candidates = [c for c in all_exps if today <= earnings <= c[1] and c[2] <= LONG_DTE_MAX]
         if candidates:
             long_exp = min(candidates, key=lambda c: (c[1] - earnings).days)
 
