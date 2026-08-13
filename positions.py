@@ -233,9 +233,6 @@ def _fmt(df):
     return d
 
 
-FINANCIALS_COLS = ["Metric", "Value"]
-
-
 def _fmt_dollar_signed(v):
     if v != v:
         return "-"
@@ -253,87 +250,11 @@ def _fmt_pct(v):
 def _fmt_pct_pair(potential_num, actual_num, denom):
     """'potential% (actual%)' -- potential_num/denom is the theoretical ROR
     (e.g. full premium collected), actual_num/denom is the real one (e.g.
-    today's Unrealized G/L)."""
+    today's Unrealized G/L). NaN denom (e.g. the Call column, which has no
+    max loss at all) naturally formats both sides to "-"."""
     potential = (potential_num / denom) if denom else float("nan")
     actual = (actual_num / denom) if denom else float("nan")
     return f"{_fmt_pct(potential)} ({_fmt_pct(actual)})"
-
-
-def _peak_concurrent_loss(intervals):
-    """intervals: list of (start_date, end_date_inclusive, loss_dollars, kind)
-    -- the total dollar Max Loss "at risk" between when each position opened
-    and when it closed (or today, if still open). Returns the largest sum of
-    loss_dollars among positions simultaneously open on the same day -- e.g.
-    if 4 positions were open together on one day, their combined loss is one
-    candidate. Only every interval's OWN start date needs checking, since the
-    running total can only increase right after a position opens (adding a
-    position never decreases the sum for that instant). NaN entries
-    (undefined max loss, e.g. a covered call with no cost basis on file) are
-    excluded from every day's sum -- can't bound an unknown risk. `kind` is
-    carried through but unused here (only the accumulated-loss helpers care,
-    to compute an ex-calls total)."""
-    valid = [(s, e, v) for s, e, v, _k in intervals if v == v]
-    if not valid:
-        return float("nan")
-    return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
-
-
-def _loss_accum(intervals, exclude_calls=False):
-    """Flat sum of every interval's loss_dollars -- no date overlap involved,
-    unlike _peak_concurrent_loss. With exclude_calls=True, covered calls
-    (type "call") are left out: their MaxLoss assumes the stock goes to $0,
-    a scenario unlikely enough that including it skews the accumulated
-    total, unlike puts/spreads whose MaxLoss is a real, boundable worst
-    case."""
-    return sum(v for _, _, v, k in intervals if v == v and not (exclude_calls and k == "call"))
-
-
-def _ex_calls_premium(positions_list):
-    """Premium collected across every non-covered-call position -- the
-    numerator to pair with _loss_accum(..., exclude_calls=True), so the
-    "-Calls" Return on Risk is a fully self-consistent ex-calls view, not
-    the full portfolio's premium against a reduced loss figure."""
-    return sum(pos["entry_credit"] * 100 * pos["contracts"]
-              for pos in positions_list if pos["type"] != "call")
-
-
-TYPE_BUCKETS = {"Put": "Put Contracts", "Covered Call": "Call Contracts",
-                "Put Credit Spread": "Put Spread Contracts", "Call Credit Spread": "Call Spread Contracts",
-                "Iron Condor": "Iron Condor Contracts"}
-BUCKET_ORDER = ["Put Contracts", "Call Contracts", "Put Spread Contracts",
-               "Call Spread Contracts", "Iron Condor Contracts"]
-
-
-def _bucket_gl(df, gl_col):
-    """{bucket: summed $} for every strategy-type bucket, from an
-    already-computed positions/closed dataframe's G/L column."""
-    out = {b: 0.0 for b in BUCKET_ORDER}
-    if len(df):
-        for t, grp in df.groupby("Type"):
-            b = TYPE_BUCKETS.get(t)
-            if b:
-                out[b] += grp[gl_col].sum()
-    return out
-
-
-def _risk_raw(positions_list, end_date_fn, today):
-    """positions_list: raw OPEN_POSITIONS/CLOSED_POSITIONS dicts.
-    end_date_fn(pos) -> the date this position's risk interval ends (today
-    for open, exit_date for closed). Returns (premium_total, intervals,
-    unbounded) ready for _peak_concurrent_loss/_loss_accum -- pure config
-    arithmetic, no live quotes needed (MaxLoss/entry_credit don't depend on
-    the market). Each interval carries the position's type too, so an
-    ex-calls view can filter it out downstream."""
-    premium_total, unbounded = 0.0, False
-    intervals = []
-    for pos in positions_list:
-        premium_total += pos["entry_credit"] * 100 * pos["contracts"]
-        loss = _max_loss_per_share(pos)
-        loss_total = loss * 100 * pos["contracts"] if loss == loss else float("nan")
-        unbounded = unbounded or (loss_total != loss_total)
-        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
-        intervals.append((entry, end_date_fn(pos), loss_total, pos["type"]))
-    return premium_total, intervals, unbounded
 
 
 def _closed_in_window(window_days, today):
@@ -341,130 +262,155 @@ def _closed_in_window(window_days, today):
             if (today - dt.date.fromisoformat(pos["exit_date"])).days <= window_days]
 
 
-def _unbounded_note(unbounded):
-    if not unbounded:
-        return []
-    return [("Note", "One or more positions have no cost basis in wheel_screener.HOLDINGS -- "
-                     "excluded from Max Loss Accumulated/1D above (risk undefined).")]
+PIVOT_COLS = ["Put", "Call", "Multi-Leg"]
+_TYPE_LABEL_TO_PIVOT = {"Put": "Put", "Covered Call": "Call", "Put Credit Spread": "Multi-Leg",
+                        "Call Credit Spread": "Multi-Leg", "Iron Condor": "Multi-Leg"}
+
+
+def _pivot_max_loss_per_share(pos):
+    """Max Loss per share for the pivoted Put/Call/Multi-Leg/Total Financials
+    tables -- deliberately different from the MaxLoss column shown in the
+    Open/Closed Positions tables above them:
+      - put: scaled to a more realistic tail-risk estimate -- 20% of the
+        existing strike-minus-premium worst case, plus the premium itself
+        (you keep that regardless of what the stock does)
+      - call (covered): NaN -- no max loss at all. A covered call's
+        stock-to-zero worst case is unrealistic enough that these tables
+        exclude it outright (shows "-"), not just discount it
+      - put_spread/call_spread/iron_condor ("Multi-Leg"): unchanged --
+        width - credit is already a real, defined-risk worst case"""
+    kind = pos["type"]
+    if kind == "put":
+        return _max_loss_per_share(pos) * 0.20 + pos["entry_credit"]
+    if kind == "call":
+        return float("nan")
+    return _max_loss_per_share(pos)
+
+
+def _pivot_gl(df, gl_col):
+    """{'Put'/'Call'/'Multi-Leg': summed $} from an already-computed
+    positions/closed dataframe's G/L column, using the real (unadjusted)
+    figures -- only the MaxLoss-derived rows use _pivot_max_loss_per_share."""
+    out = {b: 0.0 for b in PIVOT_COLS}
+    if len(df):
+        for t, grp in df.groupby("Type"):
+            b = _TYPE_LABEL_TO_PIVOT.get(t)
+            if b:
+                out[b] += grp[gl_col].sum()
+    return out
+
+
+def _pivot_entries(positions_list, end_date_fn, today):
+    """(entry_date, end_date_inclusive, pivot_loss_$, premium_$, bucket) per
+    position, ready for _pivot_table. end_date_fn(pos) -> today for open
+    positions, exit_date for closed ones."""
+    out = []
+    for pos in positions_list:
+        b = _TYPE_LABEL_TO_PIVOT.get(TYPE_LABELS.get(pos["type"]))
+        if not b:
+            continue
+        loss = _pivot_max_loss_per_share(pos)
+        loss_total = loss * 100 * pos["contracts"] if loss == loss else float("nan")
+        premium = pos["entry_credit"] * 100 * pos["contracts"]
+        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
+        out.append((entry, end_date_fn(pos), loss_total, premium, b))
+    return out
+
+
+def _pivot_sum(entries, idx, bucket=None):
+    """Flat sum of entries[idx] (2=loss, 3=premium), skipping NaN (the Call
+    bucket's loss is always NaN, so it never contributes)."""
+    return sum(e[idx] for e in entries if e[idx] == e[idx] and (bucket is None or e[4] == bucket))
+
+
+def _pivot_peak(entries, bucket=None):
+    """Same interval-overlap sweep as elsewhere in this module, scoped to one
+    bucket (or all of them, for the Total column) -- the largest sum of
+    pivot-loss $ among positions open on the same day."""
+    valid = [(e[0], e[1], e[2]) for e in entries if e[2] == e[2] and (bucket is None or e[4] == bucket)]
+    if not valid:
+        return float("nan")
+    return max(sum(v for s2, e2, v in valid if s2 <= s <= e2) for s, _, _ in valid)
+
+
+def _pivot_table(gl_row_label, gl_by_bucket, entries, ror_actual_by_bucket=None):
+    """One Put/Call/Multi-Leg/Total pivoted Financials table. `gl_by_bucket`
+    is the row-1 G/L figure (Unrealized, Realized, or their sum) per bucket,
+    already live-quoted/computed elsewhere. `entries` comes from
+    _pivot_entries(). If `ror_actual_by_bucket` is given, ROR% is shown
+    "Potential (Actual)" -- against premium collected, with the real G/L
+    ROR% in parentheses (Open/Combined); if None, ROR% is a single number
+    against `gl_by_bucket` itself (Closed, where that's Realized G/L, not
+    the theoretical premium collected). The Call column's Max Loss/ROR% is
+    always "-" (see _pivot_max_loss_per_share) -- Total still nets out
+    correctly since NaN entries are skipped, not zeroed."""
+    import pandas as pd
+    cols = PIVOT_COLS + ["Total"]
+
+    gl = dict(gl_by_bucket)
+    gl["Total"] = sum(gl_by_bucket.values())
+
+    premium = {c: _pivot_sum(entries, 3, None if c == "Total" else c) for c in cols}
+    loss_accum = {c: _pivot_sum(entries, 2, None if c == "Total" else c) for c in cols}
+    loss_1d = {c: _pivot_peak(entries, None if c == "Total" else c) for c in cols}
+    loss_accum["Call"] = float("nan")   # no max loss for covered calls -- always "-"
+    loss_1d["Call"] = float("nan")
+
+    if ror_actual_by_bucket is not None:
+        actual = dict(ror_actual_by_bucket)
+        actual["Total"] = sum(ror_actual_by_bucket.values())
+        ror_accum = {c: _fmt_pct_pair(premium[c], actual[c], loss_accum[c]) for c in cols}
+        ror_1d = {c: _fmt_pct_pair(premium[c], actual[c], loss_1d[c]) for c in cols}
+    else:
+        ror_accum = {c: _fmt_pct((gl[c] / loss_accum[c]) if loss_accum[c] == loss_accum[c] and loss_accum[c]
+                                 else float("nan")) for c in cols}
+        ror_1d = {c: _fmt_pct((gl[c] / loss_1d[c]) if loss_1d[c] == loss_1d[c] and loss_1d[c]
+                              else float("nan")) for c in cols}
+
+    rows = [
+        (gl_row_label, *[_fmt_dollar_signed(gl[c]) for c in cols]),
+        ("Potential Profit Acc. ($)", *[_fmt_dollar(premium[c]) for c in cols]),
+        ("Max Loss Accumulated ($)", *[_fmt_dollar(loss_accum[c]) for c in cols]),
+        ("Max Loss 1D ($)", *[_fmt_dollar(loss_1d[c]) for c in cols]),
+        ("ROR % (Accumulated)", *[ror_accum[c] for c in cols]),
+        ("ROR % (1D)", *[ror_1d[c] for c in cols]),
+    ]
+    return pd.DataFrame(rows, columns=["Metric"] + cols)
 
 
 def build_open_financials(dpos_df):
-    """Financials for OPEN_POSITIONS only: G/L by strategy type (unrealized),
-    premium collected, accumulated/peak-day MaxLoss, and Return on Risk shown
-    two ways -- against the Potential (premium collected, i.e. the max if
-    every position captured its full credit) and, in parentheses, against
-    the actual Unrealized G/L (today's real mark-to-market). Max Loss
-    Accumulated also gets a "- Calls" companion row/ROR%: covered calls'
-    MaxLoss assumes the stock goes to $0, unlikely enough to skew the raw
-    accumulated total, so this repeats the same figures as if calls weren't
-    part of the portfolio at all (both numerator and denominator)."""
-    import pandas as pd
+    """Pivoted Financials for OPEN_POSITIONS only (row 1 = Unrealized G/L).
+    See _pivot_table/_pivot_max_loss_per_share for the Put/Call/Multi-Leg
+    breakdown and the per-type Max Loss adjustment."""
     today = dt.date.today()
-    bucket_unreal = _bucket_gl(dpos_df, "UnrealizedGL_$")
-    total_unreal = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
-    total_unreal_ex_calls = sum(v for b, v in bucket_unreal.items() if b != "Call Contracts")
-    premium_total, intervals, unbounded = _risk_raw(ws.OPEN_POSITIONS, lambda pos: today, today)
-    premium_total_ex_calls = _ex_calls_premium(ws.OPEN_POSITIONS)
-    loss_accum = _loss_accum(intervals)
-    loss_accum_ex_calls = _loss_accum(intervals, exclude_calls=True)
-    peak_loss = _peak_concurrent_loss(intervals)
-
-    rows = [(f"{b} -- Unrealized G/L", _fmt_dollar_signed(bucket_unreal[b])) for b in BUCKET_ORDER]
-    rows += [
-        ("Total Unrealized G/L", _fmt_dollar_signed(total_unreal)),
-        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
-        ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
-        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
-        ("Max Loss Accumulated (ROR%)", _fmt_pct_pair(premium_total, total_unreal, loss_accum)),
-        ("Max Loss Accumulated - Calls (ROR%)",
-         _fmt_pct_pair(premium_total_ex_calls, total_unreal_ex_calls, loss_accum_ex_calls)),
-        ("Max Loss 1D ($)", _fmt_dollar(peak_loss)),
-        ("Max Loss 1D (ROR%)", _fmt_pct_pair(premium_total, total_unreal, peak_loss)),
-    ]
-    rows += _unbounded_note(unbounded)
-    return pd.DataFrame(rows, columns=FINANCIALS_COLS)
+    gl = _pivot_gl(dpos_df, "UnrealizedGL_$")
+    entries = _pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
+    return _pivot_table("G/L (Unrealized)", gl, entries, ror_actual_by_bucket=gl)
 
 
 def build_closed_financials(dclosed_df, window_days=30):
-    """Financials for CLOSED_POSITIONS within `window_days` only: G/L by
-    strategy type (realized), premium collected, accumulated/peak-day
-    MaxLoss, and Return on Risk -- against the actual Realized G/L (what you
-    really walked away with), not the theoretical premium collected. Max
-    Loss Accumulated also gets a "- Calls" companion, same rationale as
-    Open Positions (covered calls' stock-to-zero MaxLoss skews the total)."""
-    import pandas as pd
+    """Pivoted Financials for CLOSED_POSITIONS within `window_days` (row 1 =
+    Realized G/L). ROR% is against the actual Realized G/L, not premium
+    collected -- see _pivot_table."""
     today = dt.date.today()
     closed_list = _closed_in_window(window_days, today)
-    bucket_real = _bucket_gl(dclosed_df, "RealizedGL_$")
-    total_real = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
-    total_real_ex_calls = sum(v for b, v in bucket_real.items() if b != "Call Contracts")
-    premium_total, intervals, unbounded = _risk_raw(
-        closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
-    loss_accum = _loss_accum(intervals)
-    loss_accum_ex_calls = _loss_accum(intervals, exclude_calls=True)
-    peak_loss = _peak_concurrent_loss(intervals)
-    ror_accum = (total_real / loss_accum) if loss_accum else float("nan")
-    ror_accum_ex_calls = (total_real_ex_calls / loss_accum_ex_calls) if loss_accum_ex_calls else float("nan")
-    ror_peak = (total_real / peak_loss) if peak_loss else float("nan")
-
-    rows = [(f"{b} -- Realized G/L", _fmt_dollar_signed(bucket_real[b])) for b in BUCKET_ORDER]
-    rows += [
-        ("Total Realized G/L", _fmt_dollar_signed(total_real)),
-        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
-        ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
-        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
-        ("Max Loss Accumulated (ROR%)", _fmt_pct(ror_accum)),
-        ("Max Loss Accumulated - Calls (ROR%)", _fmt_pct(ror_accum_ex_calls)),
-        ("Max Loss 1D ($)", _fmt_dollar(peak_loss)),
-        ("Max Loss 1D (ROR%)", _fmt_pct(ror_peak)),
-    ]
-    rows += _unbounded_note(unbounded)
-    return pd.DataFrame(rows, columns=FINANCIALS_COLS)
+    gl = _pivot_gl(dclosed_df, "RealizedGL_$")
+    entries = _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
+    return _pivot_table("G/L (Realized)", gl, entries, ror_actual_by_bucket=None)
 
 
 def build_combined_financials(dpos_df, dclosed_df, window_days=30):
-    """The Open and Closed Financials tables above, summed row-for-row into
-    one: per-bucket Total G/L, Potential Profit Accumulated, Max Loss
-    Accumulated (plus its "- Calls" companion), and Max Loss 1D (the two
-    tables' peak-day figures added together, not a fresh sweep across the
-    combined interval set). Return on Risk is shown the same "Potential
-    (Actual)" way as Open Positions, using the summed premium collected and
-    the summed actual Unrealized+Realized G/L."""
-    import pandas as pd
+    """Pivoted Financials across every OPEN_POSITIONS entry plus every
+    CLOSED_POSITIONS entry within `window_days` (row 1 = Unrealized +
+    Realized G/L). Unlike the two tables above, Max Loss 1D here is a fresh
+    interval-overlap sweep across the combined open+closed timeline, not a
+    sum of the two tables' own peak-day figures -- positions from both
+    tables can genuinely overlap on the same calendar day."""
     today = dt.date.today()
-
-    bucket_unreal = _bucket_gl(dpos_df, "UnrealizedGL_$")
-    bucket_real = _bucket_gl(dclosed_df, "RealizedGL_$")
-    total_unreal = dpos_df["UnrealizedGL_$"].sum() if len(dpos_df) else 0.0
-    total_real = dclosed_df["RealizedGL_$"].sum() if len(dclosed_df) else 0.0
-    actual_total = total_unreal + total_real
-    actual_total_ex_calls = (sum(v for b, v in bucket_unreal.items() if b != "Call Contracts")
-                             + sum(v for b, v in bucket_real.items() if b != "Call Contracts"))
-
     closed_list = _closed_in_window(window_days, today)
-    open_premium, open_intervals, open_unbounded = _risk_raw(ws.OPEN_POSITIONS, lambda pos: today, today)
-    closed_premium, closed_intervals, closed_unbounded = _risk_raw(
-        closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today)
-
-    premium_total = open_premium + closed_premium
-    premium_total_ex_calls = _ex_calls_premium(ws.OPEN_POSITIONS) + _ex_calls_premium(closed_list)
-    loss_accum = _loss_accum(open_intervals) + _loss_accum(closed_intervals)
-    loss_accum_ex_calls = (_loss_accum(open_intervals, exclude_calls=True)
-                           + _loss_accum(closed_intervals, exclude_calls=True))
-    peak_open, peak_closed = _peak_concurrent_loss(open_intervals), _peak_concurrent_loss(closed_intervals)
-    peak_sum = (peak_open if peak_open == peak_open else 0.0) + (peak_closed if peak_closed == peak_closed else 0.0)
-
-    rows = [(f"{b} -- Total G/L", _fmt_dollar_signed(bucket_unreal[b] + bucket_real[b])) for b in BUCKET_ORDER]
-    rows += [
-        ("Total G/L (Unrealized + Realized)", _fmt_dollar_signed(actual_total)),
-        ("Potential Profit Accumulated ($)", _fmt_dollar(premium_total)),
-        ("Max Loss Accumulated ($)", _fmt_dollar(loss_accum)),
-        ("Max Loss Accumulated - Calls ($)", _fmt_dollar(loss_accum_ex_calls)),
-        ("Max Loss Accumulated (ROR%)", _fmt_pct_pair(premium_total, actual_total, loss_accum)),
-        ("Max Loss Accumulated - Calls (ROR%)",
-         _fmt_pct_pair(premium_total_ex_calls, actual_total_ex_calls, loss_accum_ex_calls)),
-        ("Max Loss 1D ($)", _fmt_dollar(peak_sum)),
-        ("Max Loss 1D (ROR%)", _fmt_pct_pair(premium_total, actual_total, peak_sum)),
-    ]
-    rows += _unbounded_note(open_unbounded or closed_unbounded)
-    return pd.DataFrame(rows, columns=FINANCIALS_COLS)
+    gl_open = _pivot_gl(dpos_df, "UnrealizedGL_$")
+    gl_closed = _pivot_gl(dclosed_df, "RealizedGL_$")
+    gl = {b: gl_open[b] + gl_closed[b] for b in PIVOT_COLS}
+    entries = (_pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
+              + _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today))
+    return _pivot_table("G/L (Unrealized + Realized)", gl, entries, ror_actual_by_bucket=gl)

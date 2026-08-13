@@ -401,12 +401,14 @@ try:
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Financials** (unrealized)")
-        st.caption("G/L by strategy type, premium collected, accumulated/peak-day MaxLoss, and Return on "
-                   "Risk shown two ways: against the Potential (full premium collected, as if every "
-                   "position captured max profit) with the actual Unrealized G/L ROR% in parentheses. "
-                   "**Max Loss Accumulated - Calls** repeats the accumulated $/ROR% as if covered calls "
-                   "weren't in the portfolio at all -- their MaxLoss assumes the stock goes to \\$0, "
-                   "unlikely enough to skew the raw accumulated total.")
+        st.caption("Columns split by strategy: **Put**, **Call** (covered), **Multi-Leg** (all spreads/"
+                   "condors), **Total**. Max Loss here is NOT the same figure as the MaxLoss column above "
+                   "-- Puts use a scaled-down, more realistic estimate (20% of the usual strike-minus-"
+                   "premium worst case, plus the premium itself); Calls show \"-\" (no max loss at all -- "
+                   "a covered call going to \\$0 is unrealistic enough that it's excluded outright, not "
+                   "just discounted); Multi-Leg is unchanged (width - credit, already a real defined-risk "
+                   "worst case). **ROR %** is shown as Potential (Actual) -- against premium collected, "
+                   "with the real Unrealized G/L ROR% in parentheses.")
         st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
@@ -432,10 +434,9 @@ try:
         st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
                            "closed_positions.csv", "text/csv")
         st.markdown("**Financials** (realized)")
-        st.caption("G/L by strategy type, premium collected, accumulated/peak-day MaxLoss, and Return on "
-                   "Risk against the actual Realized G/L (what you really walked away with), not the "
-                   "theoretical premium collected. **Max Loss Accumulated - Calls** repeats the "
-                   "accumulated $/ROR% excluding covered calls, same rationale as Open Positions.")
+        st.caption("Same Put/Call/Multi-Leg/Total split and Max Loss convention as Open Positions above. "
+                   "**ROR %** here is against the actual Realized G/L (what you really walked away with), "
+                   "not the theoretical premium collected.")
         st.dataframe(positions.build_closed_financials(_dclosed), hide_index=True, use_container_width=True)
     else:
         st.write("No closed positions in the last 30 days.")
@@ -446,11 +447,13 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Financials (Open + Closed combined)")
-st.caption("The two Financials tables above, summed row-for-row: per-strategy Total G/L, Potential Profit "
-           "Accumulated, Max Loss Accumulated (plus its **- Calls** companion, excluding covered calls), "
-           "and Max Loss 1D (the two tables' peak-day figures added together). **ROR%** is shown the same "
-           "Potential (Actual) way as Open Positions, using the summed premium collected and the summed "
-           "actual Unrealized + Realized G/L.")
+st.caption("Every OPEN_POSITIONS entry plus every CLOSED_POSITIONS entry in the 30-day window, same Put/"
+           "Call/Multi-Leg/Total split and Max Loss convention as the two tables above. Unlike those two, "
+           "**Max Loss 1D** here is a fresh peak-day sweep across the combined open+closed timeline (not "
+           "just the two tables' 1D figures added together) -- a still-open position and an already-closed "
+           "one can genuinely have overlapped on the same real day, so this can differ meaningfully from "
+           "Max Loss Accumulated even when nothing in either table alone would suggest it. **ROR %** uses "
+           "the summed premium collected and the summed actual Unrealized + Realized G/L.")
 try:
     _dpos_fin, _ = scan_positions()
     _dclosed_fin, _ = scan_closed_positions()
