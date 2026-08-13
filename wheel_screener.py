@@ -569,8 +569,38 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
 
+def _stockanalysis_earnings_date(symbol):
+    """Fallback earnings-date source for when Yahoo comes up empty --
+    stockanalysis.com exposes a plain, auth-free JSON endpoint (undocumented,
+    but stable) with the same kind of info Yahoo's calendar tries to give:
+    a list of past/future earnings entries, confirmed or estimated. Same
+    "soonest future date" selection as the Yahoo path above."""
+    import requests
+    try:
+        r = requests.get(f"https://stockanalysis.com/api/symbol/s/{symbol}/earnings",
+                         timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        entries = (r.json() or {}).get("data") or []
+    except Exception:
+        return None
+    today = dt.date.today()
+    fut = []
+    for e in entries:
+        try:
+            d = dt.date.fromisoformat(e["date"])
+        except Exception:
+            continue
+        if d >= today:
+            fut.append(d)
+    return min(fut) if fut else None
+
+
 def get_earnings_date(symbol):
-    """Manual EARNINGS_DATES override wins; otherwise best-effort Yahoo (two methods + retry)."""
+    """Manual EARNINGS_DATES override wins; otherwise best-effort Yahoo (two
+    methods + retry), falling back to stockanalysis.com if Yahoo comes up
+    empty -- Yahoo/yfinance can be flaky (rate limits, bot detection,
+    library-side parsing bugs), so a single source shouldn't be the only
+    thing standing between a real catalyst and this screener seeing it."""
     manual = EARNINGS_DATES.get(symbol)
     if manual:
         try:
@@ -602,7 +632,7 @@ def get_earnings_date(symbol):
         except Exception:
             pass
         _time.sleep(0.6)
-    return None
+    return _stockanalysis_earnings_date(symbol)
 
 
 def _expirations_in_window(symbol, today):
