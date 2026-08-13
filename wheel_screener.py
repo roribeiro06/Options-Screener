@@ -169,13 +169,21 @@ PEER_TICKERS = {
     "META": ["MSFT", "GOOG", "AMZN", "AAPL"],   # HBM memory bottleneck -- ties this cluster to MU/NVDA too
     "AAPL": ["MSFT", "GOOG", "AMZN", "META"],
     "NVDA": ["AMD", "AVGO", "TSM", "MU"],   # TSM: "NVIDIA is the single most Taiwan Semiconductor-
-                                            # dependent name" (supply read-through, sourced); AMD/AVGO:
-                                            # direct AI-chip competitors; MU: shared HBM bottleneck
+                                            # dependent name" (supply read-through, sourced); AMD:
+                                            # direct AI-chip competitor, but only a moderate/mixed
+                                            # 0.53 stock correlation, sometimes opposite-direction on
+                                            # earnings -- kept for the direct competition, not the
+                                            # correlation; AVGO: direct competitor; MU: shared HBM
+                                            # bottleneck
     "AVGO": ["NVDA", "MRVL", "QCOM"],   # AVGO/MRVL: "intense rivals" in AI networking chips, sourced
     "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
-    "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # sourced: all 4 jumped 4-6%+ specifically on MU's
-             "TSM", "SKHY", "SSNLF", "SNDK"],  # earnings (equipment read-through); SK Hynix/Samsung/
-                                               # SanDisk: direct memory competitors
+    "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # equipment makers: sourced, all 4 jumped 4-6%+
+             "TSM", "SKHY", "SSNLF", "SNDK"],  # specifically on MU's earnings. SK Hynix/Samsung/
+                                               # SanDisk: strongly sourced -- "SK Hynix fell 6%...
+                                               # Micron also declined 6%" (near-identical synchronized
+                                               # moves) with SanDisk down 9% in the same DRAM-pricing
+                                               # selloff; explicitly because the three renegotiate
+                                               # DRAM/NAND pricing off shared supply-demand dynamics
     "V":    ["MA"],   # direct card-network duopoly competitors
     "MA":   ["V"],
     "LLY":  ["NVO"],   # sourced: LLY +7% / NVO -6% same week off each other's GLP-1 results --
