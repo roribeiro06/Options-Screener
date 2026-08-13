@@ -19,7 +19,10 @@ All anchored at Options Alpha's 70% POP:
     SPREAD_DTE_MIN/MAX like every other strategy here -- a ticker whose earnings falls further out
     than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it -- but it is
     capped at LONG_DTE_MAX (90 days): an earnings date further out than that is too far away to be
-    worth tying up capital in a long-premium position waiting for it.
+    worth tying up capital in a long-premium position waiting for it. And within that one expiration,
+    only ONE strike/width is kept per ticker -- whichever needs the smallest move to breakeven, not
+    whichever has the tightest-OTM strikes (those can differ: a tighter strike often costs enough
+    extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative).
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -435,8 +438,18 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     requiring the credit-spread OTM floor too is nearly impossible to
     satisfy at once except in extreme-IV names: even at 50% IV and 40 DTE,
     a 0.35-delta leg is only ~8% OTM, still short of the 10% floor. POP is
-    the real gate for this strategy."""
-    out, seen = [], set()
+    the real gate for this strategy.
+
+    Only ONE candidate is returned per ticker (on top of only one
+    expiration -- see screen_spreads): whichever passing strike/width
+    actually needs the SMALLEST move to breakeven, not whichever has the
+    tightest-OTM strikes. Those aren't the same thing -- a tighter strike
+    often costs more debit, which can push its breakeven further away than
+    a slightly-further-OTM, cheaper alternative (e.g. 2%-OTM strikes but an
+    8% breakeven vs. 3%-OTM strikes with a 5% breakeven -- the second is
+    the easier trade despite the "wider" strikes)."""
+    candidates = []
+    seen = set()
     pmin = SPREAD_POP_MIN
 
     def _try(s):
@@ -452,12 +465,17 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
         r = _long_row(sym, spot, exp, dte, earn, s, pop)
         if r["AnnROR_%"] == r["AnnROR_%"] and r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
-            out.append(r)
+            debit = s["debit"]
+            be_low, be_high = p["strike"] - debit, c["strike"] + debit
+            closer_be_pct = min((spot - be_low) / spot, (be_high - spot) / spot) if spot else float("inf")
+            candidates.append((closer_be_pct, r))
 
     _try(_atm_straddle(chain, spot))
     for otm_pct in LONG_STRANGLE_OTM_PCTS:
         _try(_long_strangle(chain, spot, otm_pct))
-    return out
+    if not candidates:
+        return []
+    return [min(candidates, key=lambda t: t[0])[1]]
 
 
 def _all_expirations(symbol, today):

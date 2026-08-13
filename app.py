@@ -555,6 +555,7 @@ ratio would.
   keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to
   also clear: even at 50% IV and 40 DTE, a 0.35-delta leg is only ~8% OTM, short of the 10% floor. POP
   is the real gate here.
+- **Only one strike/width kept per ticker** -- whichever needs the smallest move to breakeven, not whichever has the tightest-OTM strikes (a tighter strike often costs enough extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative -- e.g. 2%-OTM strikes with an 8% breakeven loses to 3%-OTM strikes with a 5% breakeven)
 
 Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
 """)
