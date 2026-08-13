@@ -323,6 +323,10 @@ for _key, _title in _SPREAD_SECTIONS:
         for _mc in ("Max Profit", "Max Profit (Best)"):
             if _mc in _disp.columns and _disp[_mc].isna().all():
                 _disp = _disp.drop(columns=[_mc])
+        # Breakeven, conversely, only means something for Long Straddle/Strangle --
+        # drop it for credit spreads/iron condor, where it's always "-".
+        if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
+            _disp = _disp.drop(columns=["Breakeven"])
         st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
         st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
                            f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")
@@ -555,7 +559,7 @@ ratio would.
   keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to
   also clear: even at 50% IV and 40 DTE, a 0.35-delta leg is only ~8% OTM, short of the 10% floor. POP
   is the real gate here.
-- **Only one strike/width kept per ticker** -- whichever needs the smallest move to breakeven, not whichever has the tightest-OTM strikes (a tighter strike often costs enough extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative -- e.g. 2%-OTM strikes with an 8% breakeven loses to 3%-OTM strikes with a 5% breakeven)
+- **At most one straddle AND one strangle kept per ticker**, not one overall winner -- among the strangle widths, whichever needs the smallest move to breakeven wins, not whichever has the tightest-OTM strikes (a tighter strike often costs enough extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative -- e.g. 2%-OTM strikes with an 8% breakeven loses to 3%-OTM strikes with a 5% breakeven)
 
 Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
 """)

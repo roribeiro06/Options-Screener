@@ -143,6 +143,8 @@ def _spreads_html(ds):
         for mc in ("Max Profit", "Max Profit (Best)"):   # unlimited-upside strategies -- see app.py
             if mc in disp.columns and disp[mc].isna().all():
                 disp = disp.drop(columns=[mc])
+        if "Breakeven" in disp.columns and (disp["Breakeven"] == "-").all():
+            disp = disp.drop(columns=["Breakeven"])
         out += f"<h3>{title}</h3>{_table(disp, sp._fmt)}"
     return out
 

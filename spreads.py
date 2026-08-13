@@ -20,9 +20,10 @@ All anchored at Options Alpha's 70% POP:
     than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it -- but it is
     capped at LONG_DTE_MAX (90 days): an earnings date further out than that is too far away to be
     worth tying up capital in a long-premium position waiting for it. And within that one expiration,
-    only ONE strike/width is kept per ticker -- whichever needs the smallest move to breakeven, not
-    whichever has the tightest-OTM strikes (those can differ: a tighter strike often costs enough
-    extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative).
+    at most one straddle AND one strangle are kept per ticker (not one overall winner) -- whichever
+    strangle width needs the smallest move to breakeven, not whichever has the tightest-OTM strikes
+    (those can differ: a tighter strike often costs enough extra debit to push its own breakeven
+    further away than a cheaper, slightly-wider alternative).
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -440,12 +441,15 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     a 0.35-delta leg is only ~8% OTM, still short of the 10% floor. POP is
     the real gate for this strategy.
 
-    Only ONE candidate is returned per ticker (on top of only one
-    expiration -- see screen_spreads): whichever passing strike/width
-    actually needs the SMALLEST move to breakeven, not whichever has the
-    tightest-OTM strikes. Those aren't the same thing -- a tighter strike
-    often costs more debit, which can push its breakeven further away than
-    a slightly-further-OTM, cheaper alternative (e.g. 2%-OTM strikes but an
+    At most ONE straddle AND ONE strangle are returned per ticker (on top
+    of only one expiration -- see screen_spreads) -- not one overall
+    winner. Within each of those two groups, whichever passing strike/width
+    actually needs the SMALLEST move to breakeven wins (there's only ever
+    one straddle candidate -- the ATM strike -- so that part only matters
+    for picking among the strangle rungs). Smallest-breakeven, not
+    tightest-OTM: those aren't the same thing -- a tighter strike often
+    costs more debit, which can push its breakeven further away than a
+    slightly-further-OTM, cheaper alternative (e.g. 2%-OTM strikes but an
     8% breakeven vs. 3%-OTM strikes with a 5% breakeven -- the second is
     the easier trade despite the "wider" strikes)."""
     candidates = []
@@ -473,9 +477,13 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     _try(_atm_straddle(chain, spot))
     for otm_pct in LONG_STRANGLE_OTM_PCTS:
         _try(_long_strangle(chain, spot, otm_pct))
-    if not candidates:
-        return []
-    return [min(candidates, key=lambda t: t[0])[1]]
+
+    out = []
+    for strat in ("Long Straddle", "Long Strangle"):
+        matches = [cand for cand in candidates if cand[1]["Strategy"] == strat]
+        if matches:
+            out.append(min(matches, key=lambda t: t[0])[1])
+    return out
 
 
 def _all_expirations(symbol, today):
