@@ -3,8 +3,10 @@ spreads.py -- multi-leg strategy screener (reuses wheel_screener's Tradier data)
 All anchored at Options Alpha's 70% POP:
   * Put/Call credit spreads : short leg ~0.30 delta (~70% POP), defined risk.
   * Iron condor             : short put + short call ~0.15 delta each (combined ~0.30), defined risk.
-  * Long strangle/straddle  : long put + long call, ~0.35-0.50 delta each (combined ~0.70-1.00 -- the
-    delta ladder is picked so this floor is reachable going long, unlike the iron condor's deep-OTM
+  * Long strangle/straddle  : long put + long call. The straddle (same strike) is picked by literal
+    proximity to spot, not delta -- a 50-delta strike can drift meaningfully above spot in a
+    high-IV name. Strangle legs (different strikes) are scanned ~0.35-0.45 delta each (combined
+    ~0.70-0.90 -- picked so this floor is reachable going long, unlike the iron condor's deep-OTM
     wings). Defined risk too (max loss = the debit paid), but the opposite side of the trade from
     everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
     "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed earnings
@@ -25,8 +27,9 @@ IC_LEG_DELTA     = 0.15    # iron condor / strangle: each short leg
 IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
 SHORT_DELTAS   = [0.30, 0.25, 0.20, 0.15]   # scan credit-spread shorts -> POP 70-85%
 IC_LEG_DELTAS  = [0.15, 0.12, 0.10]         # scan iron-condor legs -> combined POP 70-80%
-LONG_LEG_DELTAS = [0.50, 0.45, 0.40, 0.35]  # scan long strangle/straddle legs (ATM down to a modest
-                                            # strangle) -> combined POP 70-100%, same floor as above
+LONG_LEG_DELTAS = [0.45, 0.40, 0.35]        # scan long STRANGLE legs (the ATM straddle is picked
+                                            # separately, by spot proximity -- see _atm_straddle)
+                                            # -> combined POP 70-90%, same floor as above
 SCAN_TOL       = 0.04                        # tolerance when matching a target delta
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
@@ -293,6 +296,35 @@ def _long_strangle(chain, put_delta, call_delta, tol):
     return {"put": p, "call": c, "debit": debit, "debit_best": debit_best}
 
 
+def _atm_straddle(chain, spot):
+    """The literal ATM straddle: put and call at whichever listed strike is
+    closest to the current spot price -- NOT the strike closest to 0.50
+    delta. Those aren't the same thing: a 50-delta option sits at roughly
+    the forward price (spot drifted by the option's own 0.5*IV^2*T term),
+    which in a high-IV name can land noticeably above spot (e.g. an 84% IV
+    name can drift several percent above spot over just a month) -- not
+    what "ATM straddle" means to a trader looking at the strike relative to
+    today's price."""
+    put_strikes = {o["strike"] for o in chain if o["type"] == "put"}
+    call_strikes = {o["strike"] for o in chain if o["type"] == "call"}
+    common = put_strikes & call_strikes
+    if not common:
+        return None
+    strike = min(common, key=lambda k: abs(k - spot))
+    p, c = _leg_at(chain, "put", strike), _leg_at(chain, "call", strike)
+    if not (p and c and (p.get("bid") or 0) > 0 and (c.get("bid") or 0) > 0):
+        return None
+    if ws.MIN_OPEN_INTEREST > 0:
+        for leg in (p, c):
+            if (leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST:
+                return None
+    debit = (p["ask"] or 0) + (c["ask"] or 0)
+    debit_best = (p["bid"] or 0) + (c["bid"] or 0)
+    if debit < MIN_DEBIT:
+        return None
+    return {"put": p, "call": c, "debit": debit, "debit_best": debit_best}
+
+
 def _long_row(sym, spot, exp, dte, earn, s, pop):
     """Max Profit here is an IV-implied expected-move estimate (spot * IV *
     sqrt(DTE/365) -- the standard 1-SD move), not a guaranteed number like
@@ -333,16 +365,19 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     the actual catalyst requirement lives there (unlike credit spreads/iron
     condor in _for_expiration, this strategy needs a real reason to expect
     a move, not just permission for one to happen). POP is each leg's own
-    delta ADDED together
-    (mirrors the iron condor's leg-combination technique, just flipped:
-    profit here means finishing BEYOND either strike, not staying between
-    them). LONG_LEG_DELTAS runs from ATM (0.50 -- a straddle, put and call
-    at the same strike) down to a modest 0.35 strangle, since that's the
-    range where put_delta + call_delta actually clears the same 70% POP
-    floor used everywhere else in this module -- deep-OTM legs like the
-    iron condor's wings would never reach it; being long premium needs to
-    be much closer to the money to have a high chance of finishing past
-    either side.
+    delta ADDED together (mirrors the iron condor's leg-combination
+    technique, just flipped: profit here means finishing BEYOND either
+    strike, not staying between them).
+
+    The straddle (put and call at the same strike) is picked by literal
+    proximity to spot -- see _atm_straddle -- not by delta; the strangle
+    legs (different strikes) are then scanned by LONG_LEG_DELTAS, same
+    delta-ladder approach as the rest of this module, from a modest 0.45
+    down to 0.35, since that's the range where put_delta + call_delta
+    actually clears the same 70% POP floor used everywhere else here --
+    deep-OTM legs like the iron condor's wings would never reach it; being
+    long premium needs to be much closer to the money to have a high
+    chance of finishing past either side.
 
     No OTM floor / OTM-over-IV cushion here, unlike credit spreads/iron
     condor -- those exist to keep a SHORT leg meaningfully far from the
@@ -354,21 +389,25 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     the real gate for this strategy."""
     out, seen = [], set()
     pmin = SPREAD_POP_MIN
-    for td in LONG_LEG_DELTAS:
-        s = _long_strangle(chain, td, td, SCAN_TOL)
+
+    def _try(s):
         if not s:
-            continue
+            return
         p, c = s["put"], s["call"]
         pop = abs(p["delta"]) + abs(c["delta"])
         if not (pmin <= pop <= SPREAD_POP_MAX):
-            continue
+            return
         key = (p["strike"], c["strike"])
         if key in seen:
-            continue
+            return
         r = _long_row(sym, spot, exp, dte, earn, s, pop)
         if r["AnnROR_%"] == r["AnnROR_%"] and r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
             out.append(r)
+
+    _try(_atm_straddle(chain, spot))
+    for td in LONG_LEG_DELTAS:
+        _try(_long_strangle(chain, td, td, SCAN_TOL))
     return out
 
 
