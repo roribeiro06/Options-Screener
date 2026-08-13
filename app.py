@@ -306,8 +306,8 @@ _SPREAD_SECTIONS = [
     ("Put credit spread",  "Put Credit Spreads  (bullish, defined risk)"),
     ("Call credit spread", "Call Credit Spreads  (bearish, defined risk)"),
     ("Iron condor",        "Iron Condors  (neutral, defined risk)"),
-    ("Long Straddle",      "Long Straddles  (big-move bet, defined risk, allowed to span earnings)"),
-    ("Long Strangle",      "Long Strangles  (big-move bet, defined risk, allowed to span earnings)"),
+    ("Long Straddle",      "Long Straddles  (big-move bet, defined risk, requires confirmed earnings in-window)"),
+    ("Long Strangle",      "Long Strangles  (big-move bet, defined risk, requires confirmed earnings in-window)"),
 ]
 for _key, _title in _SPREAD_SECTIONS:
     st.subheader(_title)
@@ -535,7 +535,7 @@ every other row in this section, there's no real cap on a long strangle's upside
 huge on a short-DTE trade -- that's linear-annualizing a lumpy, non-repeatable payoff, not a real
 expected annual return).
 - Per-leg delta scanned: {", ".join(f"{d:.2f}" for d in sp.LONG_LEG_DELTAS)} (combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above)
-- Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **unlike every other strategy here, allowed to span an earnings report**
+- Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **requires a CONFIRMED earnings date inside that window** (unlike every other strategy here, which never spans one) -- no known catalyst, no candidate, regardless of how the rest of the math looks
 - **No OTM floor / OTM-over-IV cushion** (unlike credit spreads/iron condor above) -- those exist to
   keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to
   also clear: even at 50% IV and 40 DTE, a 0.35-delta leg is only ~8% OTM, short of the 10% floor. POP

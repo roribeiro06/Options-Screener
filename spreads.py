@@ -7,8 +7,9 @@ All anchored at Options Alpha's 70% POP:
     delta ladder is picked so this floor is reachable going long, unlike the iron condor's deep-OTM
     wings). Defined risk too (max loss = the debit paid), but the opposite side of the trade from
     everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
-    "stays between them"), and -- unlike every other strategy -- these are explicitly allowed to span
-    an earnings report, since betting on that exact move is often the whole point of buying premium.
+    "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed earnings
+    date inside the expiration window (a real catalyst to move the stock), not just permission to
+    span one -- buying premium with nothing scheduled to move it is a pure bet against time decay.
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -327,10 +328,12 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
 
 
 def _for_expiration_long(sym, spot, exp, dte, earn, chain):
-    """Long strangle/straddle candidates. Unlike credit spreads/iron condor
-    in _for_expiration, these are explicitly allowed to span an earnings
-    report -- see screen_spreads(), which calls this regardless of
-    ws.earnings_blocks(). POP is each leg's own delta ADDED together
+    """Long strangle/straddle candidates. screen_spreads() only calls this
+    when a confirmed earnings date falls inside this expiration window --
+    the actual catalyst requirement lives there (unlike credit spreads/iron
+    condor in _for_expiration, this strategy needs a real reason to expect
+    a move, not just permission for one to happen). POP is each leg's own
+    delta ADDED together
     (mirrors the iron condor's leg-combination technique, just flipped:
     profit here means finishing BEYOND either strike, not staying between
     them). LONG_LEG_DELTAS runs from ATM (0.50 -- a straddle, put and call
@@ -395,9 +398,14 @@ def screen_spreads(symbol):
         chain = ws.td_chain(symbol, exp)
         if not blocked:
             rows += _for_expiration(symbol, price, exp, dte, earnings, chain)
-        # Long strangle/straddle are exempt from the earnings blackout -- see
-        # _for_expiration_long's docstring.
-        rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
+        # Long strangle/straddle need an actual catalyst -- a CONFIRMED earnings
+        # date inside this expiration window, not just permission to span one.
+        # No known catalyst -> skip entirely, no matter how the POP/delta math
+        # looks (buying premium with nothing to move the stock is a losing bet
+        # on time decay alone).
+        has_catalyst = earnings is not None and today <= earnings <= exp_date
+        if has_catalyst:
+            rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
     return rows
 
 
