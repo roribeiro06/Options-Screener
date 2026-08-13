@@ -11,11 +11,13 @@ All anchored at Options Alpha's 70% POP:
     Defined risk too (max loss = the debit paid), but the opposite side of the trade from
     everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
     "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed earnings
-    date inside the expiration window (a real catalyst to move the stock), not just permission to
-    span one -- buying premium with nothing scheduled to move it is a pure bet against time decay.
-    Only the SINGLE expiration closest to that earnings date is used, not every later expiration
-    that also happens to span it -- a catalyst trade should concentrate exposure around the event,
-    not scatter near-duplicate candidates across every weekly that comes after it.
+    date (a real catalyst to move the stock), not just permission to span one -- buying premium with
+    nothing scheduled to move it is a pure bet against time decay. Only the SINGLE expiration closest
+    to (on or after) that earnings date is used, not every later expiration that also happens to span
+    it -- a catalyst trade should concentrate exposure around the event, not scatter near-duplicate
+    candidates across every weekly that comes after it. That expiration search isn't bounded by
+    SPREAD_DTE_MIN/MAX like every other strategy here -- a ticker whose earnings falls further out
+    than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it.
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -454,7 +456,12 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     return out
 
 
-def _spread_expirations(symbol, today):
+def _all_expirations(symbol, today):
+    """Every expiration Tradier lists for this ticker that hasn't already
+    passed (dte >= 0) -- no SPREAD_DTE_MIN/MAX filtering. Used to find the
+    long strangle/straddle's earnings-catalyst expiration, which is allowed
+    to fall outside that window (see screen_spreads); the normal window
+    (_for_expiration's credit spreads/iron condor) filters this further."""
     out = []
     for exp in ws.td_expirations(symbol):
         try:
@@ -462,7 +469,7 @@ def _spread_expirations(symbol, today):
         except Exception:
             continue
         dte = (d - today).days
-        if SPREAD_DTE_MIN <= dte <= SPREAD_DTE_MAX:
+        if dte >= 0:
             out.append((exp, d, dte))
     return out
 
@@ -474,27 +481,41 @@ def screen_spreads(symbol):
     price = float(price)
     earnings = ws.get_earnings_date(symbol)
     today = dt.date.today()
-    expirations = _spread_expirations(symbol, today)
+    all_exps = _all_expirations(symbol, today)
+    expirations = [c for c in all_exps if SPREAD_DTE_MIN <= c[2] <= SPREAD_DTE_MAX]
 
-    # Long strangle/straddle only ever use the SINGLE expiration closest to a
-    # confirmed earnings date -- the standard way to actually play an
-    # earnings move (concentrate IV-crush/gamma exposure right around the
-    # event), not every later expiration that also happens to span it (which
-    # used to produce several near-duplicate rows for the same catalyst, one
-    # per expiration). No known catalyst -> no expiration qualifies at all.
+    # Long strangle/straddle only ever use the SINGLE expiration closest to
+    # (on or after) a confirmed earnings date -- the standard way to actually
+    # play an earnings move (concentrate IV-crush/gamma exposure right around
+    # the event), not every later expiration that also happens to span it.
+    # Searched across EVERY listed expiration, not just the SPREAD_DTE_MIN/MAX
+    # window above -- a ticker whose earnings falls further than
+    # SPREAD_DTE_MAX out should still get a long candidate at the nearest
+    # expiration after that date, even though every other strategy here stays
+    # capped at SPREAD_DTE_MAX. No known catalyst -> no expiration qualifies.
     long_exp = None
     if earnings is not None:
-        candidates = [c for c in expirations if today <= earnings <= c[1]]
+        candidates = [c for c in all_exps if today <= earnings <= c[1]]
         if candidates:
-            long_exp = min(candidates, key=lambda c: (c[1] - earnings).days)[0]
+            long_exp = min(candidates, key=lambda c: (c[1] - earnings).days)
 
     rows = []
+    seen = set()
     for exp, exp_date, dte in expirations:
+        seen.add(exp)
         chain = ws.td_chain(symbol, exp)
         if not ws.earnings_blocks(symbol, earnings, today, exp_date):
             rows += _for_expiration(symbol, price, exp, dte, earnings, chain)
-        if exp == long_exp:
+        if long_exp and exp == long_exp[0]:
             rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
+
+    # long_exp can fall outside SPREAD_DTE_MIN/MAX (see above) -- if so it
+    # wasn't in `expirations`/fetched yet, so give it its own chain fetch.
+    if long_exp and long_exp[0] not in seen:
+        exp, exp_date, dte = long_exp
+        chain = ws.td_chain(symbol, exp)
+        rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
+
     return rows
 
 
