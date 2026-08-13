@@ -52,8 +52,8 @@ SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than 
                             # CASH_TARGET (40,000) since multi-leg risk is defined/capped per contract.
 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
-               "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "AvgPremium",
-               "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
+               "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "Breakeven",
+               "AvgPremium", "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
                "OpenInt", "EarningsDate"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
@@ -184,6 +184,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
             "Max Profit": round(credit, 2), "Max Profit (Best)": round(credit_best, 2),
+            "Breakeven": "-",
             "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
@@ -348,13 +349,18 @@ def _atm_straddle(chain, spot):
 
 
 def _long_row(sym, spot, exp, dte, earn, s, pop):
-    """Max Profit here is an IV-implied expected-move estimate (spot * IV *
-    sqrt(DTE/365) -- the standard 1-SD move), not a guaranteed number like
-    the credit strategies' net credit -- a long strangle's real upside is
-    open-ended. ROR_%/AnnROR_% follow from that same estimate divided by
-    the debit paid, so treat them as "is this cheap relative to the move
-    IV implies", not a guaranteed return like the rest of this module.
-    MaxLoss is real and defined, though: the debit paid, worst case."""
+    """No "Max Profit" here -- a long strangle's upside is genuinely
+    open-ended (unlike the credit strategies' net credit, a real cap), so
+    showing a single number under that label would misleadingly imply one.
+    **Breakeven** replaces it: the two prices the stock actually needs to
+    clear (strike +/- the debit paid) to be profitable at expiration, with
+    the % move required from spot in parentheses -- the real, hard number
+    this strategy is about, not an estimate.
+    ROR_%/AnnROR_%/Score still derive from an IV-implied expected-move
+    estimate (spot * IV * sqrt(DTE/365)) divided by the debit paid, same
+    caveat as before: "is this cheap relative to the move IV implies", not
+    a guaranteed return. MaxLoss is real and defined: the debit paid,
+    worst case."""
     p, c = s["put"], s["call"]
     width = abs(c["strike"] - p["strike"])
     strat = "Long Straddle" if width < 0.01 else "Long Strangle"
@@ -367,12 +373,17 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
     score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
              if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop) else float("nan"))
     oi = _leg_liquidity(p, c)
+    be_low, be_high = p["strike"] - debit, c["strike"] + debit
+    be_low_pct = (spot - be_low) / spot if spot else float("nan")
+    be_high_pct = (be_high - spot) / spot if spot else float("nan")
+    breakeven = (f"${be_low:.2f} (-{be_low_pct*100:.1f}%) / ${be_high:.2f} (+{be_high_pct*100:.1f}%)"
+                if (be_low_pct == be_low_pct and be_high_pct == be_high_pct) else "-")
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": f"buy {p['strike']:g}P", "Call Legs": f"buy {c['strike']:g}C",
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
             "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
-            "Max Profit": (round(expected_move, 2) if expected_move == expected_move else float("nan")),
-            "Max Profit (Best)": float("nan"),
+            "Max Profit": float("nan"), "Max Profit (Best)": float("nan"),
+            "Breakeven": breakeven,
             "MaxLoss": round(debit, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
@@ -497,8 +508,9 @@ def _fmt(df):
     # Max Profit: "$worst-$best (total credit range across the # of contracts that reach the
     # cash target)". worst = sell short at bid / buy long at ask; best = sell short at ask /
     # buy long at bid -- this range folds in what the old separate Spread_$ liquidity column
-    # used to convey, so that column is gone. For the long strangle/straddle (no real worst/best
-    # range, just a single expected-move estimate -- see _long_row), lo==hi collapses to one value.
+    # used to convey, so that column is gone. Long strangle/straddle leave this NaN entirely
+    # (no real max profit -- see _long_row's docstring; use Breakeven instead), which the NaN
+    # check below already handles as "-". lo==hi (no separate worst/best) collapses to one value.
     if "Max Profit" in d.columns and "# of contracts" in d.columns:
         def _mp(lo, hi, n):
             if pd.isna(lo):
