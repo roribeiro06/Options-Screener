@@ -5,13 +5,17 @@ All anchored at Options Alpha's 70% POP:
   * Iron condor             : short put + short call ~0.15 delta each (combined ~0.30), defined risk.
   * Long strangle/straddle  : long put + long call. The straddle (same strike) is picked by literal
     proximity to spot, not delta -- a 50-delta strike can drift meaningfully above spot in a
-    high-IV name. Strangle legs (different strikes) are scanned ~0.35-0.45 delta each (combined
-    ~0.70-0.90 -- picked so this floor is reachable going long, unlike the iron condor's deep-OTM
-    wings). Defined risk too (max loss = the debit paid), but the opposite side of the trade from
+    high-IV name. Strangle legs (different strikes) are picked symmetrically -- the same % away
+    from spot on each side -- then filtered to combined POP 0.70-0.90 (matching-delta legs
+    independently would drift asymmetrically for the same reason the straddle strike does).
+    Defined risk too (max loss = the debit paid), but the opposite side of the trade from
     everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
     "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed earnings
     date inside the expiration window (a real catalyst to move the stock), not just permission to
     span one -- buying premium with nothing scheduled to move it is a pure bet against time decay.
+    Only the SINGLE expiration closest to that earnings date is used, not every later expiration
+    that also happens to span it -- a catalyst trade should concentrate exposure around the event,
+    not scatter near-duplicate candidates across every weekly that comes after it.
 Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
 credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
 guaranteed number (there's no real cap on a long strangle's upside).
@@ -379,13 +383,15 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
 
 def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     """Long strangle/straddle candidates. screen_spreads() only calls this
-    when a confirmed earnings date falls inside this expiration window --
-    the actual catalyst requirement lives there (unlike credit spreads/iron
-    condor in _for_expiration, this strategy needs a real reason to expect
-    a move, not just permission for one to happen). POP is each leg's own
-    delta ADDED together (mirrors the iron condor's leg-combination
-    technique, just flipped: profit here means finishing BEYOND either
-    strike, not staying between them).
+    ONCE per ticker -- for the single expiration closest to a confirmed
+    earnings date, not every expiration that happens to span one. Several
+    near-duplicate rows for the same catalyst (one per later expiration)
+    would just be noise and dilute the point of a catalyst-driven trade:
+    you want exposure concentrated right around the event, not spread
+    across every weekly that comes after it. POP is each leg's own delta
+    ADDED together (mirrors the iron condor's leg-combination technique,
+    just flipped: profit here means finishing BEYOND either strike, not
+    staying between them).
 
     The straddle (put and call at the same strike) is picked by literal
     proximity to spot -- see _atm_straddle. Strangle legs (different
@@ -451,19 +457,26 @@ def screen_spreads(symbol):
     price = float(price)
     earnings = ws.get_earnings_date(symbol)
     today = dt.date.today()
+    expirations = _spread_expirations(symbol, today)
+
+    # Long strangle/straddle only ever use the SINGLE expiration closest to a
+    # confirmed earnings date -- the standard way to actually play an
+    # earnings move (concentrate IV-crush/gamma exposure right around the
+    # event), not every later expiration that also happens to span it (which
+    # used to produce several near-duplicate rows for the same catalyst, one
+    # per expiration). No known catalyst -> no expiration qualifies at all.
+    long_exp = None
+    if earnings is not None:
+        candidates = [c for c in expirations if today <= earnings <= c[1]]
+        if candidates:
+            long_exp = min(candidates, key=lambda c: (c[1] - earnings).days)[0]
+
     rows = []
-    for exp, exp_date, dte in _spread_expirations(symbol, today):
-        blocked = ws.earnings_blocks(symbol, earnings, today, exp_date)
+    for exp, exp_date, dte in expirations:
         chain = ws.td_chain(symbol, exp)
-        if not blocked:
+        if not ws.earnings_blocks(symbol, earnings, today, exp_date):
             rows += _for_expiration(symbol, price, exp, dte, earnings, chain)
-        # Long strangle/straddle need an actual catalyst -- a CONFIRMED earnings
-        # date inside this expiration window, not just permission to span one.
-        # No known catalyst -> skip entirely, no matter how the POP/delta math
-        # looks (buying premium with nothing to move the stock is a losing bet
-        # on time decay alone).
-        has_catalyst = earnings is not None and today <= earnings <= exp_date
-        if has_catalyst:
+        if exp == long_exp:
             rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
     return rows
 

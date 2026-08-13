@@ -537,6 +537,7 @@ expected annual return).
 - Straddle strike (put = call): whichever listed strike is closest to the current price, not the closest-to-0.50-delta strike (those can diverge meaningfully in a high-IV name)
 - Strangle strikes: symmetric % away from the current price on each side (not matched by delta independently per leg, which produces lopsided strangles -- see the straddle note above, same root cause). % scanned: {", ".join(f"{p:.0%}" for p in sp.LONG_STRANGLE_OTM_PCTS)}, filtered afterward to combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **requires a CONFIRMED earnings date inside that window** (unlike every other strategy here, which never spans one) -- no known catalyst, no candidate, regardless of how the rest of the math looks
+- **Only the single expiration closest to that earnings date** is used, not every later one that also happens to span it -- a catalyst trade should concentrate exposure around the event, not scatter near-duplicate rows across every weekly that comes after it
 - **No OTM floor / OTM-over-IV cushion** (unlike credit spreads/iron condor above) -- those exist to
   keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to
   also clear: even at 50% IV and 40 DTE, a 0.35-delta leg is only ~8% OTM, short of the 10% floor. POP
