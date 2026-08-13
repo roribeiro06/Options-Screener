@@ -149,26 +149,49 @@ EARNINGS_DATES = {
 # Fully automatic (checked live via get_earnings_date, same as your own
 # earnings), no manual date entry needed; edit the peer LIST itself if a
 # relationship changes.
+#
+# Each entry is either evidence-backed (a real, sourced example of one
+# actually moving the other around earnings -- same direction or, for direct
+# competitors, opposite/divergent moves that still create real volatility)
+# or a genuine head-to-head competitor even without a specific correlation
+# example on record. Entries considered and dropped for lacking either:
+# V/MA's cross-list to AXP/PYPL ("earnings announcements and stock movements
+# don't necessarily correlate strongly with each other" -- explicit evidence
+# against it), AAPL's old TSM/AVGO guess (no evidence either way), LLY's old
+# PFE/MRK (not direct GLP-1 competitors the way NVO is), EIX's old SO/DUK/SRE
+# (regulated utilities don't compete for customers, and no correlation
+# evidence was found -- only PCG had real supporting evidence, via shared
+# California wildfire liability dynamics).
 PEER_TICKERS = {
-    "MSFT": ["GOOG", "AMZN"],
-    "GOOG": ["META", "MSFT", "AMZN"],
-    "NVDA": ["AMD", "AVGO", "TSM", "MU"],
-    "AVGO": ["NVDA", "QCOM", "MRVL"],
+    "MSFT": ["GOOG", "AMZN", "META", "AAPL"],   # "move together in virtually all cases" -- mega-cap
+    "GOOG": ["MSFT", "AMZN", "META", "AAPL"],   # tech correlation, sourced; all four (+AAPL) also
+    "AMZN": ["MSFT", "GOOG", "META", "AAPL"],   # trace back to the same Samsung/SK Hynix/Micron
+    "META": ["MSFT", "GOOG", "AMZN", "AAPL"],   # HBM memory bottleneck -- ties this cluster to MU/NVDA too
+    "AAPL": ["MSFT", "GOOG", "AMZN", "META"],
+    "NVDA": ["AMD", "AVGO", "TSM", "MU"],   # TSM: "NVIDIA is the single most Taiwan Semiconductor-
+                                            # dependent name" (supply read-through, sourced); AMD/AVGO:
+                                            # direct AI-chip competitors; MU: shared HBM bottleneck
+    "AVGO": ["NVDA", "MRVL", "QCOM"],   # AVGO/MRVL: "intense rivals" in AI networking chips, sourced
     "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
-    "MU":   ["AMAT", "ASML", "LRCX", "KLAC", "TSM", "SKHY", "SSNLF", "SNDK"],
-    "V":    ["MA", "AXP", "PYPL"],
-    "AAPL": ["TSM", "AVGO"],
-    "LLY":  ["NVO", "PFE", "MRK"],
-    "MA":   ["V", "AXP", "PYPL"],
-    "UBER": ["LYFT", "DASH"],
-    "NOW":  ["CRM", "WDAY", "MSFT"],
-    "AMZN": ["GOOG", "MSFT", "WMT"],
-    "META": ["GOOG", "SNAP", "PINS"],
-    "DKNG": ["FLUT", "MGM", "CZR"],
-    "KHC":  ["GIS", "MDLZ"],   # Kellanova (K) delisted Dec 2025 -- acquired by Mars
-    "CMCSA": ["CHTR", "DIS", "WBD"],
-    "NFLX": ["DIS", "WBD", "PSKY"],   # Paramount now trades as PSKY (Paramount Skydance), not PARA
-    "EIX":  ["SO", "DUK", "PCG", "SRE"],
+    "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # sourced: all 4 jumped 4-6%+ specifically on MU's
+             "TSM", "SKHY", "SSNLF", "SNDK"],  # earnings (equipment read-through); SK Hynix/Samsung/
+                                               # SanDisk: direct memory competitors
+    "V":    ["MA"],   # direct card-network duopoly competitors
+    "MA":   ["V"],
+    "LLY":  ["NVO"],   # sourced: LLY +7% / NVO -6% same week off each other's GLP-1 results --
+                       # opposite-direction, but real, evidenced cross-reactivity
+    "UBER": ["LYFT", "DASH"],   # direct rideshare/delivery competitors (LYFT's stock correlation
+                                # is actually low, ~0.49 -- kept anyway as a direct competitor)
+    "NOW":  ["CRM", "WDAY"],   # direct enterprise-software competitors
+    "DKNG": ["FLUT", "MGM", "CZR"],   # sourced: DKNG -8%, "selling off in sympathy with Flutter's
+                                      # 14% post-earnings drop"; MGM/CZR: direct competitors
+    "KHC":  ["GIS", "MDLZ"],   # direct packaged-food competitors (Kellanova/K delisted Dec 2025 --
+                               # acquired by Mars, removed)
+    "CMCSA": ["CHTR", "DIS", "WBD"],   # direct cable/streaming competitors
+    "NFLX": ["DIS", "WBD", "PSKY"],   # direct streaming competitors (Paramount now trades as PSKY,
+                                      # not PARA, post-Skydance merger)
+    "EIX":  ["PCG"],   # same California wildfire liability dynamics, explicitly cross-referenced
+                       # in coverage of both -- not a competitor (regulated monopoly), a shared-risk peer
     # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
     # company driven by its own portfolio's performance, not sector peers.
 }
