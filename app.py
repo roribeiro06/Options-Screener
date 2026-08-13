@@ -317,6 +317,12 @@ for _key, _title in _SPREAD_SECTIONS:
         for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
                 _disp = _disp.drop(columns=[_lc])
+        # Long Straddle/Strangle have no real Max Profit (unlimited upside, not a
+        # guaranteed number) -- drop the column entirely rather than show a
+        # column of "-" for every row (Breakeven is the real number there instead).
+        for _mc in ("Max Profit", "Max Profit (Best)"):
+            if _mc in _disp.columns and _disp[_mc].isna().all():
+                _disp = _disp.drop(columns=[_mc])
         st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
         st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
                            f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")

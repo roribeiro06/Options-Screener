@@ -140,6 +140,9 @@ def _spreads_html(ds):
         for lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if lc in disp.columns and (disp[lc].fillna("") == "").all():
                 disp = disp.drop(columns=[lc])
+        for mc in ("Max Profit", "Max Profit (Best)"):   # unlimited-upside strategies -- see app.py
+            if mc in disp.columns and disp[mc].isna().all():
+                disp = disp.drop(columns=[mc])
         out += f"<h3>{title}</h3>{_table(disp, sp._fmt)}"
     return out
 
