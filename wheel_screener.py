@@ -140,6 +140,38 @@ EARNINGS_DATES = {
     # "MSFT": "2026-07-29",
     # "LLY":  "2026-08-06",
 }
+
+# Related tickers whose OWN earnings can be a real catalyst for this one, even
+# with nothing on this ticker's own calendar (e.g. a chip equipment maker's
+# earnings moving a memory maker via demand read-through, or a direct
+# competitor's results). Used only by the long strangle/straddle screener
+# (spreads.py) -- see _catalyst_dates -- everything else here is unaffected.
+# Fully automatic (checked live via get_earnings_date, same as your own
+# earnings), no manual date entry needed; edit the peer LIST itself if a
+# relationship changes.
+PEER_TICKERS = {
+    "MSFT": ["GOOG", "AMZN"],
+    "GOOG": ["META", "MSFT", "AMZN"],
+    "NVDA": ["AMD", "AVGO", "TSM", "MU"],
+    "AVGO": ["NVDA", "QCOM", "MRVL"],
+    "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
+    "MU":   ["AMAT", "ASML", "LRCX", "KLAC", "TSM", "SKHY", "SSNLF", "SNDK"],
+    "V":    ["MA", "AXP", "PYPL"],
+    "AAPL": ["TSM", "AVGO"],
+    "LLY":  ["NVO", "PFE", "MRK"],
+    "MA":   ["V", "AXP", "PYPL"],
+    "UBER": ["LYFT", "DASH"],
+    "NOW":  ["CRM", "WDAY", "MSFT"],
+    "AMZN": ["GOOG", "MSFT", "WMT"],
+    "META": ["GOOG", "SNAP", "PINS"],
+    "DKNG": ["FLUT", "MGM", "CZR"],
+    "KHC":  ["GIS", "MDLZ"],   # Kellanova (K) delisted Dec 2025 -- acquired by Mars
+    "CMCSA": ["CHTR", "DIS", "WBD"],
+    "NFLX": ["DIS", "WBD", "PSKY"],   # Paramount now trades as PSKY (Paramount Skydance), not PARA
+    "EIX":  ["SO", "DUK", "PCG", "SRE"],
+    # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
+    # company driven by its own portfolio's performance, not sector peers.
+}
 USE_TBILL_SPREAD  = False    # your old "beat T-bill by 5pts" rule (off; set True to re-enable)
 MIN_RISK_PREMIUM  = 0.05
 IVR_MIN           = 0.50

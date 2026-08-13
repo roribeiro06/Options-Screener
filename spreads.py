@@ -10,16 +10,20 @@ All anchored at Options Alpha's 70% POP:
     independently would drift asymmetrically for the same reason the straddle strike does).
     Defined risk too (max loss = the debit paid), but the opposite side of the trade from
     everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
-    "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed earnings
-    date (a real catalyst to move the stock), not just permission to span one -- buying premium with
-    nothing scheduled to move it is a pure bet against time decay. Only the SINGLE expiration closest
-    to (on or after) that earnings date is used, not every later expiration that also happens to span
+    "stays between them"), and -- unlike every other strategy -- these REQUIRE a confirmed catalyst
+    date (a real reason to expect the stock to move), not just permission to span one -- buying
+    premium with nothing scheduled to move it is a pure bet against time decay. That catalyst can be
+    this ticker's OWN earnings, or a related ticker's -- see wheel_screener.PEER_TICKERS and
+    _catalyst_dates -- since a chip equipment maker's earnings can move a memory maker via demand
+    read-through, a direct competitor's results can move its rival, etc.; every known catalyst date
+    is tried and whichever produces the closest expiration wins. Only the SINGLE expiration closest
+    to (on or after) that catalyst date is used, not every later expiration that also happens to span
     it -- a catalyst trade should concentrate exposure around the event, not scatter near-duplicate
     candidates across every weekly that comes after it. That expiration search isn't bounded by
-    SPREAD_DTE_MIN/MAX like every other strategy here -- a ticker whose earnings falls further out
-    than SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it -- but it is
-    capped at LONG_DTE_MAX (90 days): an earnings date further out than that is too far away to be
-    worth tying up capital in a long-premium position waiting for it. And within that one expiration,
+    SPREAD_DTE_MIN/MAX like every other strategy here -- a catalyst falling further out than
+    SPREAD_DTE_MAX still gets a long candidate at the nearest expiration after it -- but it is capped
+    at LONG_DTE_MAX (90 days): a catalyst further out than that is too far away to be worth tying up
+    capital in a long-premium position waiting for it. And within that one expiration,
     at most one straddle AND one strangle are kept per ticker (not one overall winner) -- whichever
     strangle width needs the smallest move to breakeven, not whichever has the tightest-OTM strikes
     (those can differ: a tighter strike often costs enough extra debit to push its own breakeven
@@ -504,6 +508,28 @@ def _all_expirations(symbol, today):
     return out
 
 
+def _catalyst_dates(symbol):
+    """[(date, source_ticker), ...] -- this ticker's own confirmed earnings
+    plus any ws.PEER_TICKERS entry's confirmed earnings. A related ticker's
+    report (a chip equipment maker moving a memory maker via demand
+    read-through, a direct competitor, etc.) can be a real catalyst even
+    with nothing on this ticker's own calendar. Fully live -- every date
+    comes from the same get_earnings_date() call used everywhere else, no
+    manual entry needed beyond the PEER_TICKERS relationship itself."""
+    out = []
+    own = ws.get_earnings_date(symbol)
+    if own is not None:
+        out.append((own, symbol))
+    for peer in ws.PEER_TICKERS.get(symbol, []):
+        try:
+            d = ws.get_earnings_date(peer)
+        except Exception:
+            d = None
+        if d is not None:
+            out.append((d, peer))
+    return out
+
+
 def screen_spreads(symbol):
     price = ws.td_quote(symbol)
     if not price:
@@ -515,21 +541,32 @@ def screen_spreads(symbol):
     expirations = [c for c in all_exps if SPREAD_DTE_MIN <= c[2] <= SPREAD_DTE_MAX]
 
     # Long strangle/straddle only ever use the SINGLE expiration closest to
-    # (on or after) a confirmed earnings date -- the standard way to actually
-    # play an earnings move (concentrate IV-crush/gamma exposure right around
-    # the event), not every later expiration that also happens to span it.
-    # Searched past the SPREAD_DTE_MIN/MAX window above -- a ticker whose
-    # earnings falls further than SPREAD_DTE_MAX out still gets a long
-    # candidate at the nearest expiration after that date, even though every
-    # other strategy here stays capped at SPREAD_DTE_MAX -- but only up to
-    # LONG_DTE_MAX; an earnings date beyond THAT is too far out to be worth
-    # tying up capital in a long-premium position waiting for it. No known
-    # catalyst -> no expiration qualifies either way.
-    long_exp = None
-    if earnings is not None:
-        candidates = [c for c in all_exps if today <= earnings <= c[1] and c[2] <= LONG_DTE_MAX]
-        if candidates:
-            long_exp = min(candidates, key=lambda c: (c[1] - earnings).days)
+    # (on or after) a confirmed catalyst date -- this ticker's own earnings,
+    # OR (see _catalyst_dates) a related ticker's -- the standard way to
+    # actually play an earnings-driven move (concentrate IV-crush/gamma
+    # exposure right around the event), not every later expiration that
+    # also happens to span it. Every catalyst date is tried; whichever
+    # produces the closest expiration wins. Searched past the
+    # SPREAD_DTE_MIN/MAX window above -- a catalyst further than
+    # SPREAD_DTE_MAX out still gets a long candidate at the nearest
+    # expiration after it, even though every other strategy here stays
+    # capped at SPREAD_DTE_MAX -- but only up to LONG_DTE_MAX; a catalyst
+    # further out than that is too far away to be worth tying up capital in
+    # a long-premium position waiting for it. No known catalyst at all (own
+    # or peer) -> no expiration qualifies.
+    long_exp, long_catalyst = None, None
+    best = None
+    for cat_date, source in _catalyst_dates(symbol):
+        candidates = [c for c in all_exps if today <= cat_date <= c[1] and c[2] <= LONG_DTE_MAX]
+        if not candidates:
+            continue
+        cand = min(candidates, key=lambda c: (c[1] - cat_date).days)
+        dist = (cand[1] - cat_date).days
+        if best is None or dist < best[0]:
+            best = (dist, cand, cat_date, source)
+    if best is not None:
+        _, long_exp, cat_date, source = best
+        long_catalyst = f"{cat_date.isoformat()}" if source == symbol else f"{cat_date.isoformat()} (via {source})"
 
     rows = []
     seen = set()
@@ -539,14 +576,14 @@ def screen_spreads(symbol):
         if not ws.earnings_blocks(symbol, earnings, today, exp_date):
             rows += _for_expiration(symbol, price, exp, dte, earnings, chain)
         if long_exp and exp == long_exp[0]:
-            rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
+            rows += _for_expiration_long(symbol, price, exp, dte, long_catalyst, chain)
 
     # long_exp can fall outside SPREAD_DTE_MIN/MAX (see above) -- if so it
     # wasn't in `expirations`/fetched yet, so give it its own chain fetch.
     if long_exp and long_exp[0] not in seen:
         exp, exp_date, dte = long_exp
         chain = ws.td_chain(symbol, exp)
-        rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
+        rows += _for_expiration_long(symbol, price, exp, dte, long_catalyst, chain)
 
     return rows
 
