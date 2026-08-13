@@ -42,6 +42,8 @@ _SPREAD_SECTIONS = [
     ("Put credit spread",  "Put Credit Spreads (bullish, defined risk)"),
     ("Call credit spread", "Call Credit Spreads (bearish, defined risk)"),
     ("Iron condor",        "Iron Condors (neutral, defined risk)"),
+    ("Long Straddle",      "Long Straddles (big-move bet, defined risk, allowed to span earnings)"),
+    ("Long Strangle",      "Long Strangles (big-move bet, defined risk, allowed to span earnings)"),
 ]
 
 

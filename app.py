@@ -306,6 +306,8 @@ _SPREAD_SECTIONS = [
     ("Put credit spread",  "Put Credit Spreads  (bullish, defined risk)"),
     ("Call credit spread", "Call Credit Spreads  (bearish, defined risk)"),
     ("Iron condor",        "Iron Condors  (neutral, defined risk)"),
+    ("Long Straddle",      "Long Straddles  (big-move bet, defined risk, allowed to span earnings)"),
+    ("Long Strangle",      "Long Strangles  (big-move bet, defined risk, allowed to span earnings)"),
 ]
 for _key, _title in _SPREAD_SECTIONS:
     st.subheader(_title)
@@ -512,7 +514,9 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Tiered OTM-to-yield rule: **{_on(ws.USE_TIERED_YIELD)}**  |  Beat-T-bill rule: **{_on(ws.USE_TBILL_SPREAD)}**
 - Covered calls - require strike above your cost: **{_on(ws.REQUIRE_STRIKE_ABOVE_COST)}**
 
-**Multi-Leg (Credit Spreads & Iron Condors) - all defined-risk**
+**Multi-Leg - all defined-risk (short strangles/straddles excluded -- undefined risk)**
+
+*Credit Spreads & Iron Condors (selling premium)*
 - Structure: credit-spread short legs scanned from ~{sp.SHORT_DELTA:.2f} delta and further OTM; iron condors use two matched shorts. POP ranges from the floor up (safer variants included).
 - Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
@@ -520,7 +524,19 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - OTM floor on the short leg(s): {ws.OTM_MIN_INDEX:.0%} for index ETFs / {ws.OTM_MIN_OTHER:.0%} for other tickers
 - Each short leg's OTM must also be >= {getattr(sp, "SPREAD_MIN_OTM_OVER_IV", 0):.0%} of its IV (same volatility-scaled cushion as puts/calls)
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX}; never spans earnings
-- Excluded: short strangles and straddles (undefined risk)
+
+*Long Straddles/Strangles (buying premium, betting on a big move)* -- the opposite side of the trade
+from everything else above: max loss is the debit paid (defined risk), not a net credit. POP is each
+leg's own delta ADDED together (finishing beyond EITHER strike, not staying between them), scanned
+from ATM (a straddle) down to a modest strangle so it can actually clear the same POP floor. **Max
+Profit/ROR/AnnROR/Score are an IV-implied expected-move estimate, not a guaranteed number** -- unlike
+every other row in this section, there's no real cap on a long strangle's upside, so treat these as
+"is this cheap relative to what IV implies," not a promised return (AnnROR in particular can look
+huge on a short-DTE trade -- that's linear-annualizing a lumpy, non-repeatable payoff, not a real
+expected annual return).
+- Per-leg delta scanned: {", ".join(f"{d:.2f}" for d in sp.LONG_LEG_DELTAS)} (combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above)
+- Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **unlike every other strategy here, allowed to span an earnings report**
+- OTM floor and OTM/IV cushion (strangle legs only -- a straddle is AT the money by definition): same as credit spreads above
 
 Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
 """)

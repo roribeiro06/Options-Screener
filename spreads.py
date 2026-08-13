@@ -3,7 +3,15 @@ spreads.py -- multi-leg strategy screener (reuses wheel_screener's Tradier data)
 All anchored at Options Alpha's 70% POP:
   * Put/Call credit spreads : short leg ~0.30 delta (~70% POP), defined risk.
   * Iron condor             : short put + short call ~0.15 delta each (combined ~0.30), defined risk.
-Undefined-risk strategies (short strangles/straddles) are excluded. Max Profit = net credit received.
+  * Long strangle/straddle  : long put + long call, ~0.35-0.50 delta each (combined ~0.70-1.00 -- the
+    delta ladder is picked so this floor is reachable going long, unlike the iron condor's deep-OTM
+    wings). Defined risk too (max loss = the debit paid), but the opposite side of the trade from
+    everything else here: you're BUYING both legs, POP is "finishes beyond either strike" (not
+    "stays between them"), and -- unlike every other strategy -- these are explicitly allowed to span
+    an earnings report, since betting on that exact move is often the whole point of buying premium.
+Undefined-risk SHORT strangles/straddles are excluded. Max Profit = net credit received for the
+credit strategies; for the long strangle/straddle it's an IV-implied expected-move estimate, not a
+guaranteed number (there's no real cap on a long strangle's upside).
 """
 import datetime as dt
 import math
@@ -16,9 +24,12 @@ IC_LEG_DELTA     = 0.15    # iron condor / strangle: each short leg
 IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
 SHORT_DELTAS   = [0.30, 0.25, 0.20, 0.15]   # scan credit-spread shorts -> POP 70-85%
 IC_LEG_DELTAS  = [0.15, 0.12, 0.10]         # scan iron-condor legs -> combined POP 70-80%
+LONG_LEG_DELTAS = [0.50, 0.45, 0.40, 0.35]  # scan long strangle/straddle legs (ATM down to a modest
+                                            # strangle) -> combined POP 70-100%, same floor as above
 SCAN_TOL       = 0.04                        # tolerance when matching a target delta
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
+MIN_DEBIT        = 0.05    # ignore trivial debits (long strangle/straddle)
 ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
 SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/calls)
 SPREAD_POP_MAX   = 1.0     # no upper cap
@@ -261,6 +272,106 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
     return out
 
 
+def _long_strangle(chain, put_delta, call_delta, tol):
+    """Buys an OTM (or ATM, for a straddle) put + call near the given
+    per-leg deltas -- same matching mechanics as _credit_spread, but going
+    long both legs (pay the ask) instead of selling one and buying a
+    protective wing against it."""
+    p = _find_by_delta(chain, "put", put_delta, tol)
+    c = _find_by_delta(chain, "call", call_delta, tol)
+    if not (p and c):
+        return None
+    if ws.MIN_OPEN_INTEREST > 0:
+        for leg in (p, c):
+            if (leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST:
+                return None
+    debit = (p["ask"] or 0) + (c["ask"] or 0)          # worst case: buy both at ask
+    debit_best = (p["bid"] or 0) + (c["bid"] or 0)      # best case: buy both at bid
+    if debit < MIN_DEBIT:
+        return None
+    return {"put": p, "call": c, "debit": debit, "debit_best": debit_best}
+
+
+def _long_row(sym, spot, exp, dte, earn, s, pop):
+    """Max Profit here is an IV-implied expected-move estimate (spot * IV *
+    sqrt(DTE/365) -- the standard 1-SD move), not a guaranteed number like
+    the credit strategies' net credit -- a long strangle's real upside is
+    open-ended. ROR_%/AnnROR_% follow from that same estimate divided by
+    the debit paid, so treat them as "is this cheap relative to the move
+    IV implies", not a guaranteed return like the rest of this module.
+    MaxLoss is real and defined, though: the debit paid, worst case."""
+    p, c = s["put"], s["call"]
+    width = abs(c["strike"] - p["strike"])
+    strat = "Long Straddle" if width < 0.01 else "Long Strangle"
+    iv = ((p.get("iv") or 0) + (c.get("iv") or 0)) / 2
+    otm = 0.0 if width < 0.01 else min((spot - p["strike"]) / spot, (c["strike"] - spot) / spot)
+    expected_move = spot * iv * math.sqrt(dte / 365.0) if (iv and dte) else float("nan")
+    debit = s["debit"]
+    ror = (expected_move / debit) if (debit > 0 and expected_move == expected_move) else float("nan")
+    ann = ror * 365.0 / dte if (dte and ror == ror) else float("nan")
+    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
+             if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop) else float("nan"))
+    oi = _leg_liquidity(p, c)
+    return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
+            "Put Legs": f"buy {p['strike']:g}P", "Call Legs": f"buy {c['strike']:g}C",
+            "Expiration": exp, "DTE": dte, "OTM_%": otm,
+            "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
+            "Max Profit": (round(expected_move, 2) if expected_move == expected_move else float("nan")),
+            "Max Profit (Best)": float("nan"),
+            "MaxLoss": round(debit, 2),
+            "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
+            "Score": (round(score, 2) if score == score else float("nan")),
+            "AvgPremium": "-",
+            "# of contracts": ws.contracts_for_target(debit * 100, target=SPREAD_CASH_TARGET),
+            "OpenInt": int(oi), "EarningsDate": earn}
+
+
+def _for_expiration_long(sym, spot, exp, dte, earn, chain):
+    """Long strangle/straddle candidates. Unlike credit spreads/iron condor
+    in _for_expiration, these are explicitly allowed to span an earnings
+    report -- see screen_spreads(), which calls this regardless of
+    ws.earnings_blocks(). POP is each leg's own delta ADDED together
+    (mirrors the iron condor's leg-combination technique, just flipped:
+    profit here means finishing BEYOND either strike, not staying between
+    them). LONG_LEG_DELTAS runs from ATM (0.50 -- a straddle, put and call
+    at the same strike) down to a modest 0.35 strangle, since that's the
+    range where put_delta + call_delta actually clears the same 70% POP
+    floor used everywhere else in this module -- deep-OTM legs like the
+    iron condor's wings would never reach it; being long premium needs to
+    be much closer to the money to have a high chance of finishing past
+    either side."""
+    out, seen = [], set()
+    pmin = SPREAD_POP_MIN
+    omin = ws.otm_min_for(sym)
+    for td in LONG_LEG_DELTAS:
+        s = _long_strangle(chain, td, td, SCAN_TOL)
+        if not s:
+            continue
+        p, c = s["put"], s["call"]
+        width = abs(c["strike"] - p["strike"])
+        if width >= 0.01:   # a real strangle -- both legs still need the ticker's own OTM cushion
+            p_otm = (spot - p["strike"]) / spot
+            c_otm = (c["strike"] - spot) / spot
+            if p_otm < omin or c_otm < omin:
+                continue
+            p_iv, c_iv = p.get("iv") or 0, c.get("iv") or 0
+            if SPREAD_MIN_OTM_OVER_IV > 0:
+                if (p_iv > 0 and p_otm < SPREAD_MIN_OTM_OVER_IV * p_iv) or \
+                   (c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv):
+                    continue
+        pop = abs(p["delta"]) + abs(c["delta"])
+        if not (pmin <= pop <= SPREAD_POP_MAX):
+            continue
+        key = (p["strike"], c["strike"])
+        if key in seen:
+            continue
+        r = _long_row(sym, spot, exp, dte, earn, s, pop)
+        if r["AnnROR_%"] == r["AnnROR_%"] and r["AnnROR_%"] >= ROR_ANN_MIN:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 def _spread_expirations(symbol, today):
     out = []
     for exp in ws.td_expirations(symbol):
@@ -283,9 +394,13 @@ def screen_spreads(symbol):
     today = dt.date.today()
     rows = []
     for exp, exp_date, dte in _spread_expirations(symbol, today):
-        if ws.earnings_blocks(symbol, earnings, today, exp_date):
-            continue
-        rows += _for_expiration(symbol, price, exp, dte, earnings, ws.td_chain(symbol, exp))
+        blocked = ws.earnings_blocks(symbol, earnings, today, exp_date)
+        chain = ws.td_chain(symbol, exp)
+        if not blocked:
+            rows += _for_expiration(symbol, price, exp, dte, earnings, chain)
+        # Long strangle/straddle are exempt from the earnings blackout -- see
+        # _for_expiration_long's docstring.
+        rows += _for_expiration_long(symbol, price, exp, dte, earnings, chain)
     return rows
 
 
@@ -305,12 +420,15 @@ def _fmt(df):
     # Max Profit: "$worst-$best (total credit range across the # of contracts that reach the
     # cash target)". worst = sell short at bid / buy long at ask; best = sell short at ask /
     # buy long at bid -- this range folds in what the old separate Spread_$ liquidity column
-    # used to convey, so that column is gone.
+    # used to convey, so that column is gone. For the long strangle/straddle (no real worst/best
+    # range, just a single expected-move estimate -- see _long_row), lo==hi collapses to one value.
     if "Max Profit" in d.columns and "# of contracts" in d.columns:
         def _mp(lo, hi, n):
             if pd.isna(lo):
                 return "-"
             hi = hi if pd.notna(hi) else lo
+            if lo == hi:
+                return f"${lo:.2f}" if pd.isna(n) else f"${lo:.2f} (${lo * 100 * int(n):,.0f})"
             if pd.isna(n):
                 return f"${lo:.2f}-${hi:.2f}"
             return f"${lo:.2f}-${hi:.2f} (${lo * 100 * int(n):,.0f}-${hi * 100 * int(n):,.0f})"
