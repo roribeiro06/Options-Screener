@@ -27,9 +27,13 @@ IC_LEG_DELTA     = 0.15    # iron condor / strangle: each short leg
 IC_LEG_TOL       = 0.08    # accept 0.07-0.23 each (combined ~0.30 -> ~70% POP)
 SHORT_DELTAS   = [0.30, 0.25, 0.20, 0.15]   # scan credit-spread shorts -> POP 70-85%
 IC_LEG_DELTAS  = [0.15, 0.12, 0.10]         # scan iron-condor legs -> combined POP 70-80%
-LONG_LEG_DELTAS = [0.45, 0.40, 0.35]        # scan long STRANGLE legs (the ATM straddle is picked
-                                            # separately, by spot proximity -- see _atm_straddle)
-                                            # -> combined POP 70-90%, same floor as above
+LONG_STRANGLE_OTM_PCTS = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10]
+                                            # scan long STRANGLE legs -- symmetric %-from-spot on
+                                            # each side (NOT delta-matched independently, which
+                                            # drifts asymmetrically -- see _long_strangle). The ATM
+                                            # straddle is picked separately, by spot proximity --
+                                            # see _atm_straddle. POP (checked after selection) still
+                                            # needs to clear the same 70-90% floor as everywhere else.
 SCAN_TOL       = 0.04                        # tolerance when matching a target delta
 SPREAD_WIDTH_PCT = 0.05    # long strike ~5% from the short strike
 MIN_CREDIT       = 0.05    # ignore trivial credits
@@ -276,14 +280,28 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
     return out
 
 
-def _long_strangle(chain, put_delta, call_delta, tol):
-    """Buys an OTM (or ATM, for a straddle) put + call near the given
-    per-leg deltas -- same matching mechanics as _credit_spread, but going
-    long both legs (pay the ask) instead of selling one and buying a
-    protective wing against it."""
-    p = _find_by_delta(chain, "put", put_delta, tol)
-    c = _find_by_delta(chain, "call", call_delta, tol)
-    if not (p and c):
+def _long_strangle(chain, spot, otm_pct):
+    """Buys an OTM put + OTM call, each `otm_pct` away from spot -- a
+    genuinely symmetric strangle. NOT matched by delta independently per
+    leg: that was the original approach, but delta and OTM% aren't
+    symmetric between puts and calls (same root cause as the ATM straddle
+    picking a drifted strike -- see _atm_straddle's docstring -- the
+    same-delta strike sits near the forward price, not spot, and that
+    drift compounds differently for a put than a call), which produced
+    strangles with wildly uneven OTM% on each side (e.g. a put 0.3% OTM
+    paired with a call 4.5% OTM). Finds the nearest LISTED strike to each
+    symmetric target instead; POP is still computed from the resulting
+    legs' actual deltas afterward, same as before."""
+    put_strikes = [o["strike"] for o in chain if o["type"] == "put"]
+    call_strikes = [o["strike"] for o in chain if o["type"] == "call"]
+    if not (put_strikes and call_strikes):
+        return None
+    put_strike = min(put_strikes, key=lambda k: abs(k - spot * (1 - otm_pct)))
+    call_strike = min(call_strikes, key=lambda k: abs(k - spot * (1 + otm_pct)))
+    if put_strike >= call_strike:   # collapsed to (or past) the ATM straddle -- not a strangle
+        return None
+    p, c = _leg_at(chain, "put", put_strike), _leg_at(chain, "call", call_strike)
+    if not (p and c and (p.get("bid") or 0) > 0 and (c.get("bid") or 0) > 0):
         return None
     if ws.MIN_OPEN_INTEREST > 0:
         for leg in (p, c):
@@ -370,14 +388,16 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     strike, not staying between them).
 
     The straddle (put and call at the same strike) is picked by literal
-    proximity to spot -- see _atm_straddle -- not by delta; the strangle
-    legs (different strikes) are then scanned by LONG_LEG_DELTAS, same
-    delta-ladder approach as the rest of this module, from a modest 0.45
-    down to 0.35, since that's the range where put_delta + call_delta
-    actually clears the same 70% POP floor used everywhere else here --
-    deep-OTM legs like the iron condor's wings would never reach it; being
-    long premium needs to be much closer to the money to have a high
-    chance of finishing past either side.
+    proximity to spot -- see _atm_straddle. Strangle legs (different
+    strikes) are scanned by LONG_STRANGLE_OTM_PCTS -- symmetric %-from-spot
+    on each side, NOT matched by delta independently per leg (see
+    _long_strangle's docstring for why that produced lopsided strangles).
+    POP is still checked afterward against whatever legs each rung actually
+    lands on, from a tight 1% out to a modest 10%, since that's roughly the
+    range where put_delta + call_delta can clear the same 70% POP floor
+    used everywhere else here -- deep-OTM legs like the iron condor's wings
+    would never reach it; being long premium needs to be much closer to the
+    money to have a high chance of finishing past either side.
 
     No OTM floor / OTM-over-IV cushion here, unlike credit spreads/iron
     condor -- those exist to keep a SHORT leg meaningfully far from the
@@ -406,8 +426,8 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
             out.append(r)
 
     _try(_atm_straddle(chain, spot))
-    for td in LONG_LEG_DELTAS:
-        _try(_long_strangle(chain, td, td, SCAN_TOL))
+    for otm_pct in LONG_STRANGLE_OTM_PCTS:
+        _try(_long_strangle(chain, spot, otm_pct))
     return out
 
 
