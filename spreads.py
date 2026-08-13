@@ -339,26 +339,23 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
     floor used everywhere else in this module -- deep-OTM legs like the
     iron condor's wings would never reach it; being long premium needs to
     be much closer to the money to have a high chance of finishing past
-    either side."""
+    either side.
+
+    No OTM floor / OTM-over-IV cushion here, unlike credit spreads/iron
+    condor -- those exist to keep a SHORT leg meaningfully far from the
+    money. A long strangle's legs are, by construction, close to the money
+    (that's what makes the 70% POP floor reachable at all -- see above), so
+    requiring the credit-spread OTM floor too is nearly impossible to
+    satisfy at once except in extreme-IV names: even at 50% IV and 40 DTE,
+    a 0.35-delta leg is only ~8% OTM, still short of the 10% floor. POP is
+    the real gate for this strategy."""
     out, seen = [], set()
     pmin = SPREAD_POP_MIN
-    omin = ws.otm_min_for(sym)
     for td in LONG_LEG_DELTAS:
         s = _long_strangle(chain, td, td, SCAN_TOL)
         if not s:
             continue
         p, c = s["put"], s["call"]
-        width = abs(c["strike"] - p["strike"])
-        if width >= 0.01:   # a real strangle -- both legs still need the ticker's own OTM cushion
-            p_otm = (spot - p["strike"]) / spot
-            c_otm = (c["strike"] - spot) / spot
-            if p_otm < omin or c_otm < omin:
-                continue
-            p_iv, c_iv = p.get("iv") or 0, c.get("iv") or 0
-            if SPREAD_MIN_OTM_OVER_IV > 0:
-                if (p_iv > 0 and p_otm < SPREAD_MIN_OTM_OVER_IV * p_iv) or \
-                   (c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv):
-                    continue
         pop = abs(p["delta"]) + abs(c["delta"])
         if not (pmin <= pop <= SPREAD_POP_MAX):
             continue

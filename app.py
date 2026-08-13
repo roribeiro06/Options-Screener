@@ -536,7 +536,10 @@ huge on a short-DTE trade -- that's linear-annualizing a lumpy, non-repeatable p
 expected annual return).
 - Per-leg delta scanned: {", ".join(f"{d:.2f}" for d in sp.LONG_LEG_DELTAS)} (combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above)
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **unlike every other strategy here, allowed to span an earnings report**
-- OTM floor and OTM/IV cushion (strangle legs only -- a straddle is AT the money by definition): same as credit spreads above
+- **No OTM floor / OTM-over-IV cushion** (unlike credit spreads/iron condor above) -- those exist to
+  keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to
+  also clear: even at 50% IV and 40 DTE, a 0.35-delta leg is only ~8% OTM, short of the 10% floor. POP
+  is the real gate here.
 
 Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
 """)
