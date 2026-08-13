@@ -356,11 +356,14 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
     clear (strike +/- the debit paid) to be profitable at expiration, with
     the % move required from spot in parentheses -- the real, hard number
     this strategy is about, not an estimate.
-    ROR_%/AnnROR_%/Score still derive from an IV-implied expected-move
-    estimate (spot * IV * sqrt(DTE/365)) divided by the debit paid, same
-    caveat as before: "is this cheap relative to the move IV implies", not
-    a guaranteed return. MaxLoss is real and defined: the debit paid,
-    worst case."""
+
+    ROR_%/AnnROR_%/Score are tied to that same Breakeven, not a raw
+    expected-move guess: profit is estimated as whatever the IV-implied
+    expected move (spot * IV * sqrt(DTE/365)) clears ABOVE the CLOSER
+    (minimum-distance) breakeven -- not the move itself, which would
+    ignore that you make nothing until you're past breakeven in the first
+    place. 0 if the expected move doesn't even reach it. MaxLoss is real
+    and defined: the debit paid, worst case."""
     p, c = s["put"], s["call"]
     width = abs(c["strike"] - p["strike"])
     strat = "Long Straddle" if width < 0.01 else "Long Strangle"
@@ -368,16 +371,19 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
     otm = 0.0 if width < 0.01 else min((spot - p["strike"]) / spot, (c["strike"] - spot) / spot)
     expected_move = spot * iv * math.sqrt(dte / 365.0) if (iv and dte) else float("nan")
     debit = s["debit"]
-    ror = (expected_move / debit) if (debit > 0 and expected_move == expected_move) else float("nan")
-    ann = ror * 365.0 / dte if (dte and ror == ror) else float("nan")
-    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
-             if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop) else float("nan"))
     oi = _leg_liquidity(p, c)
     be_low, be_high = p["strike"] - debit, c["strike"] + debit
     be_low_pct = (spot - be_low) / spot if spot else float("nan")
     be_high_pct = (be_high - spot) / spot if spot else float("nan")
     breakeven = (f"${be_low:.2f} (-{be_low_pct*100:.1f}%) / ${be_high:.2f} (+{be_high_pct*100:.1f}%)"
                 if (be_low_pct == be_low_pct and be_high_pct == be_high_pct) else "-")
+    closer_be_dist = min(spot - be_low, be_high - spot) if spot else float("nan")
+    profit_est = (max(0.0, expected_move - closer_be_dist)
+                 if (expected_move == expected_move and closer_be_dist == closer_be_dist) else float("nan"))
+    ror = (profit_est / debit) if (debit > 0 and profit_est == profit_est) else float("nan")
+    ann = ror * 365.0 / dte if (dte and ror == ror) else float("nan")
+    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
+             if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop) else float("nan"))
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": f"buy {p['strike']:g}P", "Call Legs": f"buy {c['strike']:g}C",
             "Expiration": exp, "DTE": dte, "OTM_%": otm,

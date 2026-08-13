@@ -533,11 +533,14 @@ Profit is "-"** -- a long strangle's upside is genuinely open-ended, so showing 
 would misleadingly imply a cap that doesn't exist (unlike every other row in this section, where it's
 a real, guaranteed credit). **Breakeven** replaces it: the two prices the stock actually needs to
 clear (strike +/- the debit paid) to be profitable at expiration, with the % move required from the
-current price in parentheses -- a real number, not an estimate. **ROR/AnnROR/Score still derive from
-an IV-implied expected-move estimate** (spot x IV x sqrt(DTE/365)) divided by the debit paid, so
-treat those as "is this cheap relative to what IV implies," not a promised return (AnnROR in
-particular can look huge on a short-DTE trade -- that's linear-annualizing a lumpy, non-repeatable
-payoff, not a real expected annual return).
+current price in parentheses -- a real number, not an estimate. **ROR/AnnROR/Score are tied to that
+same Breakeven**: profit is estimated as whatever the IV-implied expected move (spot x IV x
+sqrt(DTE/365)) clears ABOVE the closer of the two breakevens -- not the raw move itself, which would
+wrongly count the whole move as profit even though nothing is made until breakeven is cleared (0 if
+the expected move doesn't even reach it). Still an estimate, not a promised return -- treat it as "is
+this cheap relative to what IV implies" -- and AnnROR can still look large on a short-DTE trade
+(linear-annualizing a lumpy, non-repeatable payoff), just less absurdly so than a raw expected-move
+ratio would.
 - Straddle strike (put = call): whichever listed strike is closest to the current price, not the closest-to-0.50-delta strike (those can diverge meaningfully in a high-IV name)
 - Strangle strikes: symmetric % away from the current price on each side (not matched by delta independently per leg, which produces lopsided strangles -- see the straddle note above, same root cause). % scanned: {", ".join(f"{p:.0%}" for p in sp.LONG_STRANGLE_OTM_PCTS)}, filtered afterward to combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX} -- **requires a CONFIRMED earnings date inside that window** (unlike every other strategy here, which never spans one) -- no known catalyst, no candidate, regardless of how the rest of the math looks
