@@ -25,6 +25,8 @@ st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
 st.caption("Cash-secured puts & covered calls. Live quotes from Tradier. "
            "Educational only - NOT financial advice. Verify every quote in your broker before trading.")
+st.caption("Tip: click any row in a contract table below for a copy-paste summary (Ticker / # of contracts / "
+           "DTE / strike(s) / premium) to send to your financial advisor.")
 if not os.environ.get("TRADIER_TOKEN"):
     st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
 
@@ -103,6 +105,58 @@ def apply_spread_criteria(sc):
     """Independent criteria for the multi-leg (spread) engine."""
     (sp.ROR_ANN_MIN, sp.SPREAD_POP_MIN,
      sp.SPREAD_DTE_MIN, sp.SPREAD_DTE_MAX, sp.SPREAD_WIDTH_PCT) = sc
+
+
+def _contract_summary(row):
+    """Copy-paste summary for a financial advisor: Ticker / # of contracts /
+    DTE / strike(s) / premium. Built from the RAW (unformatted) row so the
+    numbers are exact dollar figures, not the display-formatted range strings."""
+    n = row.get("# of contracts")
+    n_int = int(n) if pd.notna(n) else None
+    dte = row.get("DTE")
+    dte_txt = str(int(dte)) if pd.notna(dte) else "-"
+
+    if "Strike" in row.index and pd.notna(row.get("Strike")):
+        # Single-leg (cash-secured put / covered call): Premium is already the
+        # worst-case (bid) price, same convention as every yield/ROR figure
+        # in the app -- see PREMIUM_BASIS in wheel_screener.py.
+        strike_txt = f"{row['Strike']:g}"
+        per_share, prem_label = row.get("Premium"), "Premium"
+    else:
+        # Multi-leg: describe strikes via the short/long leg strings already
+        # used elsewhere in the app (e.g. "sell 67.5P / buy 65P").
+        legs = [str(row[c]) for c in ("Put Legs", "Call Legs") if row.get(c)]
+        strike_txt = " / ".join(legs) if legs else "-"
+        if pd.notna(row.get("Max Profit")):
+            per_share, prem_label = row["Max Profit"], "Net credit"       # credit spread / iron condor, worst-case
+        else:
+            per_share, prem_label = row.get("MaxLoss"), "Net debit paid"  # long straddle/strangle: max loss == the debit paid
+
+    if pd.notna(per_share) and n_int:
+        prem_txt = f"${per_share:.2f}/contract  (${per_share * 100 * n_int:,.0f} total)"
+    elif pd.notna(per_share):
+        prem_txt = f"${per_share:.2f}/contract"
+    else:
+        prem_txt = "-"
+
+    return (f"{row['Ticker']}\n"
+            f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}\n"
+            f"{dte_txt} DTE\n"
+            f"Strike: {strike_txt}\n"
+            f"{prem_label}: {prem_txt}")
+
+
+def _selectable_table(raw_df, disp_df, key):
+    """Same interactive/sortable table as before, plus click-a-row to get an
+    advisor-ready summary box underneath. raw_df must be in the same row
+    order as disp_df (disp_df is normally just _fmt(raw_df), maybe with a
+    few columns dropped) so the click maps back to the real, unformatted
+    numbers rather than the display strings."""
+    event = st.dataframe(disp_df, hide_index=True, use_container_width=True,
+                         on_select="rerun", selection_mode="single-row", key=key)
+    sel = event.selection.rows if event is not None else []
+    if sel:
+        st.code(_contract_summary(raw_df.iloc[sel[0]]), language=None)
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -249,7 +303,7 @@ dc, ec = scan_calls(holds, CRITERIA)
 
 st.subheader("Cash-Secured Puts")
 if len(dp):
-    st.dataframe(ws._fmt(dp), hide_index=True, use_container_width=True)
+    _selectable_table(dp, ws._fmt(dp), "puts_tbl")
     st.download_button("Download puts (CSV)", dp.to_csv(index=False),
                        "puts.csv", "text/csv")
 else:
@@ -259,7 +313,7 @@ if ep:
 
 st.subheader("Covered Calls")
 if len(dc):
-    st.dataframe(ws._fmt(dc), hide_index=True, use_container_width=True)
+    _selectable_table(dc, ws._fmt(dc), "calls_tbl")
     st.download_button("Download calls (CSV)", dc.to_csv(index=False),
                        "calls.csv", "text/csv")
 else:
@@ -291,7 +345,7 @@ if lk_go and lk_ticker:
         if len(_res):
             _label = "cash-secured put" if lk_kind == "put" else "covered call"
             st.write(f"**{len(_res)} {_label} contracts** for {lk_ticker} ({lk_start} to {lk_end}).")
-            st.dataframe(ws._fmt(_res), hide_index=True, use_container_width=True)
+            _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
             st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
                                f"{lk_ticker}_{lk_kind}_lookup.csv", "text/csv")
         else:
@@ -327,7 +381,7 @@ for _key, _title in _SPREAD_SECTIONS:
         # drop it for credit spreads/iron condor, where it's always "-".
         if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
             _disp = _disp.drop(columns=["Breakeven"])
-        st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
+        _selectable_table(_sub, sp._fmt(_disp), f"spread_tbl_{_key}")
         st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
                            f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")
     else:
@@ -372,7 +426,7 @@ try:
         st.markdown("**Puts**")
         _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
         if len(_dp):
-            st.dataframe(ws._fmt(_dp), hide_index=True, use_container_width=True)
+            _selectable_table(_dp, ws._fmt(_dp), "discover_puts_tbl")
             st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
                                "volume_leaders_puts.csv", "text/csv")
         else:
@@ -382,7 +436,11 @@ try:
         _dc = sp._df(_vl.get("call_spreads", []))
         if len(_dc):
             _disp = _dc.drop(columns=["Strategy", "Put Legs"])
-            st.dataframe(sp._fmt(_disp), hide_index=True, use_container_width=True)
+            # Breakeven only means something for Long Straddle/Strangle -- this
+            # section is call credit spreads only, so it's always "-"; drop it.
+            if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
+                _disp = _disp.drop(columns=["Breakeven"])
+            _selectable_table(_dc, sp._fmt(_disp), "discover_spreads_tbl")
             st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
                                "volume_leaders_call_spreads.csv", "text/csv")
         else:
