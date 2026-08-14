@@ -48,8 +48,6 @@ HOLDINGS = {
 OPEN_POSITIONS = [
     {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
      "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.41, "entry_date": "2026-08-07"},
-    {"ticker": "AVGO", "type": "call", "strike": 415, "expiration": "2026-08-21",
-     "contracts": 1, "entry_credit": 12.05, "entry_date": "2026-07-21"},
     {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
      "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
     {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
@@ -72,6 +70,9 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    {"ticker": "AVGO", "type": "call", "strike": 415, "expiration": "2026-08-21",
+     "contracts": 1, "entry_credit": 12.0498, "entry_date": "2026-07-21",
+     "exit_cost": 2.01, "exit_date": "2026-08-14"},
     {"ticker": "DKNG", "type": "call", "strike": 25, "expiration": "2026-08-21",
      "contracts": 11, "entry_credit": 1.77, "entry_date": "2026-07-17",
      "exit_cost": 0.3795, "exit_date": "2026-08-06"},
