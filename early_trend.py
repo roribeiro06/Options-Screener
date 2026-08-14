@@ -73,13 +73,22 @@ BREAKOUT_RECENT_DAYS = 10  # a breakout must have happened within this many trad
                            # days to still count as "fresh"
 BREAKOUT_BAND_PCT = 0.08   # ...and price must still be within this % above the pivot
                            # (the "not already extended past the breakout" filter)
-BREAKOUT_LOOKBACK_WEEKS = 24
+BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new high --
+                               # not just a new high relative to a shorter window. A
+                               # shorter lookback can mistake a stock clawing back toward
+                               # an OLDER high (e.g. recovering from an earnings-gap crash
+                               # that happened just outside the window) for a fresh breakout.
 BREAKOUT_LOOKBACK_DAYS = BREAKOUT_LOOKBACK_WEEKS * 5
 VOLUME_MULT = 1.5          # breakout-window peak volume vs 50-day average, required
 EXTENSION_LOOKBACK_DAYS = 63   # ~3 months
 EXTENSION_CAP_PCT = 0.40   # exclude names already up more than this over the last
                            # EXTENSION_LOOKBACK_DAYS -- the explicit "don't chase an
                            # already-spiked name" filter
+EXTENSION_LOOKBACK_DAYS_LONG = 126   # ~6 months -- catches names whose LAST 3 months
+                                     # looks fine on its own but that already had a big
+                                     # multi-month run before that; the 3-month cap alone
+                                     # only protects against chasing the most recent leg.
+EXTENSION_CAP_PCT_LONG = 0.50        # starting default -- retune with backtest_early_trend.py
 RS_WEEKS = 4
 RS_DAYS = RS_WEEKS * 5
 BENCHMARK = "SPY"
@@ -172,6 +181,12 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         if ret_3mo > EXTENSION_CAP_PCT:
             return None   # already spiked -- exactly what this screen is trying NOT to catch
 
+    ret_6mo = None
+    if n > EXTENSION_LOOKBACK_DAYS_LONG:
+        ret_6mo = price_now / float(closes.iloc[-EXTENSION_LOOKBACK_DAYS_LONG]) - 1
+        if ret_6mo > EXTENSION_CAP_PCT_LONG:
+            return None   # last 3 months looked fine, but it already had its bigger run before that
+
     if n <= 2 * RS_DAYS:
         return None
     ret_4w = price_now / float(closes.iloc[-RS_DAYS]) - 1
@@ -207,6 +222,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         "ret_prior_4w_pct": round(ret_prior_4w * 100, 2),
         "spy_ret_4w_pct": round(spy_ret_4w * 100, 2) if spy_ret_4w is not None else None,
         "ret_3mo_pct": round(ret_3mo * 100, 2) if ret_3mo is not None else None,
+        "ret_6mo_pct": round(ret_6mo * 100, 2) if ret_6mo is not None else None,
         "score": round(score, 4),
     }
 

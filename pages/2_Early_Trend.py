@@ -44,7 +44,10 @@ if not os.environ.get("TRADIER_TOKEN"):
 with st.expander("Legend - how to read this table", expanded=False):
     st.markdown(
         "- **Pivot** -- the prior base's high; the level price had to close above to count as a "
-        "breakout at all.\n"
+        "breakout at all. The pivot must also be close to a genuine 52-week high, not just a "
+        "high relative to a shorter window -- otherwise a stock recovering toward an OLDER high "
+        "(e.g. clawing back after an earnings-gap crash) could look like a fresh breakout when "
+        "it's really just returning to a level it's already failed at before.\n"
         "- **Days Since Breakout** -- trading days since price first closed above the pivot. "
         "Lower = fresher. Only breakouts within the sidebar's \"Breakout must be within\" window "
         "show up here at all -- older ones age out.\n"
@@ -63,9 +66,11 @@ with st.expander("Legend - how to read this table", expanded=False):
         "- **SPY 4wk %** -- the S&P 500 ETF's own 4-week return, for comparison. The stock's 4wk "
         "return must beat this too -- real relative strength vs. the market, not just vs. its own "
         "past.\n"
-        "- **3mo Return %** -- trailing ~3-month return, shown for context. This is what \"Exclude "
-        "if already up more than % (3mo)\" caps -- the main filter against catching a name that's "
-        "already had its spike.\n"
+        "- **3mo Return % / 6mo Return %** -- trailing returns over both windows, shown for "
+        "context. These are what \"Exclude if already up more than % (3mo)\" and \"...(6mo)\" cap "
+        "-- the main filters against catching a name that's already had its spike. The 3mo cap "
+        "alone can miss a name whose LAST few months look fine but that already ran hard before "
+        "that; the 6mo cap catches that case.\n"
         "- **Call OI Skew** -- from the nearest live options-chain expiration: call open interest "
         "as a % of total (call+put) open interest. Above 50% means the options market is "
         "positioned more toward calls than puts -- a secondary confirmation only, never a hard "
@@ -83,8 +88,8 @@ with st.expander("Legend - how to read this table", expanded=False):
 
 def apply_criteria(c):
     (et.BASE_WEEKS, et.BASE_DAYS, et.BASE_RANGE_PCT, et.BREAKOUT_RECENT_DAYS,
-     et.BREAKOUT_BAND_PCT, et.VOLUME_MULT, et.EXTENSION_CAP_PCT, et.MIN_MARKET_CAP,
-     et.CANDIDATE_POOL, et.MOVER_POOL) = c
+     et.BREAKOUT_BAND_PCT, et.VOLUME_MULT, et.EXTENSION_CAP_PCT, et.EXTENSION_CAP_PCT_LONG,
+     et.MIN_MARKET_CAP, et.CANDIDATE_POOL, et.MOVER_POOL) = c
 
 
 @st.cache_data(ttl=600, show_spinner="Scanning for early-stage breakouts (candidate pool, then price history per candidate)...")
@@ -104,6 +109,8 @@ with st.sidebar:
         vol_mult = st.number_input("Breakout volume >= X times 50-day avg", 1.0, 5.0, et.VOLUME_MULT, 0.1)
         ext_cap = st.number_input("Exclude if already up more than %% (3mo)", 5, 200,
                                   int(et.EXTENSION_CAP_PCT * 100))
+        ext_cap_long = st.number_input("Exclude if already up more than %% (6mo)", 5, 300,
+                                       int(et.EXTENSION_CAP_PCT_LONG * 100))
         min_cap = st.number_input("Min market cap ($B)", 0, 500, int(et.MIN_MARKET_CAP / 1_000_000_000))
         pool = st.number_input("Candidate pool size (volume surge)", 20, 500, et.CANDIDATE_POOL)
         mover_pool = st.number_input("Candidate pool size (today's movers)", 10, 300, et.MOVER_POOL)
@@ -113,14 +120,15 @@ with st.sidebar:
         st.cache_data.clear()
 
 crit = (int(base_weeks), int(base_weeks) * 5, base_range / 100.0, int(breakout_recent),
-        breakout_band / 100.0, float(vol_mult), ext_cap / 100.0, int(min_cap) * 1_000_000_000,
-        int(pool), int(mover_pool))
+        breakout_band / 100.0, float(vol_mult), ext_cap / 100.0, ext_cap_long / 100.0,
+        int(min_cap) * 1_000_000_000, int(pool), int(mover_pool))
 
 DISPLAY_COLS = {
     "ticker": "Ticker", "price": "Price", "pivot": "Pivot", "days_since_breakout": "Days Since Breakout",
     "extension_pct": "Above Pivot %", "base_range_pct": "Base Range %", "volume_ratio": "Volume x Avg",
     "ret_4w_pct": "4wk Return %", "ret_prior_4w_pct": "Prior 4wk %", "spy_ret_4w_pct": "SPY 4wk %",
-    "ret_3mo_pct": "3mo Return %", "oi_skew": "Call OI Skew", "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
+    "ret_3mo_pct": "3mo Return %", "ret_6mo_pct": "6mo Return %", "oi_skew": "Call OI Skew",
+    "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
 }
 
 try:
