@@ -178,12 +178,18 @@ PEER_TICKERS = {
     "AVGO": ["NVDA", "MRVL", "QCOM"],   # AVGO/MRVL: "intense rivals" in AI networking chips, sourced
     "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
     "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # equipment makers: sourced, all 4 jumped 4-6%+
-             "TSM", "SKHY", "SSNLF", "SNDK"],  # specifically on MU's earnings. SK Hynix/Samsung/
+             "SKHY", "SSNLF", "SNDK"],         # specifically on MU's earnings. SK Hynix/Samsung/
                                                # SanDisk: strongly sourced -- "SK Hynix fell 6%...
                                                # Micron also declined 6%" (near-identical synchronized
                                                # moves) with SanDisk down 9% in the same DRAM-pricing
                                                # selloff; explicitly because the three renegotiate
-                                               # DRAM/NAND pricing off shared supply-demand dynamics
+                                               # DRAM/NAND pricing off shared supply-demand dynamics.
+                                               # (TSM removed -- confirmed NOT a competitor, "they do
+                                               # not compete because they are making different types
+                                               # of chips" -- logic vs. memory -- and no correlation
+                                               # evidence either; memory is far more cyclical/commodity-
+                                               # priced than logic, and the two stocks have diverged
+                                               # sharply, TSM +~400% vs MU +~700% since 2023)
     "V":    ["MA"],   # direct card-network duopoly competitors
     "MA":   ["V"],
     "LLY":  ["NVO"],   # sourced: LLY +7% / NVO -6% same week off each other's GLP-1 results --
