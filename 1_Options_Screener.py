@@ -117,20 +117,21 @@ def _contract_summary(row):
     dte_txt = str(int(dte)) if pd.notna(dte) else "-"
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
-        # Single-leg (cash-secured put / covered call): Premium is already the
-        # worst-case (bid) price, same convention as every yield/ROR figure
-        # in the app -- see PREMIUM_BASIS in wheel_screener.py.
+        # Single-leg (cash-secured put / covered call): the rest of the app is
+        # worst-case (bid) throughout, but this summary is a starting point
+        # for what to tell the advisor -- use the higher end of the spread
+        # (Ask), not the conservative bid used everywhere else.
         strike_txt = f"{row['Strike']:g}"
-        per_share, prem_label = row.get("Premium"), "Premium"
+        per_share, prem_label = row.get("Ask"), "Premium"
     else:
         # Multi-leg: describe strikes via the short/long leg strings already
         # used elsewhere in the app (e.g. "sell 67.5P / buy 65P").
         legs = [str(row[c]) for c in ("Put Legs", "Call Legs") if row.get(c)]
         strike_txt = " / ".join(legs) if legs else "-"
-        if pd.notna(row.get("Max Profit")):
-            per_share, prem_label = row["Max Profit"], "Net credit"       # credit spread / iron condor, worst-case
+        if pd.notna(row.get("Max Profit (Best)")):
+            per_share, prem_label = row["Max Profit (Best)"], "Net credit"  # credit spread / iron condor, best-case (higher) side
         else:
-            per_share, prem_label = row.get("MaxLoss"), "Net debit paid"  # long straddle/strangle: max loss == the debit paid
+            per_share, prem_label = row.get("MaxLoss"), "Net debit paid"    # long straddle/strangle: debit paid is already the higher (ask) side
 
     if pd.notna(per_share) and n_int:
         prem_txt = f"${per_share:.2f}/contract  (${per_share * 100 * n_int:,.0f} total)"
