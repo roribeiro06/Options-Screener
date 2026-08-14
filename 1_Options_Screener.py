@@ -163,7 +163,7 @@ def _contract_summary(row):
                     else row.get("MaxLoss"))
     prem_label = "Premium"
 
-    prem_txt = f"${per_share:.2f}/contract" if pd.notna(per_share) else "-"
+    prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
 
     lines = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
