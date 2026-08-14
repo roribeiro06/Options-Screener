@@ -109,7 +109,7 @@ def apply_spread_criteria(sc):
 
 def _leg_lines(text):
     """Splits a leg-description string like 'sell 67.5P / buy 65P' into
-    ['Sell 67.5 Put', 'Buy 65 Put'] -- one leg per line, spelled-out Put/Call
+    ['Sell $67.5 Put', 'Buy $65 Put'] -- one leg per line, spelled-out Put/Call
     instead of the table's P/C shorthand (printable summary only, the table
     itself keeps the shorthand)."""
     lines = []
@@ -117,30 +117,37 @@ def _leg_lines(text):
         leg = leg.strip()
         action, _, rest = leg.partition(" ")
         if rest.endswith("P"):
-            rest = rest[:-1] + " Put"
+            num, opt = rest[:-1], "Put"
         elif rest.endswith("C"):
-            rest = rest[:-1] + " Call"
-        lines.append(f"{action.capitalize()} {rest}".strip())
+            num, opt = rest[:-1], "Call"
+        else:
+            num, opt = rest, ""
+        lines.append(f"{action.capitalize()} ${num} {opt}".strip())
     return lines
 
 
 def _contract_summary(row):
     """Copy-paste summary for a financial advisor: Ticker / # of contracts /
-    expiration date / strike(s) / premium. Built from the RAW (unformatted)
-    row so the numbers are exact dollar figures, not the display-formatted
-    range strings."""
+    expiration date / Sell/Buy $strike Put or Call line(s) / premium. Built
+    from the RAW (unformatted) row so the numbers are exact dollar figures,
+    not the display-formatted range strings."""
     n = row.get("# of contracts")
     n_int = int(n) if pd.notna(n) else None
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
-        # Single-leg (cash-secured put / covered call): the rest of the app is
-        # worst-case (bid) throughout, but this summary is a starting point
-        # for what to tell the advisor -- use the higher end of the spread
-        # (Ask), not the conservative bid used everywhere else.
-        strike_lines = [f"{row['Strike']:g}"]
-        per_share, prem_label = row.get("Ask"), "Premium"
+        # Single-leg (cash-secured put / covered call): always a sell-to-open,
+        # and always OTM in the direction that matches its type (puts strictly
+        # below spot, calls strictly above -- the screener never shows ITM),
+        # so Strike vs CurrentPrice alone tells us which one it is without
+        # needing a separate type column (Contract Lookup doesn't carry one).
+        # The rest of the app is worst-case (bid) throughout, but this summary
+        # is a starting point for what to tell the advisor -- use the higher
+        # end of the spread (Ask), not the conservative bid used elsewhere.
+        is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
+        strike_lines = [f"Sell ${row['Strike']:g} {'Call' if is_call else 'Put'}"]
+        per_share = row.get("Ask")
     else:
         # Multi-leg: one leg per line (vertical), spelled-out Put/Call.
         strike_lines = []
@@ -150,26 +157,18 @@ def _contract_summary(row):
                 strike_lines.extend(_leg_lines(str(v)))
         if not strike_lines:
             strike_lines = ["-"]
-        if pd.notna(row.get("Max Profit (Best)")):
-            per_share, prem_label = row["Max Profit (Best)"], "Net credit"  # credit spread / iron condor, best-case (higher) side
-        else:
-            per_share, prem_label = row.get("MaxLoss"), "Net debit paid"    # long straddle/strangle: debit paid is already the higher (ask) side
+        # credit spread/iron condor: best-case (higher) side; long straddle/
+        # strangle: MaxLoss IS the debit paid, already the higher (ask) side.
+        per_share = (row["Max Profit (Best)"] if pd.notna(row.get("Max Profit (Best)"))
+                    else row.get("MaxLoss"))
+    prem_label = "Premium"
 
-    if pd.notna(per_share) and n_int:
-        prem_txt = f"${per_share:.2f}/contract  (${per_share * 100 * n_int:,.0f} total)"
-    elif pd.notna(per_share):
-        prem_txt = f"${per_share:.2f}/contract"
-    else:
-        prem_txt = "-"
+    prem_txt = f"${per_share:.2f}/contract" if pd.notna(per_share) else "-"
 
     lines = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
              f"Expiration: {exp_txt}"]
-    if len(strike_lines) == 1:
-        lines.append(f"Strike: {strike_lines[0]}")
-    else:
-        lines.append("Strike:")
-        lines.extend(f"  {s}" for s in strike_lines)
+    lines.extend(strike_lines)
     lines.append(f"{prem_label}: {prem_txt}")
     return "\n".join(lines)
 
