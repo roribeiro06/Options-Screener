@@ -96,7 +96,8 @@ def build_spreads():
 
 def build_discover():
     """Live scan of tickers outside the watchlist (see discover.py); falls back
-    to the daily-Action snapshot if the live scan errors, same as app.py."""
+    to the daily-Action snapshot if the live scan errors, same as
+    1_Options_Screener.py."""
     try:
         d = discover.run_discovery()
     except Exception as e:
@@ -140,7 +141,7 @@ def _spreads_html(ds):
         for lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if lc in disp.columns and (disp[lc].fillna("") == "").all():
                 disp = disp.drop(columns=[lc])
-        for mc in ("Max Profit", "Max Profit (Best)"):   # unlimited-upside strategies -- see app.py
+        for mc in ("Max Profit", "Max Profit (Best)"):   # unlimited-upside strategies -- see 1_Options_Screener.py
             if mc in disp.columns and disp[mc].isna().all():
                 disp = disp.drop(columns=[mc])
         if "Breakeven" in disp.columns and (disp["Breakeven"] == "-").all():

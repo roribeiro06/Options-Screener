@@ -15,14 +15,36 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 - **Claude Code (recommended):** `git clone https://github.com/roribeiro06/Options-Screener`,
   then run Claude Code in that folder. It edits files directly and can commit/push.
 - **Claude.ai chat:** paste files or describe changes; copy edits back into GitHub.
-- After editing `wheel_screener.py`/`spreads.py`/`app.py`, Streamlit auto-redeploys on commit,
-  but a code change to an already-imported module needs a **Reboot** (Manage app -> Reboot) to load.
+- After editing `wheel_screener.py`/`spreads.py`/`1_Options_Screener.py`, Streamlit auto-redeploys
+  on commit, but a code change to an already-imported module needs a **Reboot** (Manage app ->
+  Reboot) to load.
+- The Streamlit Cloud app's **Main file path** setting must match the actual entry-point filename
+  (currently `1_Options_Screener.py`) -- if you ever rename it again, update that setting too
+  (Manage app -> Settings -> General) or the deploy will fail to build.
 
 ## Files
-- **`app.py`** — Streamlit UI. Sections: Cash-Secured Puts, Covered Calls, Contract Lookup
-  (sell-side, any ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Discover,
-  Legend, then Open Positions and Closed Positions (last 30 days) at the very bottom -- see below.
-  Loads TRADIER_TOKEN from st.secrets; 30-min market-clock auto-refresh; editable criteria panels.
+- **`1_Options_Screener.py`** (formerly `app.py` -- renamed so the Streamlit sidebar nav shows
+  "Options Screener" instead of the filename-derived "app"; Streamlit's classic multi-page nav
+  labels the entry script from its own filename, there's no separate title setting for it) —
+  Streamlit UI. Sections: Cash-Secured Puts, Covered Calls, Contract Lookup (sell-side, any
+  ticker), Multi-Leg Strategies (put/call credit spreads, iron condors), Discover, Legend, then
+  Open Positions and Closed Positions (last 30 days) at the very bottom -- see below. Loads
+  TRADIER_TOKEN from st.secrets; 30-min market-clock auto-refresh; editable criteria panels.
+- **`pages/2_Early_Trend.py`** + **`early_trend.py`** — a second, separate Streamlit page/tab
+  ("Early Trend Screener" in the sidebar) for an early-stage trend/breakout screener, distinct
+  from the wheel screener above and never mixed into its page. Looks for a stock breaking OUT of
+  a multi-week base on volume, with relative-strength acceleration vs its own recent past and vs
+  SPY, while capping how far price is already past that breakout -- aimed at catching a trend
+  before it's already run, unlike a trailing-momentum screener. `early_trend.py` is the
+  Streamlit-agnostic 3-stage engine (see its own module docstring for the full rules); the page
+  file is a thin UI wrapper with its own criteria sidebar, following the same
+  `@st.cache_data(ttl=600)` pattern as the main app's `scan_*` functions. Reuses `discover.py`'s
+  universe/batched-quotes/market-cap helpers and `wheel_screener.py`'s Tradier/yfinance helpers --
+  doesn't duplicate any of that plumbing. **`backtest_early_trend.py`** re-runs the exact same
+  rule function (`early_trend._evaluate_breakout_at`) against historical S&P 500 data (no
+  lookahead) and reports forward 1mo/3mo/6mo returns vs. a SPY baseline -- run it locally to
+  validate (or retune) the thresholds before trusting the live page's output; it isn't run as
+  part of the live app. Needs no Tradier token (yfinance-only).
 - **`wheel_screener.py`** — the engine. Tradier data funcs, Black-Scholes, `evaluate_put`/`evaluate_call`,
   `screen_puts`/`screen_calls`, `lookup_contracts`, the Score, liquidity, cash/target columns,
   historical AvgPremium lookup, all config constants at the top (including `OPEN_POSITIONS` and
@@ -74,7 +96,8 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   options activity, or one that just moved hard on real volume) can surface on its own.
   The universe comes from a community-maintained GitHub mirror of Nasdaq/NYSE's listed-securities
   directory (`UNIVERSE_URL`); if that's unreachable it falls back to the static `sp500_tickers.py`
-  snapshot (Wikipedia; refresh manually if stale). `app.py` calls `discover.run_discovery()` **live**,
+  snapshot (Wikipedia; refresh manually if stale). `1_Options_Screener.py` calls
+  `discover.run_discovery()` **live**,
   cached at `ttl=600` like every other scan (30-min auto-refresh / "Refresh data" on demand) -- it's
   placed last on the page since it scans ~7,000 tickers vs. ~20 for the sections above, so it's much
   slower and shouldn't block the rest of the page from rendering first. Previously measured at ~170s
@@ -187,7 +210,10 @@ Cash/Contract column anymore (MaxLoss covers that role) and no separate Spread_$
 - Optional: extend AvgPremium to a paid historical-IV source for exactness (currently realized-vol estimate).
 
 ## Workflow reminders
-- Always commit `wheel_screener.py`, `spreads.py`, `app.py`, `discover.py`, `positions.py` together
+- Always commit `wheel_screener.py`, `spreads.py`, `1_Options_Screener.py`, `discover.py`,
+  `positions.py` together
+- Similarly, commit `early_trend.py` and `pages/2_Early_Trend.py` together when a change spans
+  both (the page imports `early_trend` directly, same "module has no attribute X" failure mode)
   when a change spans them (a "module has no attribute X" error = files out of sync).
 - The .yml workflow files must contain YAML, not Python (a past mistake). They start with `name:`.
 - GitHub scheduled runs can be delayed/dropped; the email workflow also has a manual "Run workflow".

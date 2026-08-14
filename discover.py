@@ -67,10 +67,11 @@ outside the top pools above can still be missed -- this is the tradeoff for
 not running an options-chain call (or a market-cap lookup) against every
 ticker in the universe.
 
-Called live from app.py (cached, ttl=600 -- refreshes on the same 30-min-auto/
-on-demand cadence as the rest of the screener) and from build_volume_leaders.py
-(an offline CLI wrapper that writes volume_leaders.json as a fallback snapshot
-app.py falls back to if the live scan ever errors).
+Called live from 1_Options_Screener.py (cached, ttl=600 -- refreshes on the same
+30-min-auto/on-demand cadence as the rest of the screener) and from
+build_volume_leaders.py (an offline CLI wrapper that writes volume_leaders.json
+as a fallback snapshot 1_Options_Screener.py falls back to if the live scan
+ever errors).
 """
 import sys
 import datetime as dt

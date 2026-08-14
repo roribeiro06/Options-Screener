@@ -1,6 +1,6 @@
 """
 Early Trend Screener -- Streamlit page, separate from the wheel screener
-(app.py). Looks for stocks breaking OUT of a base on volume with relative-
+(1_Options_Screener.py). Looks for stocks breaking OUT of a base on volume with relative-
 strength acceleration, while capping how far price is already past that
 breakout -- the goal is catching a trend early, not after a momentum
 screener would already show it up 50-100%+. See early_trend.py for the full
@@ -16,7 +16,7 @@ import streamlit as st
 # Load the Tradier token from Streamlit "Secrets" into the environment BEFORE
 # importing anything that touches it -- Streamlit's classic multi-page
 # mechanism re-runs each page script independently, so this can't rely on
-# app.py having already run in the same session.
+# 1_Options_Screener.py having already run in the same session.
 try:
     if "TRADIER_TOKEN" in st.secrets:
         os.environ["TRADIER_TOKEN"] = str(st.secrets["TRADIER_TOKEN"])
@@ -40,6 +40,45 @@ st.caption(
 )
 if not os.environ.get("TRADIER_TOKEN"):
     st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
+
+with st.expander("Legend - how to read this table", expanded=False):
+    st.markdown(
+        "- **Pivot** -- the prior base's high; the level price had to close above to count as a "
+        "breakout at all.\n"
+        "- **Days Since Breakout** -- trading days since price first closed above the pivot. "
+        "Lower = fresher. Only breakouts within the sidebar's \"Breakout must be within\" window "
+        "show up here at all -- older ones age out.\n"
+        "- **Above Pivot %** -- how far price has already run past the pivot. This is the main "
+        "\"don't chase it\" gauge: capped by \"Max % above pivot\" in the sidebar, so nothing "
+        "already far past its breakout shows up.\n"
+        "- **Base Range %** -- how tight the prior consolidation was (high-low range as a % of "
+        "the low) before it broke out. Tighter/lower generally reads as a more coiled, "
+        "higher-quality base, not a random bounce.\n"
+        "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. Must "
+        "clear \"Breakout volume >= X times 50-day avg\" -- confirms real buying interest, not "
+        "just drift on light volume.\n"
+        "- **4wk Return % / Prior 4wk %** -- the acceleration check: the last ~4 weeks' return "
+        "must beat the 4 weeks before that. This is what separates *speeding up* from merely "
+        "*being up* -- a plain momentum screener only checks the second one.\n"
+        "- **SPY 4wk %** -- the S&P 500 ETF's own 4-week return, for comparison. The stock's 4wk "
+        "return must beat this too -- real relative strength vs. the market, not just vs. its own "
+        "past.\n"
+        "- **3mo Return %** -- trailing ~3-month return, shown for context. This is what \"Exclude "
+        "if already up more than % (3mo)\" caps -- the main filter against catching a name that's "
+        "already had its spike.\n"
+        "- **Call OI Skew** -- from the nearest live options-chain expiration: call open interest "
+        "as a % of total (call+put) open interest. Above 50% means the options market is "
+        "positioned more toward calls than puts -- a secondary confirmation only, never a hard "
+        "filter (sandbox chain data can be thin for less-liquid names).\n"
+        "- **ATM IV Skew (C-P)** -- the at-the-money call's implied vol minus the at-the-money "
+        "put's, same chain. Positive means calls are pricing relatively richer than puts near the "
+        "money -- another options-positioning tell, same caveat as above.\n"
+        "- **Score** -- the ranking number: combines breakout freshness, volume confirmation, how "
+        "much the RS acceleration exceeds zero, and how close price still is to the pivot, then "
+        "nudged by the options tilt if available. Higher = a better setup by these specific rules. "
+        "Only meaningful for ranking *within* one scan -- it isn't a probability or a return "
+        "forecast, and isn't comparable across different criteria settings."
+    )
 
 
 def apply_criteria(c):

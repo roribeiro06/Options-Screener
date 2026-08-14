@@ -6,8 +6,8 @@ The live app now runs discover.run_discovery() directly (cached, ttl=600 --
 refreshes on the same 30-min-auto/on-demand cadence as the rest of the
 screener) instead of reading a precomputed file. This script + its daily
 GitHub Action remain as a safety net: if the live scan ever errors inside the
-app (Tradier hiccup, the universe source going down, etc.), app.py falls back
-to whatever this last wrote. Needs TRADIER_TOKEN.
+app (Tradier hiccup, the universe source going down, etc.), 1_Options_Screener.py
+falls back to whatever this last wrote. Needs TRADIER_TOKEN.
 """
 import os
 import sys
