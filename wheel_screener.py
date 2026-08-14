@@ -168,13 +168,16 @@ PEER_TICKERS = {
     "AMZN": ["MSFT", "GOOG", "META", "AAPL"],   # trace back to the same Samsung/SK Hynix/Micron
     "META": ["MSFT", "GOOG", "AMZN", "AAPL"],   # HBM memory bottleneck -- ties this cluster to MU/NVDA too
     "AAPL": ["MSFT", "GOOG", "AMZN", "META"],
-    "NVDA": ["AMD", "AVGO", "TSM", "MU"],   # TSM: "NVIDIA is the single most Taiwan Semiconductor-
-                                            # dependent name" (supply read-through, sourced); AMD:
-                                            # direct AI-chip competitor, but only a moderate/mixed
-                                            # 0.53 stock correlation, sometimes opposite-direction on
-                                            # earnings -- kept for the direct competition, not the
-                                            # correlation; AVGO: direct competitor; MU: shared HBM
-                                            # bottleneck
+    "NVDA": ["AMD", "AVGO", "TSM"],   # TSM: "NVIDIA is the single most Taiwan Semiconductor-
+                                      # dependent name" (supply read-through, sourced); AMD: direct
+                                      # AI-chip competitor, but only a moderate/mixed 0.53 stock
+                                      # correlation, sometimes opposite-direction on earnings --
+                                      # kept for the direct competition, not the correlation; AVGO:
+                                      # direct competitor. (MU removed -- not a competitor, different
+                                      # products; despite a real commercial link -- Micron supplies
+                                      # HBM memory for NVDA's GPUs -- the stock evidence actually
+                                      # shows divergence, not correlation: "Since earnings, Micron
+                                      # surged 128% while NVDA fell 10%")
     "AVGO": ["NVDA", "MRVL", "QCOM"],   # AVGO/MRVL: "intense rivals" in AI networking chips, sourced
     "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
     "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # equipment makers: sourced, all 4 jumped 4-6%+
