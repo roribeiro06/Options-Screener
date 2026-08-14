@@ -62,6 +62,8 @@ OPEN_POSITIONS = [
      "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27, "entry_date": "2026-08-11"},
     {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
      "contracts": 1, "entry_credit": 10.35, "entry_date": "2026-07-30"},
+    {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
+     "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
