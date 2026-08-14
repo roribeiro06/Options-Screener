@@ -196,6 +196,22 @@ PEER_TICKERS = {
                                                # evidence either; memory is far more cyclical/commodity-
                                                # priced than logic, and the two stocks have diverged
                                                # sharply, TSM +~400% vs MU +~700% since 2023)
+    "INTC": ["AMD", "QCOM", "TSM", "SSNLF", "NVDA"],   # AMD: direct x86 CPU rival, the classic
+                                                        # INTC/AMD rivalry; QCOM: Snapdragon X now
+                                                        # directly competing for Windows PC/laptop
+                                                        # CPU share ("Qualcomm Snapdragon Takes Aim
+                                                        # At PC Rivals Intel..."); TSM/SSNLF: Intel
+                                                        # Foundry vs. TSMC/Samsung Foundry, grouped
+                                                        # industry-wide as the "big three" advanced-
+                                                        # node foundries; NVDA: still a direct data-
+                                                        # center/AI-compute rival despite NVIDIA's
+                                                        # $5B equity stake + joint roadmap (Sept 2025)
+                                                        # -- coverage calls it "both partner and
+                                                        # competitor." (ARM considered and excluded --
+                                                        # its March 2026 Arm AGI CPU is its first own-
+                                                        # brand chip and a genuine data-center
+                                                        # competitor, but too new/narrow a product to
+                                                        # be a real driver of INTC moves yet)
     "V":    ["MA"],   # direct card-network duopoly competitors
     "MA":   ["V"],
     "LLY":  ["NVO"],   # sourced: LLY +7% / NVO -6% same week off each other's GLP-1 results --
