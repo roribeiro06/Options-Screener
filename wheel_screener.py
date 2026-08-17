@@ -46,8 +46,6 @@ HOLDINGS = {
 # "put", "call", "put_spread", "call_spread". Single-leg entries need "strike";
 # spreads need "short_strike" and "long_strike" instead. See positions.py.
 OPEN_POSITIONS = [
-    {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
-     "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.41, "entry_date": "2026-08-07"},
     {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
      "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
     {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
@@ -74,6 +72,9 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
+     "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.409947, "entry_date": "2026-08-07",
+     "exit_cost": 0.19, "exit_date": "2026-08-17"},
     {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
      "contracts": 1, "entry_credit": 10.3498, "entry_date": "2026-07-30",
      "exit_cost": 0, "exit_date": "2026-08-14"},   # expired worthless, full premium kept
