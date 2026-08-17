@@ -58,8 +58,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13, "entry_date": "2026-08-10"},
     {"ticker": "MRVL", "type": "put_spread", "short_strike": 185, "long_strike": 175,
      "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27, "entry_date": "2026-08-11"},
-    {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
-     "contracts": 1, "entry_credit": 10.35, "entry_date": "2026-07-30"},
     {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
      "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14"},
 ]
@@ -70,6 +68,9 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    {"ticker": "MU", "type": "put", "strike": 650, "expiration": "2026-08-14",
+     "contracts": 1, "entry_credit": 10.3498, "entry_date": "2026-07-30",
+     "exit_cost": 0, "exit_date": "2026-08-14"},   # expired worthless, full premium kept
     {"ticker": "AVGO", "type": "call", "strike": 415, "expiration": "2026-08-21",
      "contracts": 1, "entry_credit": 12.0498, "entry_date": "2026-07-21",
      "exit_cost": 2.01, "exit_date": "2026-08-14"},
