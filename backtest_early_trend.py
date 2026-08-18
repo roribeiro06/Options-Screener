@@ -72,6 +72,26 @@ Seven reports plus a closing caveat, in order:
   positioning) has no historical equivalent and is not validated by anything
   here.
 
+  MARKET-CAP FILTERING (found and fixed after 7 rounds of otherwise-validated
+  tuning): the live run_scan() rejects anything below MIN_MARKET_CAP at Stage
+  2b, but this backtest was evaluating every ticker's Stage-2 rules with NO
+  cap check at all -- meaning it had been measuring "how good are the rules
+  in isolation," not "how good is the live app end-to-end." Checked directly:
+  3 of 8 spot-checked best-outcome examples (MNPR, RCAT, UAMY) were sub-$2B
+  and could never have appeared on the live page regardless of rule quality.
+  Now checked once per ticker (cached, not per flag) and applied to every
+  report -- flags from sub-floor tickers are excluded from all_hits (so they
+  never count toward recall/precision/Score stats), while boom DETECTION
+  still runs on the full universe so report 3 can show the cap floor's own
+  opportunity cost as a separate, explicit number from rule-tuning misses.
+  (Checked the Stage 1 liquidity floor too, MIN_DOLLAR_VOLUME -- the same 8
+  examples all cleared it comfortably, so it wasn't added; a spot check, not
+  an exhaustive one.) Stage 1's actual candidate-pool SELECTION (today's
+  volume surge, live-only) remains untested here and would need a much larger
+  effort to backtest properly (simulating what the daily candidate list would
+  have looked like on every past trading day) -- a known, open limitation,
+  not one this backtest can currently answer.
+
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
 the screen isn't just noise; it doesn't guarantee the edge repeats going
@@ -102,6 +122,7 @@ from collections import Counter, defaultdict
 import pandas as pd
 
 import early_trend as et
+import discover
 from sp500_tickers import SP500_TICKERS
 from russell2500_tickers import RUSSELL2500_TICKERS
 
@@ -566,6 +587,16 @@ def _report_boom_recall(all_booms):
     print(f"{len(all_booms)} booms found (>= {BOOM_THRESHOLD:.0%} within {BOOM_WINDOW} trading days). "
           f"Caught: {len(caught)} ({len(caught) / len(all_booms) * 100:.0f}%)  "
           f"Missed entirely: {len(missed)} ({len(missed) / len(all_booms) * 100:.0f}%)")
+    cap_ok_booms = [b for b in all_booms if b.get("cap_ok")]
+    if cap_ok_booms:
+        cap_caught = [b for b in cap_ok_booms if b["caught"]]
+        below_cap = len(all_booms) - len(cap_ok_booms)
+        print(f"  Of those, {len(cap_ok_booms)} were in names that clear the live app's "
+              f"${et.MIN_MARKET_CAP:,.0f} market-cap floor ({below_cap} were in sub-floor names the "
+              f"live app could never show regardless of rule tuning). Recall WITHIN cap-eligible "
+              f"names specifically (the fair comparison to what the live app could actually "
+              f"achieve): {len(cap_caught)}/{len(cap_ok_booms)} "
+              f"({len(cap_caught) / len(cap_ok_booms) * 100:.0f}%).")
     if caught:
         positions = [b["catch_position_pct"] for b in caught]
         print(f"  Of the caught ones, how far into the move the first flag fired "
@@ -622,6 +653,7 @@ def main():
     spy_closes = spy_df["Close"]
 
     all_hits, all_booms, diagnosed = [], [], []
+    skipped_by_cap = 0
     for idx, sym in enumerate(BACKTEST_UNIVERSE):
         try:
             df = et._history_df(sym, period=PERIOD)
@@ -629,15 +661,29 @@ def main():
                 continue
             closes, volumes = df["Close"], df["Volume"]
 
+            # The live run_scan() rejects anything below MIN_MARKET_CAP at Stage 2b --
+            # a flag from a sub-floor ticker could never actually appear on the live
+            # page, so it doesn't belong in "how good is the live app" stats. Checked
+            # here (once per ticker, not per flag) rather than skipping the ticker
+            # outright, so boom DETECTION still runs on the full universe -- that's
+            # what lets the recall report show the cap floor's own opportunity cost
+            # separately from rule-tuning misses.
+            mc = discover.market_cap(sym)
+            cap_ok = bool(mc and mc >= et.MIN_MARKET_CAP)
+
             hits = scan_flags(sym, closes, volumes, spy_closes)
             for h in hits:
                 h["ticker"] = sym
-            all_hits.extend(hits)
+            if cap_ok:
+                all_hits.extend(hits)
+            else:
+                skipped_by_cap += len(hits)
 
             booms = find_boom_episodes(closes)
-            flag_idxs = [h["i"] for h in hits]
+            flag_idxs = [h["i"] for h in hits] if cap_ok else []
             for b in booms:
                 b["ticker"] = sym
+                b["cap_ok"] = cap_ok
                 b["trough_date"] = str(closes.index[b["trough_idx"]].date())
                 b["peak_date"] = str(closes.index[b["peak_idx"]].date())
                 b["duration_days"] = b["peak_idx"] - b["trough_idx"]
@@ -648,19 +694,21 @@ def main():
                     b["catch_position_pct"] = round((min(caught_flags) - b["trough_idx"]) / span * 100, 1)
                 else:
                     b["catch_position_pct"] = None
-                if not b["caught"] and b["duration_days"] >= MIN_TREND_DURATION_DAYS:
+                if cap_ok and not b["caught"] and b["duration_days"] >= MIN_TREND_DURATION_DAYS:
                     best = diagnose_missed_boom(sym, closes, volumes, spy_closes, b)
                     diagnosed.append((sym, b, best))
             all_booms.extend(booms)
 
             if hits or booms:
-                print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: {len(hits)} flags, {len(booms)} booms "
-                      f"({sum(1 for b in booms if b['caught'])} caught)")
+                cap_note = "cap-ok" if cap_ok else f"BELOW ${et.MIN_MARKET_CAP:,.0f}, excluded"
+                print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: {len(hits)} flags ({cap_note}), "
+                      f"{len(booms)} booms ({sum(1 for b in booms if b['caught'])} caught)")
         except Exception as e:
             print(f"{sym}: ERROR {e}", file=sys.stderr)
 
-    print(f"\nTotal: {len(all_hits)} historical flags, {len(all_booms)} booms, "
-          f"across {len(BACKTEST_UNIVERSE)} tickers")
+    print(f"\nTotal: {len(all_hits)} historical flags (market-cap-eligible only -- {skipped_by_cap} "
+          f"more were found but excluded for being below the ${et.MIN_MARKET_CAP:,.0f} floor, same "
+          f"as the live app would), {len(all_booms)} booms, across {len(BACKTEST_UNIVERSE)} tickers")
     if not all_hits:
         print("No historical flags at all -- thresholds are too strict to evaluate. Loosen "
               "early_trend.py's BASE_RANGE_PCT / VOLUME_MULT / BREAKOUT_BAND_PCT and re-run.")
