@@ -316,19 +316,26 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
             if not (ret_4w > spy_ret_4w):
                 return None   # not actually outperforming the market
 
-    # Score, v2: a backtest run showed the original formula's extension_penalty
-    # (rewarding being barely past the pivot) was actually INVERTED -- flags it
-    # scored lowest outperformed the ones it scored highest -- so that term is
-    # dropped rather than kept on faith. freshness is now a mild 0.5-1.0
-    # tiebreaker instead of a hard multiplier that could crush a several-
-    # days-old (but still valid) breakout toward zero. growth_score explicitly
-    # rewards higher-volatility names, on the same logic as the filters above:
-    # this is meant to find growth/short-term movers, not calm compounders.
-    freshness = max(0.0, 1 - days_since / BREAKOUT_RECENT_DAYS)
-    volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 3.0)
-    rs_accel = (ret_4w - ret_prior_4w) + (ret_4w - (spy_ret_4w or 0.0))
+    # Score, v3: backtest report 9 (raw-signal-vs-actual-outcome correlations,
+    # not just the composite) showed v2 had the weighting backwards in two
+    # places. (1) freshness correlated ~0 with outcome (-0.01) despite v2
+    # letting it swing score by up to 2x -- dropped as a score factor entirely
+    # (BREAKOUT_RECENT_DAYS already handles freshness as a hard FILTER; this
+    # is only about whether it should also drive ranking within that window --
+    # it shouldn't). (2) volume_ratio, v2's dominant multiplicative factor, was
+    # one of the WEAKEST correlates (+0.07) -- de-emphasized (cap lowered,
+    # 3.0 -> 1.5). RS-vs-SPY correlated meaningfully more than RS-vs-own-past
+    # (+0.19 vs +0.15) -- weighted higher instead of an unweighted sum.
+    # growth_score (volatility) was already well-justified (+0.19) and is
+    # unchanged. NOTE: base_range_pct showed the single strongest raw
+    # correlation (+0.23) but is mechanically linked to volatility_pct (both
+    # scale with vol_scale) -- risk of double-counting the same underlying
+    # signal rather than adding an independent one, so deliberately NOT added
+    # here; would need a proper multi-variate check first.
+    volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 1.5)
+    rs_score = 1.5 * max(ret_4w - (spy_ret_4w or 0.0), 0.0) + max(ret_4w - ret_prior_4w, 0.0)
     growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
-    score = volume_score * (1 + max(rs_accel, 0.0)) * growth_score * (0.5 + 0.5 * freshness)
+    score = volume_score * (1 + rs_score) * growth_score
 
     asof = closes.index[-1]
     return {
