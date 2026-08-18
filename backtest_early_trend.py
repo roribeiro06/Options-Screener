@@ -158,7 +158,7 @@ def _flag_outcome(closes, i, flag_price):
     OUTCOME_CAP_DAYS later or however much data is actually available,
     whichever is shorter. Returns None only if there's no forward data at all
     (a flag on the very last available day)."""
-    track = closes.iloc[i:i + OUTCOME_CAP_DAYS + 1]
+    track = closes.iloc[i:i + OUTCOME_CAP_DAYS + 1].dropna()
     n = len(track)
     if n < 2:
         return None

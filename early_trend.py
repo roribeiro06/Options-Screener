@@ -100,7 +100,15 @@ MIN_DOLLAR_VOLUME = discover.MIN_DOLLAR_VOLUME  # same liquidity floor as Discov
 MIN_MARKET_CAP = 2_000_000_000   # $2B -- lower than Discover's $10B; early-stage
                                  # trends are more often still mid-cap, not yet mega-cap
 SMA_WINDOW = 150          # ~30 trading weeks, Weinstein "Stage 2" basis
-SMA_TREND_LOOKBACK = 20   # trading days back to confirm the SMA itself is rising
+SMA_TREND_LOOKBACK = 10   # trading days back to confirm the SMA itself is rising -- shortened
+                          # from 20 after backtest evidence (report 8) showed sma_rising was
+                          # the #2 blocker (37% of genuine trend misses) once window_high was
+                          # loosened. Traced WAL (2025-08-25): its 150-day SMA had already
+                          # bottomed and been rising for 9 straight trading days (price already
+                          # $85 vs SMA $76, a real move well underway) but a 20-day-back
+                          # comparison point still fell before the inflection, since a 150-day
+                          # SMA is slow enough that a full month's lookback can still reach past
+                          # a turn that already happened -- directly at odds with "catch it early."
 BASE_WEEKS = 8
 BASE_DAYS = BASE_WEEKS * 5
 BASE_RANGE_PCT = 0.30     # the prior base must be range-bound within this high-low band
