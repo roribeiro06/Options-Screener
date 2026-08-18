@@ -109,6 +109,18 @@ SMA_TREND_LOOKBACK = 10   # trading days back to confirm the SMA itself is risin
                           # comparison point still fell before the inflection, since a 150-day
                           # SMA is slow enough that a full month's lookback can still reach past
                           # a turn that already happened -- directly at odds with "catch it early."
+SMA_RISING_TOLERANCE_PCT = 0.015   # allow the SMA to be flat-to-barely-declining, not just
+                                    # strictly higher -- traced LUMN (2024-07-24, missed a
+                                    # +922% move): its SMA was still declining at the earliest
+                                    # catchable day, just barely (-0.98% over 10 days), because a
+                                    # 150-day average genuinely hasn't inflected yet this early in
+                                    # a fresh move, no matter how short the comparison window is.
+                                    # Rather than keep shortening SMA_TREND_LOOKBACK (diminishing
+                                    # returns) or shortening SMA_WINDOW itself (which would abandon
+                                    # the actual "established Stage-2 uptrend" character this check
+                                    # exists to require, not just how strictly it's checked), this
+                                    # treats "no longer meaningfully declining" as passing while a
+                                    # clearly still-declining SMA still fails.
 BASE_WEEKS = 8
 BASE_DAYS = BASE_WEEKS * 5
 BASE_RANGE_PCT = 0.30     # the prior base must be range-bound within this high-low band
@@ -240,7 +252,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     sma = closes.rolling(SMA_WINDOW).mean()
     sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - SMA_TREND_LOOKBACK]
-    if pd.isna(sma_now) or pd.isna(sma_then) or not (sma_now > sma_then):
+    if pd.isna(sma_now) or pd.isna(sma_then) or sma_now < sma_then * (1 - SMA_RISING_TOLERANCE_PCT):
         return None
 
     price_now = float(closes.iloc[-1])

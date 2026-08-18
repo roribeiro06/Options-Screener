@@ -280,7 +280,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
 
     sma = closes.rolling(et.SMA_WINDOW).mean()
     sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - et.SMA_TREND_LOOKBACK]
-    checks["sma_rising"] = bool(pd.notna(sma_now) and pd.notna(sma_then) and sma_now > sma_then)
+    checks["sma_rising"] = bool(pd.notna(sma_now) and pd.notna(sma_then)
+                                and sma_now >= sma_then * (1 - et.SMA_RISING_TOLERANCE_PCT))
 
     price_now = float(closes.iloc[-1])
     checks["price_above_sma"] = bool(pd.notna(sma_now) and price_now > sma_now)
