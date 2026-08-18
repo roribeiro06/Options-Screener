@@ -60,13 +60,22 @@ the screen isn't just noise; it doesn't guarantee the edge repeats going
 forward. A null/negative edge is a strong reason to tune early_trend.py's
 thresholds before trusting the live page.
 
-Universe: S&P 500 (sp500_tickers.py) to start -- broadening to early_trend's
-full ~7,000-ticker live universe would multiply runtime for a backtest whose
-whole point is validation, not completeness.
+Universe: S&P 500 + Russell 2500 (sp500_tickers.py + russell2500_tickers.py),
+~2,900 tickers combined -- NOT S&P 500 alone. S&P 500 membership is a
+LAGGING signal (a stock usually joins well after most of its growth story
+has already played out), so backtesting only against S&P 500 constituents
+biases the sample toward exactly the population this screen ISN'T trying to
+find. Russell 2500 (small/mid-cap) adds the population where an early trend
+would actually still be findable. See russell2500_tickers.py's own docstring
+for how that list was built and its point-in-time-snapshot caveat (same
+limitation sp500_tickers.py already has). Full ~7,000-ticker live universe
+would multiply runtime further for a backtest whose whole point is
+validation, not completeness -- this combined ~2,900 is the practical middle
+ground.
 
 Needs no Tradier token (yfinance-only, via wheel_screener._ticker). Takes a
-while to run (hundreds of tickers x years of history) -- run it locally, not
-as part of the live app.
+while to run (thousands of tickers x years of history) -- run it locally,
+not as part of the live app.
 """
 import sys
 import statistics as stats
@@ -76,6 +85,9 @@ import pandas as pd
 
 import early_trend as et
 from sp500_tickers import SP500_TICKERS
+from russell2500_tickers import RUSSELL2500_TICKERS
+
+BACKTEST_UNIVERSE = sorted(set(SP500_TICKERS) | set(RUSSELL2500_TICKERS))
 
 PERIOD = "3y"    # history window pulled per ticker
 STEP = 5          # sample every STEP trading days (weekly) when re-running the
@@ -272,7 +284,7 @@ def _report_score_correlation(dedup_hits):
 def _report_top_tickers(dedup_hits):
     print("\n=== 5. Most frequently flagged tickers (de-duplicated) -- watch for concentration ===")
     counts = Counter(h["ticker"] for h in dedup_hits)
-    print(f"{len(counts)} distinct tickers ever flagged, out of {len(SP500_TICKERS)} in the universe.")
+    print(f"{len(counts)} distinct tickers ever flagged, out of {len(BACKTEST_UNIVERSE)} in the universe.")
     top = counts.most_common(15)
     print("Top 15 by flag count -- if this list is dominated by one sector/style "
           "(e.g. slow-moving utilities/insurers rather than growth names), the base+breakout "
@@ -417,7 +429,9 @@ def _report_boom_recall(all_booms):
 
 
 def main():
-    print(f"Backtest universe: {len(SP500_TICKERS)} S&P 500 tickers, period={PERIOD}, step={STEP}d")
+    print(f"Backtest universe: {len(BACKTEST_UNIVERSE)} tickers "
+          f"({len(SP500_TICKERS)} S&P 500 + {len(RUSSELL2500_TICKERS)} Russell 2500, deduped), "
+          f"period={PERIOD}, step={STEP}d")
     spy_df = et._history_df("SPY", period=PERIOD)
     if spy_df is None:
         print("Could not fetch SPY history -- aborting", file=sys.stderr)
@@ -425,7 +439,7 @@ def main():
     spy_closes = spy_df["Close"]
 
     all_hits, all_booms = [], []
-    for idx, sym in enumerate(SP500_TICKERS):
+    for idx, sym in enumerate(BACKTEST_UNIVERSE):
         try:
             df = et._history_df(sym, period=PERIOD)
             if df is None or len(df) < 300:
@@ -454,12 +468,13 @@ def main():
             all_booms.extend(booms)
 
             if hits or booms:
-                print(f"[{idx + 1}/{len(SP500_TICKERS)}] {sym}: {len(hits)} flags, {len(booms)} booms "
+                print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: {len(hits)} flags, {len(booms)} booms "
                       f"({sum(1 for b in booms if b['caught'])} caught)")
         except Exception as e:
             print(f"{sym}: ERROR {e}", file=sys.stderr)
 
-    print(f"\nTotal: {len(all_hits)} historical flags, {len(all_booms)} booms, across {len(SP500_TICKERS)} tickers")
+    print(f"\nTotal: {len(all_hits)} historical flags, {len(all_booms)} booms, "
+          f"across {len(BACKTEST_UNIVERSE)} tickers")
     if not all_hits:
         print("No historical flags at all -- thresholds are too strict to evaluate. Loosen "
               "early_trend.py's BASE_RANGE_PCT / VOLUME_MULT / BREAKOUT_BAND_PCT and re-run.")
