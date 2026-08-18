@@ -54,8 +54,6 @@ OPEN_POSITIONS = [
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
     {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
      "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13, "entry_date": "2026-08-10"},
-    {"ticker": "MRVL", "type": "put_spread", "short_strike": 185, "long_strike": 175,
-     "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.27, "entry_date": "2026-08-11"},
     {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
      "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14"},
     {"ticker": "MU", "type": "call_spread", "short_strike": 1060, "long_strike": 1110,
@@ -64,6 +62,8 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-18", "contracts": 53, "entry_credit": 0.35, "entry_date": "2026-08-17"},
     {"ticker": "V", "type": "put", "strike": 350, "expiration": "2026-09-18",
      "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17"},
+    {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
+     "contracts": 1, "entry_credit": 6.4999, "entry_date": "2026-08-17"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -72,6 +72,9 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    {"ticker": "MRVL", "type": "put_spread", "short_strike": 185, "long_strike": 175,
+     "expiration": "2026-08-21", "contracts": 28, "entry_credit": 1.270311, "entry_date": "2026-08-11",
+     "exit_cost": 0.040004, "exit_date": "2026-08-17"},
     {"ticker": "AMZN", "type": "call_spread", "short_strike": 310, "long_strike": 325,
      "expiration": "2026-09-18", "contracts": 15, "entry_credit": 1.409947, "entry_date": "2026-08-07",
      "exit_cost": 0.19, "exit_date": "2026-08-17"},
