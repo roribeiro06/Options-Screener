@@ -7,6 +7,22 @@ ACCELERATION vs both its own recent past and the broader market -- and caps
 how far price is allowed to already be past that breakout before it's too
 extended to count as "early" anymore.
 
+Tuned for GROWTH/short-term movers, not long-term/defensive names. A backtest
+run (see backtest_early_trend.py) with fixed, one-size-fits-all thresholds
+showed exactly the failure mode you'd expect from that: flags clustered in
+calm, low-volatility financials/utilities/insurers, while missing nearly the
+entire semiconductor/AI-hardware supercycle (SNDK, SMCI, MU, INTC, AMD...) --
+because a volatile grower routinely blows past a fixed base-range/extension/
+breakout-band threshold just by being itself, while a sleepy defensive name
+glides under the SAME numbers on a meaningless wiggle. MIN_VOLATILITY_PCT now
+excludes low-volatility names outright, and the base-range/extension/breakout-
+band thresholds scale UP for a more-volatile-than-average stock (proportionally
+more room) rather than applying one fixed number to every stock regardless of
+its own character. The Score formula was also reworked after the same
+backtest run showed the original was actually INVERTED (see its comment
+below) -- retune/re-validate anything here with backtest_early_trend.py
+rather than assuming it works.
+
 No rules-based signal can guarantee catching a trend before it runs -- if it
 reliably could, it would get arbitraged away. backtest_early_trend.py re-runs
 the exact rule function below (_evaluate_breakout_at) against history so the
@@ -93,6 +109,34 @@ RS_WEEKS = 4
 RS_DAYS = RS_WEEKS * 5
 BENCHMARK = "SPY"
 
+# ---- Growth vs. defensive: volatility floor + threshold scaling ------------
+# A fixed BASE_RANGE_PCT/EXTENSION_CAP_PCT/BREAKOUT_BAND_PCT calibrated for a
+# "typical" stock is easy for a calm, low-volatility name (utilities, insurers,
+# staples) to clear on a meaningless wiggle, while a genuinely volatile growth
+# name routinely blows past the SAME fixed numbers just by being itself -- a
+# backtest run showed exactly this: flags clustered in slow financials/
+# utilities while missing nearly the entire semiconductor/AI-hardware
+# supercycle (SNDK, SMCI, MU, INTC, AMD...). MIN_VOLATILITY_PCT excludes
+# low-vol names outright; the other three thresholds above scale UP for a
+# stock more volatile than REFERENCE_VOLATILITY_PCT (proportionally more room)
+# and scale DOWN for a calmer one (held to a tighter bar), rather than one
+# fixed number applied to every stock regardless of its own character.
+VOLATILITY_WINDOW = 20            # trading days for the realized-vol calc
+REFERENCE_VOLATILITY_PCT = 0.30   # "typical" stock's annualized realized vol -- the
+                                   # baseline the fixed thresholds above are calibrated for
+MIN_VOLATILITY_PCT = 0.35         # hard floor -- excludes low-vol defensive names outright
+MAX_VOL_SCALE = 3.0                # cap on how much extra room an extreme-vol name gets
+
+
+def _realized_vol(closes, window=VOLATILITY_WINDOW):
+    """Annualized realized volatility of simple daily returns over the
+    trailing `window` days -- a stock's own recent volatility, used both as a
+    hard floor (MIN_VOLATILITY_PCT) and to scale the base-range/extension/
+    breakout-band thresholds to that stock's own character."""
+    rets = closes.pct_change().iloc[-window:]
+    vol = rets.std()
+    return float(vol * (252 ** 0.5)) if pd.notna(vol) else 0.0
+
 
 def _candidate_pool(stats, universe):
     have_avg = sum(1 for s in stats.values() if s.get("avg_volume", 0) > 0) >= len(stats) * 0.5
@@ -136,6 +180,15 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     if n < SMA_WINDOW + BASE_DAYS + BREAKOUT_RECENT_DAYS:
         return None
 
+    volatility_pct = _realized_vol(closes)
+    if volatility_pct < MIN_VOLATILITY_PCT:
+        return None   # too calm to be a growth/short-term setup -- see module docstring
+    vol_scale = min(volatility_pct / REFERENCE_VOLATILITY_PCT, MAX_VOL_SCALE)
+    eff_base_range = BASE_RANGE_PCT * vol_scale
+    eff_breakout_band = BREAKOUT_BAND_PCT * vol_scale
+    eff_extension_cap = EXTENSION_CAP_PCT * vol_scale
+    eff_extension_cap_long = EXTENSION_CAP_PCT_LONG * vol_scale
+
     sma = closes.rolling(SMA_WINDOW).mean()
     sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - SMA_TREND_LOOKBACK]
     if pd.isna(sma_now) or pd.isna(sma_then) or not (sma_now > sma_then):
@@ -151,7 +204,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         return None
     base_slice = closes.iloc[base_start:base_end]
     base_hi, base_lo = float(base_slice.max()), float(base_slice.min())
-    if base_lo <= 0 or (base_hi - base_lo) / base_lo > BASE_RANGE_PCT:
+    if base_lo <= 0 or (base_hi - base_lo) / base_lo > eff_base_range:
         return None
     pivot = base_hi
 
@@ -162,7 +215,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     days_since = len(recent) - 1 - recent.index.get_loc(broke.index[0])
 
     extension = (price_now - pivot) / pivot
-    if not (0 <= extension <= BREAKOUT_BAND_PCT):
+    if not (0 <= extension <= eff_breakout_band):
         return None   # either hasn't broken out, or already run too far past it
 
     lookback_n = min(BREAKOUT_LOOKBACK_DAYS, n)
@@ -178,13 +231,13 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     ret_3mo = None
     if n > EXTENSION_LOOKBACK_DAYS:
         ret_3mo = price_now / float(closes.iloc[-EXTENSION_LOOKBACK_DAYS]) - 1
-        if ret_3mo > EXTENSION_CAP_PCT:
+        if ret_3mo > eff_extension_cap:
             return None   # already spiked -- exactly what this screen is trying NOT to catch
 
     ret_6mo = None
     if n > EXTENSION_LOOKBACK_DAYS_LONG:
         ret_6mo = price_now / float(closes.iloc[-EXTENSION_LOOKBACK_DAYS_LONG]) - 1
-        if ret_6mo > EXTENSION_CAP_PCT_LONG:
+        if ret_6mo > eff_extension_cap_long:
             return None   # last 3 months looked fine, but it already had its bigger run before that
 
     if n <= 2 * RS_DAYS:
@@ -202,11 +255,19 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
             if not (ret_4w > spy_ret_4w):
                 return None   # not actually outperforming the market
 
+    # Score, v2: a backtest run showed the original formula's extension_penalty
+    # (rewarding being barely past the pivot) was actually INVERTED -- flags it
+    # scored lowest outperformed the ones it scored highest -- so that term is
+    # dropped rather than kept on faith. freshness is now a mild 0.5-1.0
+    # tiebreaker instead of a hard multiplier that could crush a several-
+    # days-old (but still valid) breakout toward zero. growth_score explicitly
+    # rewards higher-volatility names, on the same logic as the filters above:
+    # this is meant to find growth/short-term movers, not calm compounders.
     freshness = max(0.0, 1 - days_since / BREAKOUT_RECENT_DAYS)
-    volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 2.0)
+    volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 3.0)
     rs_accel = (ret_4w - ret_prior_4w) + (ret_4w - (spy_ret_4w or 0.0))
-    extension_penalty = max(1 - extension / BREAKOUT_BAND_PCT, 0.05)
-    score = freshness * volume_score * (1 + max(rs_accel, 0.0)) * extension_penalty
+    growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
+    score = volume_score * (1 + max(rs_accel, 0.0)) * growth_score * (0.5 + 0.5 * freshness)
 
     asof = closes.index[-1]
     return {
@@ -217,6 +278,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         "days_since_breakout": int(days_since),
         "extension_pct": round(extension * 100, 2),
         "base_range_pct": round((base_hi - base_lo) / base_lo * 100, 2),
+        "volatility_pct": round(volatility_pct * 100, 2),
         "volume_ratio": round(recent_vol_peak / avg_vol_50, 2),
         "ret_4w_pct": round(ret_4w * 100, 2),
         "ret_prior_4w_pct": round(ret_prior_4w * 100, 2),

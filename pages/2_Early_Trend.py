@@ -33,7 +33,10 @@ st.caption(
     "Flags stocks breaking OUT of a multi-week base on volume, with relative-strength "
     "ACCELERATION vs their own recent past and vs SPY -- and caps how far price is already "
     "past that breakout, to try to catch a trend early rather than after a plain momentum "
-    "screener would already show it up sharply. Educational only, NOT financial advice -- "
+    "screener would already show it up sharply. Tuned for GROWTH/short-term movers, not "
+    "long-term/defensive names -- a volatility floor excludes calm names outright, and the "
+    "base-range/extension/breakout-band thresholds scale up for a more volatile stock instead "
+    "of applying one fixed number to every name. Educational only, NOT financial advice -- "
     "no rules-based screen can guarantee catching a trend before it runs. Run "
     "`backtest_early_trend.py` locally to see how these exact rules performed historically "
     "before trusting the table below."
@@ -56,7 +59,14 @@ with st.expander("Legend - how to read this table", expanded=False):
         "already far past its breakout shows up.\n"
         "- **Base Range %** -- how tight the prior consolidation was (high-low range as a % of "
         "the low) before it broke out. Tighter/lower generally reads as a more coiled, "
-        "higher-quality base, not a random bounce.\n"
+        "higher-quality base, not a random bounce. The allowed max scales up for a more "
+        "volatile stock (see Volatility % below) instead of one fixed number for every name.\n"
+        "- **Volatility %** -- the stock's own annualized realized volatility (trailing 20 "
+        "days). Must clear \"Min volatility %\" in the sidebar to appear at all -- this is what "
+        "excludes calm, defensive names (utilities, insurers, staples) and keeps this a "
+        "growth/short-term screen rather than a slow-compounder one. It also scales up the base "
+        "range, extension caps, and breakout band for names more volatile than a 30% baseline, "
+        "and feeds directly into Score below.\n"
         "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. Must "
         "clear \"Breakout volume >= X times 50-day avg\" -- confirms real buying interest, not "
         "just drift on light volume.\n"
@@ -78,18 +88,22 @@ with st.expander("Legend - how to read this table", expanded=False):
         "- **ATM IV Skew (C-P)** -- the at-the-money call's implied vol minus the at-the-money "
         "put's, same chain. Positive means calls are pricing relatively richer than puts near the "
         "money -- another options-positioning tell, same caveat as above.\n"
-        "- **Score** -- the ranking number: combines breakout freshness, volume confirmation, how "
-        "much the RS acceleration exceeds zero, and how close price still is to the pivot, then "
-        "nudged by the options tilt if available. Higher = a better setup by these specific rules. "
-        "Only meaningful for ranking *within* one scan -- it isn't a probability or a return "
-        "forecast, and isn't comparable across different criteria settings."
+        "- **Score** -- the ranking number: combines volume confirmation, how much the RS "
+        "acceleration exceeds zero, the stock's own volatility (higher = more of a growth-style "
+        "mover, scored higher), and a mild freshness tiebreaker, then nudged by the options tilt "
+        "if available. Higher = a better setup by these specific rules. Only meaningful for "
+        "ranking *within* one scan -- it isn't a probability or a return forecast, and isn't "
+        "comparable across different criteria settings. (An earlier version of this formula also "
+        "rewarded being barely past the pivot; a backtest run showed that piece was actually "
+        "INVERTED -- worse-scored flags outperformed better-scored ones -- so it was dropped. "
+        "Re-check this with backtest_early_trend.py before trusting Score too heavily.)"
     )
 
 
 def apply_criteria(c):
     (et.BASE_WEEKS, et.BASE_DAYS, et.BASE_RANGE_PCT, et.BREAKOUT_RECENT_DAYS,
      et.BREAKOUT_BAND_PCT, et.VOLUME_MULT, et.EXTENSION_CAP_PCT, et.EXTENSION_CAP_PCT_LONG,
-     et.MIN_MARKET_CAP, et.CANDIDATE_POOL, et.MOVER_POOL) = c
+     et.MIN_MARKET_CAP, et.CANDIDATE_POOL, et.MOVER_POOL, et.MIN_VOLATILITY_PCT) = c
 
 
 @st.cache_data(ttl=600, show_spinner="Scanning for early-stage breakouts (candidate pool, then price history per candidate)...")
@@ -114,6 +128,11 @@ with st.sidebar:
         min_cap = st.number_input("Min market cap ($B)", 0, 500, int(et.MIN_MARKET_CAP / 1_000_000_000))
         pool = st.number_input("Candidate pool size (volume surge)", 20, 500, et.CANDIDATE_POOL)
         mover_pool = st.number_input("Candidate pool size (today's movers)", 10, 300, et.MOVER_POOL)
+        min_vol = st.number_input("Min volatility % (annualized, excludes defensive names)", 0, 200,
+                                  int(et.MIN_VOLATILITY_PCT * 100))
+        st.caption("Base range / extension / breakout-band above scale UP automatically for a "
+                   "stock more volatile than 30% annualized -- the numbers you set are the "
+                   "baseline for a 'typical' stock, not a hard cap for every stock.")
 
     st.markdown("---")
     if st.button("Refresh data (clear cache)"):
@@ -121,14 +140,14 @@ with st.sidebar:
 
 crit = (int(base_weeks), int(base_weeks) * 5, base_range / 100.0, int(breakout_recent),
         breakout_band / 100.0, float(vol_mult), ext_cap / 100.0, ext_cap_long / 100.0,
-        int(min_cap) * 1_000_000_000, int(pool), int(mover_pool))
+        int(min_cap) * 1_000_000_000, int(pool), int(mover_pool), min_vol / 100.0)
 
 DISPLAY_COLS = {
     "ticker": "Ticker", "price": "Price", "pivot": "Pivot", "days_since_breakout": "Days Since Breakout",
-    "extension_pct": "Above Pivot %", "base_range_pct": "Base Range %", "volume_ratio": "Volume x Avg",
-    "ret_4w_pct": "4wk Return %", "ret_prior_4w_pct": "Prior 4wk %", "spy_ret_4w_pct": "SPY 4wk %",
-    "ret_3mo_pct": "3mo Return %", "ret_6mo_pct": "6mo Return %", "oi_skew": "Call OI Skew",
-    "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
+    "extension_pct": "Above Pivot %", "base_range_pct": "Base Range %", "volatility_pct": "Volatility %",
+    "volume_ratio": "Volume x Avg", "ret_4w_pct": "4wk Return %", "ret_prior_4w_pct": "Prior 4wk %",
+    "spy_ret_4w_pct": "SPY 4wk %", "ret_3mo_pct": "3mo Return %", "ret_6mo_pct": "6mo Return %",
+    "oi_skew": "Call OI Skew", "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
 }
 
 try:
