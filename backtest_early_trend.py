@@ -132,7 +132,11 @@ def _forward_returns(closes, i):
     out = {}
     for name, days in HORIZONS.items():
         j = i + days
-        out[name] = float(closes.iloc[j]) / price0 - 1 if j < len(closes) else None
+        if j >= len(closes) or pd.isna(price0):
+            out[name] = None
+            continue
+        price_j = float(closes.iloc[j])
+        out[name] = price_j / price0 - 1 if pd.notna(price_j) else None
     return out
 
 
@@ -148,7 +152,11 @@ def _spy_forward_returns(spy_closes, asof_date):
     out = {}
     for name, days in HORIZONS.items():
         j = pos + days
-        out[name] = float(spy_closes.iloc[j]) / price0 - 1 if j < len(spy_closes) else None
+        if j >= len(spy_closes) or pd.isna(price0):
+            out[name] = None
+            continue
+        price_j = float(spy_closes.iloc[j])
+        out[name] = price_j / price0 - 1 if pd.notna(price_j) else None
     return out
 
 

@@ -122,19 +122,22 @@ BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new 
                                # an OLDER high (e.g. recovering from an earnings-gap crash
                                # that happened just outside the window) for a fresh breakout.
 BREAKOUT_LOOKBACK_DAYS = BREAKOUT_LOOKBACK_WEEKS * 5
-WINDOW_HIGH_TOLERANCE_PCT = 0.15   # price must be within this % of its own 52-week high --
+WINDOW_HIGH_TOLERANCE_PCT = 0.30   # price must be within this % of its own 52-week high --
                                    # loosened from a hard 2% after backtest evidence (report 8
                                    # in backtest_early_trend.py) showed the tight 2% band was
                                    # the single most common blocker on genuine multi-month
                                    # trend misses (61% of them, e.g. MNPR +2248%, ABAT +1011%,
                                    # PDYN +805%) -- a stock recovering from a real drawdown
                                    # into a new uptrend shouldn't have to fully reclaim its
-                                   # whole-year high before counting as "early." Keeps the
-                                   # 52-week LOOKBACK itself (that part fixed the ZBH-style
-                                   # "clawing back to an old pre-crash level" false positive);
-                                   # only the tolerance band widened. Re-verified against ZBH
-                                   # directly (2026-08-18): it now clears window_high (93.3% of
-                                   # its 52wk high, vs the loosened 85% floor) but is STILL
+                                   # whole-year high before counting as "early." First widened
+                                   # to 15%, which cut its blocking share to 44% but left it
+                                   # still #1 by a wide margin over #2 (sma_rising, 30%) --
+                                   # widened further to 30%. Keeps the 52-week LOOKBACK itself
+                                   # (that part fixed the ZBH-style "clawing back to an old
+                                   # pre-crash level" false positive); only the tolerance band
+                                   # widened. Re-verified against ZBH directly (2026-08-18): it
+                                   # clears window_high easily at either 15% or 30% (93.3% of
+                                   # its 52wk high) but is STILL
                                    # correctly rejected -- by MIN_VOLATILITY_PCT instead, since
                                    # a calm recovery like ZBH's just doesn't clear the growth-
                                    # focus volatility floor. The two independent changes end up
