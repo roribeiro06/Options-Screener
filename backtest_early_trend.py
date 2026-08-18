@@ -49,6 +49,15 @@ Seven reports plus a closing caveat, in order:
      trends" from a known fact into "here's specifically which gate is doing
      that," so any future loosening is evidence-based, not a guess.
 
+  9. COMPONENT CORRELATIONS -- for every raw signal early_trend.py computes
+     (extension %, base range %, volatility %, volume ratio, RS acceleration,
+     RS vs. SPY, days since breakout, 3mo/6mo return, and the current Score
+     itself), correlates it against actual outcome (peak gain, current
+     return). Same purpose as report 4 but one level deeper: report 4 checks
+     whether the Score COMPOSITE predicts outcome; this checks which
+     INGREDIENTS of that composite actually carry signal, so a Score rework
+     is evidence-based rather than a guess at which factors matter.
+
   Flags are sampled every STEP trading days and a fresh breakout stays
   flagged for up to BREAKOUT_RECENT_DAYS, so a single real breakout usually
   fires several times in a row. Reports 2 and 4-6 de-duplicate to the FIRST
@@ -393,6 +402,41 @@ def _report_score_correlation(dedup_hits):
               f"median current return {stats.median(h['outcome']['current_return_pct'] for h in bot):+.1f}%")
 
 
+def _report_component_correlations(dedup_hits):
+    print("\n=== 9. Which raw signals actually correlate with outcome (informs Score) ===")
+    tracked = [h for h in dedup_hits if h["outcome"] is not None
+              and h["outcome"]["days_tracked"] >= MIN_TRACK_DAYS]
+    if len(tracked) < 20:
+        print("Not enough tracked, de-duplicated flags to check this meaningfully.")
+        return
+    rows = []
+    for h in tracked:
+        rs_accel = h["ret_4w_pct"] - h["ret_prior_4w_pct"]
+        rs_vs_spy = (h["ret_4w_pct"] - h["spy_ret_4w_pct"]) if h.get("spy_ret_4w_pct") is not None else None
+        rows.append({
+            "extension_pct": h["extension_pct"],
+            "base_range_pct": h["base_range_pct"],
+            "volatility_pct": h["volatility_pct"],
+            "volume_ratio": h["volume_ratio"],
+            "ret_4w_pct": h["ret_4w_pct"],
+            "rs_accel": rs_accel,
+            "rs_vs_spy": rs_vs_spy,
+            "days_since_breakout": h["days_since_breakout"],
+            "ret_3mo_pct": h["ret_3mo_pct"],
+            "ret_6mo_pct": h["ret_6mo_pct"],
+            "current_score": h["score"],
+            "peak_gain_pct": h["outcome"]["peak_gain_pct"],
+            "current_return_pct": h["outcome"]["current_return_pct"],
+        })
+    df = pd.DataFrame(rows)
+    print(f"n={len(df)} tracked flags. Correlation of each raw signal with what actually happened:")
+    for target in ["peak_gain_pct", "current_return_pct"]:
+        print(f"\n  vs. {target}:")
+        corrs = df.drop(columns=["peak_gain_pct", "current_return_pct"]).corrwith(df[target])
+        for name, c in corrs.reindex(corrs.abs().sort_values(ascending=False).index).items():
+            print(f"    {name:<20} {c:+.3f}")
+
+
 def _report_top_tickers(dedup_hits):
     print("\n=== 5. Most frequently flagged tickers (de-duplicated) -- watch for concentration ===")
     counts = Counter(h["ticker"] for h in dedup_hits)
@@ -632,6 +676,7 @@ def main():
     _report_boom_precision(dedup_hits, all_booms)
     _report_by_year(all_hits)
     _report_missed_boom_diagnosis(diagnosed)
+    _report_component_correlations(dedup_hits)
 
     print("\n=== Caveat ===")
     print("This backtest can only validate stages 1-2 of early_trend.py (the price/volume "
