@@ -114,6 +114,23 @@ BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new 
                                # an OLDER high (e.g. recovering from an earnings-gap crash
                                # that happened just outside the window) for a fresh breakout.
 BREAKOUT_LOOKBACK_DAYS = BREAKOUT_LOOKBACK_WEEKS * 5
+WINDOW_HIGH_TOLERANCE_PCT = 0.15   # price must be within this % of its own 52-week high --
+                                   # loosened from a hard 2% after backtest evidence (report 8
+                                   # in backtest_early_trend.py) showed the tight 2% band was
+                                   # the single most common blocker on genuine multi-month
+                                   # trend misses (61% of them, e.g. MNPR +2248%, ABAT +1011%,
+                                   # PDYN +805%) -- a stock recovering from a real drawdown
+                                   # into a new uptrend shouldn't have to fully reclaim its
+                                   # whole-year high before counting as "early." Keeps the
+                                   # 52-week LOOKBACK itself (that part fixed the ZBH-style
+                                   # "clawing back to an old pre-crash level" false positive);
+                                   # only the tolerance band widened. Re-verified against ZBH
+                                   # directly (2026-08-18): it now clears window_high (93.3% of
+                                   # its 52wk high, vs the loosened 85% floor) but is STILL
+                                   # correctly rejected -- by MIN_VOLATILITY_PCT instead, since
+                                   # a calm recovery like ZBH's just doesn't clear the growth-
+                                   # focus volatility floor. The two independent changes end up
+                                   # covering for each other on this specific case.
 VOLUME_MULT = 1.5          # breakout-window peak volume vs 50-day average, required
 EXTENSION_LOOKBACK_DAYS = 63   # ~3 months
 EXTENSION_CAP_PCT = 0.40   # exclude names already up more than this over the last
@@ -241,8 +258,8 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     lookback_n = min(BREAKOUT_LOOKBACK_DAYS, n)
     window_high = float(closes.iloc[-lookback_n:].max())
-    if price_now < window_high * 0.98:
-        return None   # pivot isn't actually a meaningful multi-month high
+    if price_now < window_high * (1 - WINDOW_HIGH_TOLERANCE_PCT):
+        return None   # not close enough yet to a meaningful multi-month high
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())

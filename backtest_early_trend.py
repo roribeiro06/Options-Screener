@@ -292,7 +292,7 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
 
     lookback_n = min(et.BREAKOUT_LOOKBACK_DAYS, n)
     window_high = float(closes.iloc[-lookback_n:].max())
-    checks["window_high"] = price_now >= window_high * 0.98
+    checks["window_high"] = price_now >= window_high * (1 - et.WINDOW_HIGH_TOLERANCE_PCT)
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())
