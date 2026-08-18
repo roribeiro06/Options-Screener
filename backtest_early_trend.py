@@ -40,6 +40,15 @@ Seven reports plus a closing caveat, in order:
   7. YEAR-BY-YEAR -- whether any edge holds up across different periods or is
      concentrated in one regime.
 
+  8. MISSED-BOOM DIAGNOSIS -- for every missed boom that lasted long enough
+     to be a genuine developing trend (>= MIN_TREND_DURATION_DAYS, excluding
+     single-catalyst-style spikes no chart pattern could catch), samples days
+     across its trough-to-peak run and finds the day that came CLOSEST to
+     firing a flag (fewest failing checks), then reports which SPECIFIC rule
+     condition was most often the blocker. Turns "the rules miss most real
+     trends" from a known fact into "here's specifically which gate is doing
+     that," so any future loosening is evidence-based, not a guess.
+
   Flags are sampled every STEP trading days and a fresh breakout stays
   flagged for up to BREAKOUT_RECENT_DAYS, so a single real breakout usually
   fires several times in a row. Reports 2 and 4-6 de-duplicate to the FIRST
@@ -107,6 +116,15 @@ MIN_TRACK_DAYS = 63           # a flag needs at least this much forward data (~3
 BOOM_THRESHOLD = 0.50   # a rise of at least this much counts as a "boom"
 BOOM_WINDOW = 126        # ...within this many trading days (~6 months)
 BOOM_MERGE_GAP = 10      # merge qualifying days into one episode if this close together
+
+# -- Missed-boom diagnosis (report 8) --
+MIN_TREND_DURATION_DAYS = 40   # ~8 weeks -- a boom shorter than this (e.g. DRUG: +5709% in
+                               # 83d, BNAI: +5150% in 21d) is almost certainly a single binary
+                               # catalyst event (FDA approval, buyout, squeeze), not a
+                               # developing TREND -- no chart-pattern rule could plausibly
+                               # catch that, so diagnosing why it was missed would be noise.
+                               # Only booms that had enough time to show real technical
+                               # structure count as "should this rule set have caught it."
 
 
 def _forward_returns(closes, i):
@@ -230,6 +248,91 @@ def find_boom_episodes(closes):
         gain = vals[peak_idx] / vals[trough_idx] - 1
         episodes.append({"trough_idx": trough_idx, "peak_idx": peak_idx, "gain_pct": round(gain * 100, 2)})
     return episodes
+
+
+def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
+    """Mirrors early_trend._evaluate_breakout_at's checks WITHOUT short-
+    circuiting on the first failure -- diagnostic use only, never a source of
+    truth (that stays _evaluate_breakout_at). Returns a dict of
+    check_name -> True/False, omitting checks that genuinely can't be
+    evaluated yet (not enough history for that specific window), or None if
+    there isn't even enough history to evaluate anything at all."""
+    n = len(closes)
+    if n < et.SMA_WINDOW + et.BASE_DAYS + et.BREAKOUT_RECENT_DAYS:
+        return None
+
+    checks = {}
+    volatility_pct = et._realized_vol(closes)
+    checks["volatility_floor"] = volatility_pct >= et.MIN_VOLATILITY_PCT
+    vol_scale = min(volatility_pct / et.REFERENCE_VOLATILITY_PCT, et.MAX_VOL_SCALE) if volatility_pct > 0 else 0.0
+    eff_base_range = et.BASE_RANGE_PCT * vol_scale
+    eff_breakout_band = et.BREAKOUT_BAND_PCT * vol_scale
+    eff_extension_cap = et.EXTENSION_CAP_PCT * vol_scale
+    eff_extension_cap_long = et.EXTENSION_CAP_PCT_LONG * vol_scale
+
+    sma = closes.rolling(et.SMA_WINDOW).mean()
+    sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - et.SMA_TREND_LOOKBACK]
+    checks["sma_rising"] = bool(pd.notna(sma_now) and pd.notna(sma_then) and sma_now > sma_then)
+
+    price_now = float(closes.iloc[-1])
+    checks["price_above_sma"] = bool(pd.notna(sma_now) and price_now > sma_now)
+
+    base_end = n - et.BREAKOUT_RECENT_DAYS
+    base_start = base_end - et.BASE_DAYS
+    base_slice = closes.iloc[base_start:base_end]
+    base_hi, base_lo = float(base_slice.max()), float(base_slice.min())
+    checks["base_range"] = bool(base_lo > 0 and (base_hi - base_lo) / base_lo <= eff_base_range)
+    pivot = base_hi
+
+    recent = closes.iloc[base_end:]
+    checks["broke_out"] = bool((recent > pivot).any())
+
+    extension = (price_now - pivot) / pivot if pivot > 0 else None
+    checks["extension_band"] = bool(extension is not None and 0 <= extension <= eff_breakout_band)
+
+    lookback_n = min(et.BREAKOUT_LOOKBACK_DAYS, n)
+    window_high = float(closes.iloc[-lookback_n:].max())
+    checks["window_high"] = price_now >= window_high * 0.98
+
+    avg_vol_50 = float(volumes.iloc[-50:].mean())
+    recent_vol_peak = float(volumes.iloc[base_end:].max())
+    checks["volume"] = bool(avg_vol_50 > 0 and recent_vol_peak >= et.VOLUME_MULT * avg_vol_50)
+
+    if n > et.EXTENSION_LOOKBACK_DAYS:
+        ret_3mo = price_now / float(closes.iloc[-et.EXTENSION_LOOKBACK_DAYS]) - 1
+        checks["ext_3mo"] = ret_3mo <= eff_extension_cap
+    if n > et.EXTENSION_LOOKBACK_DAYS_LONG:
+        ret_6mo = price_now / float(closes.iloc[-et.EXTENSION_LOOKBACK_DAYS_LONG]) - 1
+        checks["ext_6mo"] = ret_6mo <= eff_extension_cap_long
+
+    if n > 2 * et.RS_DAYS:
+        ret_4w = price_now / float(closes.iloc[-et.RS_DAYS]) - 1
+        ret_prior_4w = float(closes.iloc[-et.RS_DAYS]) / float(closes.iloc[-2 * et.RS_DAYS]) - 1
+        checks["rs_accel"] = ret_4w > ret_prior_4w
+        if spy_closes is not None:
+            spy_upto = spy_closes.loc[:closes.index[-1]]
+            if len(spy_upto) >= et.RS_DAYS:
+                spy_ret_4w = float(spy_upto.iloc[-1]) / float(spy_upto.iloc[-et.RS_DAYS]) - 1
+                checks["rs_vs_spy"] = ret_4w > spy_ret_4w
+
+    return checks
+
+
+def diagnose_missed_boom(sym, closes, volumes, spy_closes, boom):
+    """For one missed boom, samples days across [trough_idx, peak_idx] and
+    finds the day that came CLOSEST to firing (fewest failing checks),
+    returning (n_failing, [failing check names], day index). None if no
+    sampled day had enough history to diagnose at all."""
+    best = None
+    lo, hi = boom["trough_idx"], boom["peak_idx"]
+    for i in range(lo, hi + 1, STEP):
+        checks = _diagnose_breakout_at(sym, closes.iloc[:i + 1], volumes.iloc[:i + 1], spy_closes)
+        if checks is None:
+            continue
+        failing = [k for k, v in checks.items() if v is False]
+        if best is None or len(failing) < best[0]:
+            best = (len(failing), failing, i)
+    return best
 
 
 DEDUPE_GAP_DAYS = 15   # a bit more than BREAKOUT_RECENT_DAYS -- flags for the same ticker
@@ -428,6 +531,33 @@ def _report_boom_recall(all_booms):
                   f"+{b['gain_pct']:.0f}% over {b['duration_days']}d")
 
 
+def _report_missed_boom_diagnosis(diagnosed):
+    print(f"\n=== 8. Why are 'genuine trend' misses (duration >= {MIN_TREND_DURATION_DAYS}d) being missed ===")
+    print(f"{len(diagnosed)} missed booms had enough time to develop into a real trend (excludes "
+          f"single-catalyst-style spikes like DRUG/BNAI -- those aren't chart patterns any rule "
+          f"set could plausibly catch, so including them would just be noise here).")
+    resolved = [(sym, boom, best) for sym, boom, best in diagnosed if best is not None]
+    if not resolved:
+        print("No diagnosable days found.")
+        return
+    single_blocker = [(sym, boom, best) for sym, boom, best in resolved if best[0] == 1]
+    print(f"{len(single_blocker)}/{len(resolved)} had a BEST (closest-call) day where only ONE "
+          f"condition was blocking a flag -- everything else already lined up.")
+    blocker_counts = Counter()
+    for _, _, (n_fail, failing, _) in resolved:
+        for f in failing:
+            blocker_counts[f] += 1
+    print("How often each condition appears among the failing checks on each boom's best day "
+          f"(n={len(resolved)}):")
+    for name, count in blocker_counts.most_common():
+        print(f"  {name:<16} {count} ({count / len(resolved) * 100:.0f}%)")
+    if single_blocker:
+        print("Single-blocker examples (ticker, trough->peak, gain, the ONE thing in the way):")
+        for sym, boom, (n_fail, failing, day_i) in sorted(single_blocker, key=lambda x: -x[1]["gain_pct"])[:10]:
+            print(f"  {sym:<6} {boom['trough_date']} -> {boom['peak_date']}  "
+                  f"+{boom['gain_pct']:.0f}% over {boom['duration_days']}d  blocked by: {failing[0]}")
+
+
 def main():
     print(f"Backtest universe: {len(BACKTEST_UNIVERSE)} tickers "
           f"({len(SP500_TICKERS)} S&P 500 + {len(RUSSELL2500_TICKERS)} Russell 2500, deduped), "
@@ -438,7 +568,7 @@ def main():
         sys.exit(1)
     spy_closes = spy_df["Close"]
 
-    all_hits, all_booms = [], []
+    all_hits, all_booms, diagnosed = [], [], []
     for idx, sym in enumerate(BACKTEST_UNIVERSE):
         try:
             df = et._history_df(sym, period=PERIOD)
@@ -465,6 +595,9 @@ def main():
                     b["catch_position_pct"] = round((min(caught_flags) - b["trough_idx"]) / span * 100, 1)
                 else:
                     b["catch_position_pct"] = None
+                if not b["caught"] and b["duration_days"] >= MIN_TREND_DURATION_DAYS:
+                    best = diagnose_missed_boom(sym, closes, volumes, spy_closes, b)
+                    diagnosed.append((sym, b, best))
             all_booms.extend(booms)
 
             if hits or booms:
@@ -489,6 +622,7 @@ def main():
     _report_top_tickers(dedup_hits)
     _report_boom_precision(dedup_hits, all_booms)
     _report_by_year(all_hits)
+    _report_missed_boom_diagnosis(diagnosed)
 
     print("\n=== Caveat ===")
     print("This backtest can only validate stages 1-2 of early_trend.py (the price/volume "
