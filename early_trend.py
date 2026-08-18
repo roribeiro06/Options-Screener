@@ -23,6 +23,25 @@ backtest run showed the original was actually INVERTED (see its comment
 below) -- retune/re-validate anything here with backtest_early_trend.py
 rather than assuming it works.
 
+DELIBERATE SCOPE BOUNDARY, not a bug to fix later: after this rework, boom
+PRECISION jumped from 19% to 54% and Score's correlation with outcome flipped
+from slightly negative to slightly positive -- but the biggest individual
+misses (SNDK, SMCI, MU, WDC, DELL, MRVL, STX, AMD) were unchanged. Traced
+SNDK specifically through _evaluate_breakout_at: its realized volatility hit
+107-125% annualized and its 6-month return reached 870-1294% -- blowing
+through even the volatility-scaled extension caps (capped at MAX_VOL_SCALE =
+3x, i.e. ~150% max allowance). A true parabolic melt-up is a genuinely
+different chart pattern from a Stage-2 base breakout: by the time a stock is
+recognizably "about to 10x," it's usually already up hundreds of percent,
+which is exactly what the "don't chase an already-spiked name" extension
+caps exist to reject. Raising MAX_VOL_SCALE further would just trade this
+miss for letting through already-exhausted blow-off-top names instead of
+early ones. Decision (2026-08-18): accept this as out of scope rather than
+chase it -- this screen stays a base-breakout finder, not a parabolic-
+continuation ("high tight flag") finder, which would need its own separate
+rule set (short, shallow pullback tolerance instead of an 8-week base, and
+much looser extension tolerance) rather than being folded in here.
+
 No rules-based signal can guarantee catching a trend before it runs -- if it
 reliably could, it would get arbitraged away. backtest_early_trend.py re-runs
 the exact rule function below (_evaluate_breakout_at) against history so the
@@ -125,7 +144,9 @@ VOLATILITY_WINDOW = 20            # trading days for the realized-vol calc
 REFERENCE_VOLATILITY_PCT = 0.30   # "typical" stock's annualized realized vol -- the
                                    # baseline the fixed thresholds above are calibrated for
 MIN_VOLATILITY_PCT = 0.35         # hard floor -- excludes low-vol defensive names outright
-MAX_VOL_SCALE = 3.0                # cap on how much extra room an extreme-vol name gets
+MAX_VOL_SCALE = 3.0                # cap on how much extra room an extreme-vol name gets --
+                                   # deliberately NOT raised further to chase true parabolic
+                                   # melt-ups (SNDK-style, 800%+ in 6mo); see module docstring
 
 
 def _realized_vol(closes, window=VOLATILITY_WINDOW):

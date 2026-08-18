@@ -35,16 +35,29 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   from the wheel screener above and never mixed into its page. Looks for a stock breaking OUT of
   a multi-week base on volume, with relative-strength acceleration vs its own recent past and vs
   SPY, while capping how far price is already past that breakout -- aimed at catching a trend
-  before it's already run, unlike a trailing-momentum screener. `early_trend.py` is the
-  Streamlit-agnostic 3-stage engine (see its own module docstring for the full rules); the page
-  file is a thin UI wrapper with its own criteria sidebar, following the same
-  `@st.cache_data(ttl=600)` pattern as the main app's `scan_*` functions. Reuses `discover.py`'s
-  universe/batched-quotes/market-cap helpers and `wheel_screener.py`'s Tradier/yfinance helpers --
-  doesn't duplicate any of that plumbing. **`backtest_early_trend.py`** re-runs the exact same
-  rule function (`early_trend._evaluate_breakout_at`) against historical S&P 500 data (no
-  lookahead) and reports forward 1mo/3mo/6mo returns vs. a SPY baseline -- run it locally to
+  before it's already run, unlike a trailing-momentum screener. Tuned for GROWTH/short-term
+  movers, not long-term/defensive names: a volatility floor (`MIN_VOLATILITY_PCT`) excludes calm
+  names outright, and the base-range/extension/breakout-band thresholds scale up for a stock more
+  volatile than a 30% baseline (capped at `MAX_VOL_SCALE` = 3x) instead of one fixed number for
+  every stock. `early_trend.py` is the Streamlit-agnostic 3-stage engine (see its own module
+  docstring for the full rules, the Score formula, and a documented DELIBERATE scope boundary:
+  this screen does NOT try to catch true parabolic melt-ups like SNDK's 800%+-in-6mo run --
+  traced and confirmed via backtest that a stock that volatile blows through even the scaled
+  extension caps, and catching it would require a different rule set entirely, not a bigger
+  `MAX_VOL_SCALE`); the page file is a thin UI wrapper with its own criteria sidebar, following
+  the same `@st.cache_data(ttl=600)` pattern as the main app's `scan_*` functions. Reuses
+  `discover.py`'s universe/batched-quotes/market-cap helpers and `wheel_screener.py`'s
+  Tradier/yfinance helpers -- doesn't duplicate any of that plumbing. **`backtest_early_trend.py`**
+  re-runs the exact same rule function (`early_trend._evaluate_breakout_at`) against historical
+  S&P 500 data (no lookahead) and reports forward returns vs. SPY (same-window, not just SPY's
+  trailing return), per-flag outcome tracking (did it actually go up, how fast, how long, current
+  status), boom recall/precision (of real 50%+ moves, how many caught vs. missed, and vice versa),
+  whether Score actually predicts outcomes, and a year-by-year regime check -- run it locally to
   validate (or retune) the thresholds before trusting the live page's output; it isn't run as
-  part of the live app. Needs no Tradier token (yfinance-only).
+  part of the live app. Needs no Tradier token (yfinance-only). Its own findings drove the
+  growth-focus rework above: originally flags clustered in utilities/financials and missed the
+  AI/semiconductor supercycle almost entirely; after the rework, boom precision went 19% -> 54%
+  and Score's correlation with actual outcome flipped from slightly negative to slightly positive.
 - **`wheel_screener.py`** — the engine. Tradier data funcs, Black-Scholes, `evaluate_put`/`evaluate_call`,
   `screen_puts`/`screen_calls`, `lookup_contracts`, the Score, liquidity, cash/target columns,
   historical AvgPremium lookup, all config constants at the top (including `OPEN_POSITIONS` and
