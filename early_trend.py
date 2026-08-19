@@ -154,7 +154,17 @@ WINDOW_HIGH_TOLERANCE_PCT = 0.30   # price must be within this % of its own 52-w
                                    # a calm recovery like ZBH's just doesn't clear the growth-
                                    # focus volatility floor. The two independent changes end up
                                    # covering for each other on this specific case.
-VOLUME_MULT = 1.5          # breakout-window peak volume vs 50-day average, required
+VOLUME_MULT = 1.35         # breakout-window peak volume vs 50-day average, required.
+                           # Lowered from 1.5 after report 8 (post volatility-floor fix) showed
+                           # volume co-leading the remaining blockers (16%, near-tied with
+                           # window_high). Sampled 25 cap-eligible single-blocker examples: no
+                           # clean gap like volatility had -- a fairly even spread from 1.09x to
+                           # 1.48x -- but 11/25 clustered tightly at 1.40-1.48x (near-boundary
+                           # misses, e.g. MXL 1.47x/+714%, TSLA 1.40x/+164%) vs a weaker tail
+                           # down to 1.09x (e.g. SEZL 1.02x -- barely any volume pickup at all).
+                           # Given the 25% volatility-floor overshoot cost 11pp of precision,
+                           # deliberately conservative here: 1.35 captures the clear cluster plus
+                           # a bit more (~14/25 examples) without reaching into the weak tail.
 EXTENSION_LOOKBACK_DAYS = 63   # ~3 months
 EXTENSION_CAP_PCT = 0.40   # exclude names already up more than this over the last
                            # EXTENSION_LOOKBACK_DAYS -- the explicit "don't chase an
