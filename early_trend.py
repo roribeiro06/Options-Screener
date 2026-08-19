@@ -183,7 +183,22 @@ BENCHMARK = "SPY"
 VOLATILITY_WINDOW = 20            # trading days for the realized-vol calc
 REFERENCE_VOLATILITY_PCT = 0.30   # "typical" stock's annualized realized vol -- the
                                    # baseline the fixed thresholds above are calibrated for
-MIN_VOLATILITY_PCT = 0.35         # hard floor -- excludes low-vol defensive names outright
+MIN_VOLATILITY_PCT = 0.25         # hard floor -- excludes low-vol defensive names outright.
+                                   # Lowered from 0.35 after backtest report 8 (post market-cap
+                                   # fix) showed it as the #1 blocker on genuine, cap-eligible
+                                   # trend misses (22%). Traced 5 examples (FCX, DBD, HALO,
+                                   # CGNX, ADUS): all sat at 30.8-34.8% realized vol -- short of
+                                   # the old 35% floor by as little as 0.2pp, but a full 8+
+                                   # points above ZBH's confirmed-defensive 16.6% (the case that
+                                   # motivated this filter existing at all). That's a real gap
+                                   # with room in it, not a boundary the floor needed to sit
+                                   # right against -- 0.25 clears all 5 examples with margin
+                                   # while staying well above ZBH. Now sits BELOW
+                                   # REFERENCE_VOLATILITY_PCT rather than above it, which is
+                                   # more coherent: the floor is a genuine minimum, the
+                                   # reference point is the "average" scaling anchor, and
+                                   # growth_score (not a hard gate) is what should downweight a
+                                   # merely-average-vol name relative to the more explosive ones.
 MAX_VOL_SCALE = 3.0                # cap on how much extra room an extreme-vol name gets --
                                    # deliberately NOT raised further to chase true parabolic
                                    # melt-ups (SNDK-style, 800%+ in 6mo); see module docstring
