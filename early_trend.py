@@ -52,6 +52,38 @@ exhausted blow-off-tops instead of early moves -- MAX_VOL_SCALE itself is
 UNCHANGED by the revision above; the fix was adding a duration/concentration-
 based exception, not loosening the existing magnitude-based caps further.
 
+STRUCTURAL CHANGE (2026-08-19): after the sustained-move exception above, report
+8's remaining blockers were diffuse (window_high 16%, extension_band/sma_rising
+12% each, volatility_floor 11%, volume 10%, no single dominant lever left).
+window_high and sma_rising specifically were each already tuned twice via
+threshold-widening (see their own comments) and STILL remained top blockers --
+evidence that "how close to a high" and "how clearly is the SMA rising" are
+matters of degree, not questions a single bright-line cutoff can answer well.
+Converted both from hard pass/fail gates to soft SCORE factors instead
+(window_high_score, sma_trend_score in _evaluate_breakout_at) -- a near-miss on
+either now surfaces, ranked appropriately, rather than vanishing outright.
+Verified against the existing reference set: ZBH's occasional passes and DRUG's
+later unrelated 2025-10 setup are UNCHANGED from before this conversion (traced
+by diffing against the pre-change code directly); BNAI remains fully excluded
+throughout its actual spike window. The other remaining hard gates
+(volatility_floor, volume, extension caps, base_range, broke_out, rs_accel,
+rs_vs_spy, price_above_sma) are deliberately NOT converted this round -- none
+has the same "tuned twice, still the top blocker" track record, so converting
+them without that evidence would be a much less justified bet.
+
+FOLLOW-UP (same day, after the full backtest this structural change was
+supposed to be validated by): report 9 showed the first cut's score-factor
+DIRECTIONS were wrong, not just untested. window_high_pct correlated
+NEGATIVELY with actual outcome, the opposite of the "closer to the high =
+better" assumption the first version scored it by; sma_trend_pct barely
+correlated with outcome at all. Both corrected (see WINDOW_HIGH_SCORE_FLOOR
+and the Score comment in _evaluate_breakout_at) -- window_high now rewards
+distance FROM the high, sma_trend was dropped from the score formula entirely.
+This is exactly the failure mode the backtest discipline exists to catch:
+an intuitive-sounding scoring assumption that evidence directly contradicted.
+Re-run the full backtest again before trusting this round's numbers, since the
+corrected version has not itself been through a full run yet.
+
 No rules-based signal can guarantee catching a trend before it runs -- if it
 reliably could, it would get arbitraged away. backtest_early_trend.py re-runs
 the exact rule function below (_evaluate_breakout_at) against history so the
@@ -119,18 +151,22 @@ SMA_TREND_LOOKBACK = 10   # trading days back to confirm the SMA itself is risin
                           # comparison point still fell before the inflection, since a 150-day
                           # SMA is slow enough that a full month's lookback can still reach past
                           # a turn that already happened -- directly at odds with "catch it early."
-SMA_RISING_TOLERANCE_PCT = 0.015   # allow the SMA to be flat-to-barely-declining, not just
-                                    # strictly higher -- traced LUMN (2024-07-24, missed a
-                                    # +922% move): its SMA was still declining at the earliest
-                                    # catchable day, just barely (-0.98% over 10 days), because a
-                                    # 150-day average genuinely hasn't inflected yet this early in
-                                    # a fresh move, no matter how short the comparison window is.
-                                    # Rather than keep shortening SMA_TREND_LOOKBACK (diminishing
-                                    # returns) or shortening SMA_WINDOW itself (which would abandon
-                                    # the actual "established Stage-2 uptrend" character this check
-                                    # exists to require, not just how strictly it's checked), this
-                                    # treats "no longer meaningfully declining" as passing while a
-                                    # clearly still-declining SMA still fails.
+# sma_rising: originally a hard gate (SMA_RISING_TOLERANCE_PCT, allowing flat-to-barely-
+# declining) -- traced LUMN (2024-07-24, missed a +922% move): its SMA was still declining
+# at the earliest catchable day, just barely (-0.98% over 10 days), because a 150-day
+# average genuinely hasn't inflected yet this early in a fresh move, no matter how short the
+# comparison window is. A 1.5% tolerance fixed LUMN specifically, but report 8 still showed
+# sma_rising tied for #2 blocker (12%) afterward -- the underlying issue is that "is the SMA
+# rising" is a matter of degree, not a bright line, and no single tolerance number captures
+# that for every stock. Converted (2026-08-19) from a hard gate: first as a soft SCORE factor
+# alongside window_high's conversion, but that round's full-backtest report 9 showed
+# sma_trend_pct barely correlates with actual outcome at all (-0.02 peak gain, -0.04 current
+# return, n=3454) -- essentially the same "no real signal" verdict v2's freshness factor got
+# (-0.01), which was dropped entirely rather than kept at a token weight. Same treatment here:
+# dropped as a SCORE factor. The raw sma_trend_pct value is still returned/displayed (useful
+# context) and the underlying gate stays soft, i.e. still not a hard pass/fail -- just no
+# longer part of the ranking formula. Whether the SMA is even COMPUTABLE at all (enough
+# history) remains a hard requirement -- that's a data availability question, not a signal.
 BASE_WEEKS = 8
 BASE_DAYS = BASE_WEEKS * 5
 BASE_RANGE_PCT = 0.30     # the prior base must be range-bound within this high-low band
@@ -144,26 +180,29 @@ BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new 
                                # an OLDER high (e.g. recovering from an earnings-gap crash
                                # that happened just outside the window) for a fresh breakout.
 BREAKOUT_LOOKBACK_DAYS = BREAKOUT_LOOKBACK_WEEKS * 5
-WINDOW_HIGH_TOLERANCE_PCT = 0.30   # price must be within this % of its own 52-week high --
-                                   # loosened from a hard 2% after backtest evidence (report 8
-                                   # in backtest_early_trend.py) showed the tight 2% band was
-                                   # the single most common blocker on genuine multi-month
-                                   # trend misses (61% of them, e.g. MNPR +2248%, ABAT +1011%,
-                                   # PDYN +805%) -- a stock recovering from a real drawdown
-                                   # into a new uptrend shouldn't have to fully reclaim its
-                                   # whole-year high before counting as "early." First widened
-                                   # to 15%, which cut its blocking share to 44% but left it
-                                   # still #1 by a wide margin over #2 (sma_rising, 30%) --
-                                   # widened further to 30%. Keeps the 52-week LOOKBACK itself
-                                   # (that part fixed the ZBH-style "clawing back to an old
-                                   # pre-crash level" false positive); only the tolerance band
-                                   # widened. Re-verified against ZBH directly (2026-08-18): it
-                                   # clears window_high easily at either 15% or 30% (93.3% of
-                                   # its 52wk high) but is STILL
-                                   # correctly rejected -- by MIN_VOLATILITY_PCT instead, since
-                                   # a calm recovery like ZBH's just doesn't clear the growth-
-                                   # focus volatility floor. The two independent changes end up
-                                   # covering for each other on this specific case.
+WINDOW_HIGH_SCORE_FLOOR = 0.5      # window_high went from a hard 2% tolerance -> loosened to
+                                   # 15% -> 30% (each step evidenced by backtest report 8, see
+                                   # git history) and was STILL the #1 remaining blocker at 16%
+                                   # once every other diffuse blocker had been individually
+                                   # tuned -- no single tolerance number was going to fix a
+                                   # continuous "how close to its own high" question. Converted
+                                   # (2026-08-19) from a hard gate to a soft SCORE factor. FIRST
+                                   # attempt got the direction backwards -- assumed closer to the
+                                   # 52-week high should score higher. Report 9 on that round's
+                                   # full backtest showed the opposite: window_high_pct correlated
+                                   # NEGATIVELY with actual outcome (-0.19 peak gain, -0.20 current
+                                   # return, n=3454) -- comparable in size to rs_vs_spy's trusted
+                                   # +0.19, just pointed the other way. Makes sense in hindsight: a
+                                   # name already sitting near its own year high has less obvious
+                                   # room to re-rate than one breaking out of a fresh base while
+                                   # still well below an old high -- exactly the "not yet broadly
+                                   # discovered" character this screen wants, not a penalty.
+                                   # Corrected: now REWARDS being farther from the 52wk high, not
+                                   # closer. See window_high_score in _evaluate_breakout_at. Scale
+                                   # kept modest (factor ranges ~0.5-1.5x) to match rs_vs_spy's
+                                   # weighting, since this is one backtest round's evidence for a
+                                   # newly-flipped factor, not something to lean on heavily yet --
+                                   # re-verify direction holds on the next full run.
 VOLUME_MULT = 1.35         # breakout-window peak volume vs 50-day average, required.
                            # Lowered from 1.5 after report 8 (post volatility-floor fix) showed
                            # volume co-leading the remaining blockers (16%, near-tied with
@@ -327,8 +366,9 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     sma = closes.rolling(SMA_WINDOW).mean()
     sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - SMA_TREND_LOOKBACK]
-    if pd.isna(sma_now) or pd.isna(sma_then) or sma_now < sma_then * (1 - SMA_RISING_TOLERANCE_PCT):
-        return None
+    if pd.isna(sma_now) or pd.isna(sma_then):
+        return None   # not enough history to compute the SMA trend at all
+    sma_trend = (sma_now - sma_then) / sma_then if sma_then > 0 else 0.0
 
     price_now = float(closes.iloc[-1])
     if not (price_now > sma_now):
@@ -356,8 +396,9 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     lookback_n = min(BREAKOUT_LOOKBACK_DAYS, n)
     window_high = float(closes.iloc[-lookback_n:].max())
-    if price_now < window_high * (1 - WINDOW_HIGH_TOLERANCE_PCT):
-        return None   # not close enough yet to a meaningful multi-month high
+    # window_high is the max of a window that INCLUDES price_now itself, so this
+    # ratio is always in (0, 1] -- 1.0 means today's close IS the lookback's high.
+    window_high_ratio = price_now / window_high if window_high > 0 else 0.0
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())
@@ -409,10 +450,23 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     # scale with vol_scale) -- risk of double-counting the same underlying
     # signal rather than adding an independent one, so deliberately NOT added
     # here; would need a proper multi-variate check first.
+    #
+    # v3.1 (2026-08-19): window_high and sma_rising converted from hard pass/fail gates to
+    # soft factors -- report 8 showed neither had a clean threshold that separated genuine
+    # early trends from noise; both were matters of degree being forced through a bright
+    # line. First attempt scored both directly by intuition (closer to the high = better,
+    # more-rising SMA = better) -- WRONG on both counts per that round's report 9:
+    # window_high_pct correlated NEGATIVELY with outcome (-0.19/-0.20, see
+    # WINDOW_HIGH_SCORE_FLOOR's comment for why that makes sense in hindsight) and
+    # sma_trend_pct barely correlated at all (-0.02/-0.04, same "no real signal" verdict as
+    # v2's dropped freshness factor). Corrected here: window_high_score now rewards being
+    # FARTHER from the 52wk high, not closer; sma_trend_score is dropped from the formula
+    # entirely (sma_trend_pct is still computed/returned for display, just not scored).
     volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 1.5)
     rs_score = 1.5 * max(ret_4w - (spy_ret_4w or 0.0), 0.0) + max(ret_4w - ret_prior_4w, 0.0)
     growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
-    score = volume_score * (1 + rs_score) * growth_score
+    window_high_score = max(1.5 - window_high_ratio, WINDOW_HIGH_SCORE_FLOOR)
+    score = volume_score * (1 + rs_score) * growth_score * window_high_score
 
     asof = closes.index[-1]
     return {
@@ -424,6 +478,8 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         "extension_pct": round(extension * 100, 2),
         "base_range_pct": round((base_hi - base_lo) / base_lo * 100, 2),
         "volatility_pct": round(volatility_pct * 100, 2),
+        "window_high_pct": round(window_high_ratio * 100, 2),
+        "sma_trend_pct": round(sma_trend * 100, 2),
         "volume_ratio": round(recent_vol_peak / avg_vol_50, 2),
         "ret_4w_pct": round(ret_4w * 100, 2),
         "ret_prior_4w_pct": round(ret_prior_4w * 100, 2),

@@ -310,8 +310,9 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
 
     sma = closes.rolling(et.SMA_WINDOW).mean()
     sma_now, sma_then = sma.iloc[-1], sma.iloc[-1 - et.SMA_TREND_LOOKBACK]
-    checks["sma_rising"] = bool(pd.notna(sma_now) and pd.notna(sma_then)
-                                and sma_now >= sma_then * (1 - et.SMA_RISING_TOLERANCE_PCT))
+    # sma_rising is no longer a hard pass/fail gate in _evaluate_breakout_at (converted to
+    # a soft score factor, 2026-08-19) -- only whether it's computable at all still matters
+    # here, so it's intentionally NOT in `checks` below (nothing to diagnose as a "blocker").
 
     price_now = float(closes.iloc[-1])
     checks["price_above_sma"] = bool(pd.notna(sma_now) and price_now > sma_now)
@@ -329,9 +330,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     extension = (price_now - pivot) / pivot if pivot > 0 else None
     checks["extension_band"] = bool(extension is not None and 0 <= extension <= eff_breakout_band)
 
-    lookback_n = min(et.BREAKOUT_LOOKBACK_DAYS, n)
-    window_high = float(closes.iloc[-lookback_n:].max())
-    checks["window_high"] = price_now >= window_high * (1 - et.WINDOW_HIGH_TOLERANCE_PCT)
+    # window_high is likewise no longer a hard gate (same 2026-08-19 conversion) -- not in
+    # `checks` below for the same reason as sma_rising above.
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())
@@ -440,6 +440,8 @@ def _report_component_correlations(dedup_hits):
             "extension_pct": h["extension_pct"],
             "base_range_pct": h["base_range_pct"],
             "volatility_pct": h["volatility_pct"],
+            "window_high_pct": h.get("window_high_pct"),
+            "sma_trend_pct": h.get("sma_trend_pct"),
             "volume_ratio": h["volume_ratio"],
             "ret_4w_pct": h["ret_4w_pct"],
             "rs_accel": rs_accel,

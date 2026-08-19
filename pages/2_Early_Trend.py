@@ -67,6 +67,15 @@ with st.expander("Legend - how to read this table", expanded=False):
         "growth/short-term screen rather than a slow-compounder one. It also scales up the base "
         "range, extension caps, and breakout band for names more volatile than a 30% baseline, "
         "and feeds directly into Score below.\n"
+        "- **% of 52wk High** -- how close price is to its own trailing-year high (100% = a "
+        "fresh year high right now). Not a hard cutoff, and NOT what you'd assume -- a "
+        "backtest run showed names farther below their own high actually did BETTER going "
+        "forward than names already sitting near it (more room to re-rate, not yet as widely "
+        "recognized), so Score rewards distance from the high here, not closeness to it.\n"
+        "- **SMA Trend %** -- how much the 150-day SMA itself has moved over the last "
+        "~2 trading weeks (positive = clearly inflecting upward), shown for context. A "
+        "backtest run found this barely correlated with actual outcome either way, so it's "
+        "not a Score factor -- just informational.\n"
         "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. Must "
         "clear \"Breakout volume >= X times 50-day avg\" -- confirms real buying interest, not "
         "just drift on light volume.\n"
@@ -93,14 +102,19 @@ with st.expander("Legend - how to read this table", expanded=False):
         "put's, same chain. Positive means calls are pricing relatively richer than puts near the "
         "money -- another options-positioning tell, same caveat as above.\n"
         "- **Score** -- the ranking number: combines volume confirmation, how much the RS "
-        "acceleration exceeds zero, the stock's own volatility (higher = more of a growth-style "
-        "mover, scored higher), and a mild freshness tiebreaker, then nudged by the options tilt "
-        "if available. Higher = a better setup by these specific rules. Only meaningful for "
-        "ranking *within* one scan -- it isn't a probability or a return forecast, and isn't "
-        "comparable across different criteria settings. (An earlier version of this formula also "
-        "rewarded being barely past the pivot; a backtest run showed that piece was actually "
-        "INVERTED -- worse-scored flags outperformed better-scored ones -- so it was dropped. "
-        "Re-check this with backtest_early_trend.py before trusting Score too heavily.)"
+        "acceleration exceeds zero (weighted higher vs. SPY than vs. the stock's own past), the "
+        "stock's own volatility (higher = more of a growth-style mover, scored higher), and "
+        "distance from the 52wk high (farther = scored higher, see above), then nudged by the "
+        "options tilt if available. Higher = a better setup by these specific rules. Only "
+        "meaningful for ranking *within* one scan -- it isn't a probability or a return "
+        "forecast, and isn't comparable across different criteria settings. (This formula has "
+        "been revised more than once after backtest evidence directly contradicted an intuitive "
+        "assumption: a v1 factor rewarding being barely past the pivot was actually INVERTED -- "
+        "worse-scored flags outperformed better-scored ones; freshness was dropped after showing "
+        "~zero correlation with outcome; and when % of 52wk High and SMA Trend % first replaced "
+        "hard pass/fail cutoffs, the FIRST version scored proximity-to-high as a positive -- a "
+        "full backtest run showed that was backwards too. Re-check this with "
+        "backtest_early_trend.py before trusting Score too heavily.)"
     )
 
 
@@ -149,6 +163,7 @@ crit = (int(base_weeks), int(base_weeks) * 5, base_range / 100.0, int(breakout_r
 DISPLAY_COLS = {
     "ticker": "Ticker", "price": "Price", "pivot": "Pivot", "days_since_breakout": "Days Since Breakout",
     "extension_pct": "Above Pivot %", "base_range_pct": "Base Range %", "volatility_pct": "Volatility %",
+    "window_high_pct": "% of 52wk High", "sma_trend_pct": "SMA Trend %",
     "volume_ratio": "Volume x Avg", "ret_4w_pct": "4wk Return %", "ret_prior_4w_pct": "Prior 4wk %",
     "spy_ret_4w_pct": "SPY 4wk %", "ret_3mo_pct": "3mo Return %", "ret_6mo_pct": "6mo Return %",
     "oi_skew": "Call OI Skew", "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
