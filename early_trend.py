@@ -183,22 +183,22 @@ BENCHMARK = "SPY"
 VOLATILITY_WINDOW = 20            # trading days for the realized-vol calc
 REFERENCE_VOLATILITY_PCT = 0.30   # "typical" stock's annualized realized vol -- the
                                    # baseline the fixed thresholds above are calibrated for
-MIN_VOLATILITY_PCT = 0.25         # hard floor -- excludes low-vol defensive names outright.
+MIN_VOLATILITY_PCT = 0.30         # hard floor -- excludes low-vol defensive names outright.
                                    # Lowered from 0.35 after backtest report 8 (post market-cap
                                    # fix) showed it as the #1 blocker on genuine, cap-eligible
                                    # trend misses (22%). Traced 5 examples (FCX, DBD, HALO,
-                                   # CGNX, ADUS): all sat at 30.8-34.8% realized vol -- short of
-                                   # the old 35% floor by as little as 0.2pp, but a full 8+
-                                   # points above ZBH's confirmed-defensive 16.6% (the case that
-                                   # motivated this filter existing at all). That's a real gap
-                                   # with room in it, not a boundary the floor needed to sit
-                                   # right against -- 0.25 clears all 5 examples with margin
-                                   # while staying well above ZBH. Now sits BELOW
-                                   # REFERENCE_VOLATILITY_PCT rather than above it, which is
-                                   # more coherent: the floor is a genuine minimum, the
-                                   # reference point is the "average" scaling anchor, and
-                                   # growth_score (not a hard gate) is what should downweight a
-                                   # merely-average-vol name relative to the more explosive ones.
+                                   # CGNX, ADUS): all sat at 30.8-34.8% realized vol. First cut
+                                   # went to 0.25 for "safety margin" against ZBH (16.6%) -- too
+                                   # far: the very next full backtest showed precision drop from
+                                   # 56% to 45%, the single biggest quality cost of any change
+                                   # this session, because 0.25 opened the gate to a whole 25-30%
+                                   # band never actually verified, not just the traced examples.
+                                   # Dialed back to 0.30 -- the tightest floor that still clears
+                                   # all 5 traced examples (lowest is ADUS at 30.8%) without the
+                                   # extra, unverified margin. Still sits at, not below,
+                                   # REFERENCE_VOLATILITY_PCT; growth_score (not this hard gate)
+                                   # is what should downweight a merely-average-vol name relative
+                                   # to a more explosive one. Re-validate precision after this.
 MAX_VOL_SCALE = 3.0                # cap on how much extra room an extreme-vol name gets --
                                    # deliberately NOT raised further to chase true parabolic
                                    # melt-ups (SNDK-style, 800%+ in 6mo); see module docstring
