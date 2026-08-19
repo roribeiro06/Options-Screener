@@ -23,24 +23,34 @@ backtest run showed the original was actually INVERTED (see its comment
 below) -- retune/re-validate anything here with backtest_early_trend.py
 rather than assuming it works.
 
-DELIBERATE SCOPE BOUNDARY, not a bug to fix later: after this rework, boom
-PRECISION jumped from 19% to 54% and Score's correlation with outcome flipped
-from slightly negative to slightly positive -- but the biggest individual
-misses (SNDK, SMCI, MU, WDC, DELL, MRVL, STX, AMD) were unchanged. Traced
-SNDK specifically through _evaluate_breakout_at: its realized volatility hit
-107-125% annualized and its 6-month return reached 870-1294% -- blowing
-through even the volatility-scaled extension caps (capped at MAX_VOL_SCALE =
-3x, i.e. ~150% max allowance). A true parabolic melt-up is a genuinely
-different chart pattern from a Stage-2 base breakout: by the time a stock is
-recognizably "about to 10x," it's usually already up hundreds of percent,
-which is exactly what the "don't chase an already-spiked name" extension
-caps exist to reject. Raising MAX_VOL_SCALE further would just trade this
-miss for letting through already-exhausted blow-off-top names instead of
-early ones. Decision (2026-08-18): accept this as out of scope rather than
-chase it -- this screen stays a base-breakout finder, not a parabolic-
-continuation ("high tight flag") finder, which would need its own separate
-rule set (short, shallow pullback tolerance instead of an 8-week base, and
-much looser extension tolerance) rather than being folded in here.
+REVISED SCOPE DECISION (2026-08-19, supersedes the 2026-08-18 note below):
+initially decided to accept missing SNDK-style parabolic moves as out of
+scope, since its realized volatility (107-125% annualized) and 6-month
+return (870-1294%) blew through even the volatility-scaled extension caps,
+and raising MAX_VOL_SCALE further looked like it would just trade this miss
+for letting through already-exhausted blow-off-tops instead of early moves.
+Revisited on request: the real distinction isn't the SIZE of the move, it's
+whether it was a single-catalyst spike (DRUG: 75% of its whole +5709% gain
+happened in ONE week -- a Pfizer-vaccine-announcement-style overnight
+re-rating) or a genuinely SUSTAINED multi-month climb the market kept
+re-rating over time (SNDK's actual path: $199->$409->$576->$635->$692->
+$1187->$1761->$2335 over ~6 months -- memory-chip/AI-supercycle names like
+this, not a one-day gap). See MAX_WEEK_CONCENTRATION_PCT and
+_is_sustained_move() below -- a move that clears the extension caps but is
+demonstrably NOT concentrated in any single week now gets an explicit
+exception instead of automatic rejection. Verified: SNDK now passes multiple
+times during its real April 2026 climb (ret_6mo up to 551%); DRUG and BNAI
+(confirmed single-catalyst spikes) still never pass during their actual
+spike windows -- DRUG does pass on some LATER, unrelated dates in 2025-2026,
+which is correct, not a leak: those are genuinely different, later setups in
+the same ticker's history, not the original spike being re-flagged.
+
+Original decision (2026-08-18, kept for context, no longer current): accept
+SNDK-style misses as out of scope rather than chase them by raising
+MAX_VOL_SCALE, since that would trade this miss for letting through already-
+exhausted blow-off-tops instead of early moves -- MAX_VOL_SCALE itself is
+UNCHANGED by the revision above; the fix was adding a duration/concentration-
+based exception, not loosening the existing magnitude-based caps further.
 
 No rules-based signal can guarantee catching a trend before it runs -- if it
 reliably could, it would get arbitraged away. backtest_early_trend.py re-runs
@@ -174,6 +184,27 @@ EXTENSION_LOOKBACK_DAYS_LONG = 126   # ~6 months -- catches names whose LAST 3 m
                                      # multi-month run before that; the 3-month cap alone
                                      # only protects against chasing the most recent leg.
 EXTENSION_CAP_PCT_LONG = 0.50        # starting default -- retune with backtest_early_trend.py
+
+# ---- Sustained trend exception (a gradual multi-month climb, not a spike) --
+# The extension caps above exist to reject a name that's "already spiked" --
+# but a stock that grinds up for months (memory-chip/AI-supercycle names:
+# SNDK, MU, WDC) is a fundamentally different pattern from one that spikes on
+# a single catalyst (DRUG: 75% of its whole move happened in ONE week; a
+# Pfizer-vaccine-announcement-style overnight gap). A flat return-over-window
+# number can't tell these apart -- decided (2026-08-19) to build that
+# distinction in, rather than treat every big multi-month gain as "already
+# spiked." WEEK_CONCENTRATION_DAYS/MAX_WEEK_CONCENTRATION check what fraction
+# of the total EXTENSION_LOOKBACK_DAYS_LONG gain is attributable to any single
+# best week -- verified on real cases: DRUG 75%, BNAI 17% (spikes) vs SNDK 5%,
+# LUMN 12% (already-accepted genuine trend). 0.15 sits with real margin on
+# both sides of that gap. A move clearing this bar is treated as SUSTAINED --
+# the extension caps are skipped for it entirely (not just loosened), since
+# the whole premise of those caps (someone is chasing a name AFTER it already
+# moved fast) doesn't apply to a trend the market has been re-rating for
+# months. A concentrated spike still gets rejected by the caps, unchanged.
+WEEK_CONCENTRATION_DAYS = 5          # ~1 trading week
+MAX_WEEK_CONCENTRATION_PCT = 0.15    # no single week may explain more than this
+                                      # fraction of the total gain, to count as sustained
 RS_WEEKS = 4
 RS_DAYS = RS_WEEKS * 5
 BENCHMARK = "SPY"
@@ -222,6 +253,25 @@ def _realized_vol(closes, window=VOLATILITY_WINDOW):
     rets = closes.pct_change().iloc[-window:]
     vol = rets.std()
     return float(vol * (252 ** 0.5)) if pd.notna(vol) else 0.0
+
+
+def _is_sustained_move(closes_window, total_gain):
+    """True if no single WEEK_CONCENTRATION_DAYS-day stretch within
+    `closes_window` explains more than MAX_WEEK_CONCENTRATION_PCT of
+    `total_gain` -- a gradual multi-month climb, not a single-catalyst spike.
+    See the module-level comment above MAX_WEEK_CONCENTRATION_PCT."""
+    if total_gain <= 0:
+        return False
+    vals = closes_window.values
+    n = len(vals)
+    if n <= WEEK_CONCENTRATION_DAYS:
+        return False   # window too short to judge -- don't grant the exception
+    max_week_gain = 0.0
+    for i in range(n - WEEK_CONCENTRATION_DAYS):
+        r = vals[i + WEEK_CONCENTRATION_DAYS] / vals[i] - 1
+        if r > max_week_gain:
+            max_week_gain = r
+    return (max_week_gain / total_gain) <= MAX_WEEK_CONCENTRATION_PCT
 
 
 def _candidate_pool(stats, universe):
@@ -316,14 +366,16 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     ret_3mo = None
     if n > EXTENSION_LOOKBACK_DAYS:
-        ret_3mo = price_now / float(closes.iloc[-EXTENSION_LOOKBACK_DAYS]) - 1
-        if ret_3mo > eff_extension_cap:
+        window_3mo = closes.iloc[-EXTENSION_LOOKBACK_DAYS:]
+        ret_3mo = price_now / float(window_3mo.iloc[0]) - 1
+        if ret_3mo > eff_extension_cap and not _is_sustained_move(window_3mo, ret_3mo):
             return None   # already spiked -- exactly what this screen is trying NOT to catch
 
     ret_6mo = None
     if n > EXTENSION_LOOKBACK_DAYS_LONG:
-        ret_6mo = price_now / float(closes.iloc[-EXTENSION_LOOKBACK_DAYS_LONG]) - 1
-        if ret_6mo > eff_extension_cap_long:
+        window_6mo = closes.iloc[-EXTENSION_LOOKBACK_DAYS_LONG:]
+        ret_6mo = price_now / float(window_6mo.iloc[0]) - 1
+        if ret_6mo > eff_extension_cap_long and not _is_sustained_move(window_6mo, ret_6mo):
             return None   # last 3 months looked fine, but it already had its bigger run before that
 
     if n <= 2 * RS_DAYS:

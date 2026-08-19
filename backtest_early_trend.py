@@ -338,11 +338,13 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     checks["volume"] = bool(avg_vol_50 > 0 and recent_vol_peak >= et.VOLUME_MULT * avg_vol_50)
 
     if n > et.EXTENSION_LOOKBACK_DAYS:
-        ret_3mo = price_now / float(closes.iloc[-et.EXTENSION_LOOKBACK_DAYS]) - 1
-        checks["ext_3mo"] = ret_3mo <= eff_extension_cap
+        window_3mo = closes.iloc[-et.EXTENSION_LOOKBACK_DAYS:]
+        ret_3mo = price_now / float(window_3mo.iloc[0]) - 1
+        checks["ext_3mo"] = ret_3mo <= eff_extension_cap or et._is_sustained_move(window_3mo, ret_3mo)
     if n > et.EXTENSION_LOOKBACK_DAYS_LONG:
-        ret_6mo = price_now / float(closes.iloc[-et.EXTENSION_LOOKBACK_DAYS_LONG]) - 1
-        checks["ext_6mo"] = ret_6mo <= eff_extension_cap_long
+        window_6mo = closes.iloc[-et.EXTENSION_LOOKBACK_DAYS_LONG:]
+        ret_6mo = price_now / float(window_6mo.iloc[0]) - 1
+        checks["ext_6mo"] = ret_6mo <= eff_extension_cap_long or et._is_sustained_move(window_6mo, ret_6mo)
 
     if n > 2 * et.RS_DAYS:
         ret_4w = price_now / float(closes.iloc[-et.RS_DAYS]) - 1

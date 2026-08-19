@@ -40,11 +40,15 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   names outright, and the base-range/extension/breakout-band thresholds scale up for a stock more
   volatile than a 30% baseline (capped at `MAX_VOL_SCALE` = 3x) instead of one fixed number for
   every stock. `early_trend.py` is the Streamlit-agnostic 3-stage engine (see its own module
-  docstring for the full rules, the Score formula, and a documented DELIBERATE scope boundary:
-  this screen does NOT try to catch true parabolic melt-ups like SNDK's 800%+-in-6mo run --
-  traced and confirmed via backtest that a stock that volatile blows through even the scaled
-  extension caps, and catching it would require a different rule set entirely, not a bigger
-  `MAX_VOL_SCALE`); the page file is a thin UI wrapper with its own criteria sidebar, following
+  docstring for the full rules and the Score formula. Extension caps (3mo/6mo "don't chase an
+  already-spiked name") now carry a SUSTAINED-MOVE exception: a move that's demonstrably spread
+  out (no single week explains more than `MAX_WEEK_CONCENTRATION_PCT` of the total gain --
+  `_is_sustained_move()`) skips the cap entirely, since a gradual multi-month re-rating
+  (SNDK/memory-chip-supercycle-style) is a fundamentally different pattern from a single-catalyst
+  spike (DRUG-style, 75% of its whole move in one week) even at the same total magnitude. Verified
+  SNDK now passes during its real climb while DRUG/BNAI still never pass during their actual spike
+  windows. `MAX_VOL_SCALE` itself is unchanged; the fix is duration/concentration-based, not a
+  bigger magnitude allowance; the page file is a thin UI wrapper with its own criteria sidebar, following
   the same `@st.cache_data(ttl=600)` pattern as the main app's `scan_*` functions. Reuses
   `discover.py`'s universe/batched-quotes/market-cap helpers and `wheel_screener.py`'s
   Tradier/yfinance helpers -- doesn't duplicate any of that plumbing. **`backtest_early_trend.py`**
