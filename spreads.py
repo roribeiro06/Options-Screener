@@ -68,7 +68,14 @@ SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "Breakeven",
                "AvgPremium", "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
-               "OpenInt", "EarningsDate"]
+               "OpenInt", "EarningsDate",
+               # Iron condor only -- each side's own best-case credit, NaN everywhere else.
+               # Not for display (always dropped from the visible table in
+               # 1_Options_Screener.py): exists purely so the click-to-copy summary can
+               # quote the put spread and call spread as two independent legs, since the
+               # user's broker has no native iron condor order type and has to place them
+               # as two separate spread orders anyway.
+               "Put Max Profit (Best)", "Call Max Profit (Best)"]
 PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
 
 
@@ -293,6 +300,10 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
                          credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr)
+        # Each side's own best-case credit (see SPREAD_COLS) -- not displayed,
+        # just carried through for the click-to-copy summary.
+        r["Put Max Profit (Best)"] = round(ps["credit_best"], 2)
+        r["Call Max Profit (Best)"] = round(cs["credit_best"], 2)
         if r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
             out.append(r)

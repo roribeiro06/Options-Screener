@@ -135,6 +135,21 @@ def _contract_summary(row):
     n_int = int(n) if pd.notna(n) else None
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
+    header = [str(row["Ticker"]),
+             f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
+             f"Expiration: {exp_txt}"]
+
+    # Iron condor: the table keeps it as one combined row, but the user's
+    # broker has no native iron condor order type -- it has to be placed as
+    # two separate spread orders, so format the summary that way too, each
+    # side with its own independent (best-case) premium.
+    if pd.notna(row.get("Put Max Profit (Best)")) and pd.notna(row.get("Call Max Profit (Best)")):
+        return "\n".join(header + [
+            "", "Put Spread", *_leg_lines(str(row["Put Legs"])),
+            f"Premium: ${row['Put Max Profit (Best)']:.2f}",
+            "", "Call Spread", *_leg_lines(str(row["Call Legs"])),
+            f"Premium: ${row['Call Max Profit (Best)']:.2f}",
+        ])
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
         # Single-leg (cash-secured put / covered call): always a sell-to-open,
@@ -157,20 +172,13 @@ def _contract_summary(row):
                 strike_lines.extend(_leg_lines(str(v)))
         if not strike_lines:
             strike_lines = ["-"]
-        # credit spread/iron condor: best-case (higher) side; long straddle/
+        # Put/call credit spread: best-case (higher) side; long straddle/
         # strangle: MaxLoss IS the debit paid, already the higher (ask) side.
+        # (Iron condor never reaches here -- handled separately above.)
         per_share = (row["Max Profit (Best)"] if pd.notna(row.get("Max Profit (Best)"))
                     else row.get("MaxLoss"))
-    prem_label = "Premium"
-
     prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
-
-    lines = [str(row["Ticker"]),
-             f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
-             f"Expiration: {exp_txt}"]
-    lines.extend(strike_lines)
-    lines.append(f"{prem_label}: {prem_txt}")
-    return "\n".join(lines)
+    return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"])
 
 
 def _selectable_table(raw_df, disp_df, key):
@@ -394,7 +402,11 @@ for _key, _title in _SPREAD_SECTIONS:
     st.subheader(_title)
     _sub = ds[ds["Strategy"] == _key] if len(ds) else ds
     if len(_sub):
-        _disp = _sub.drop(columns=["Strategy"])
+        # Iron condor's per-side best-case credit columns exist only so the
+        # click-to-copy summary can quote the put spread and call spread as
+        # two independent legs (see spreads.py SPREAD_COLS) -- never shown
+        # in the table itself, the row stays a single combined iron condor.
+        _disp = _sub.drop(columns=["Strategy", "Put Max Profit (Best)", "Call Max Profit (Best)"])
         for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
                 _disp = _disp.drop(columns=[_lc])
@@ -462,7 +474,8 @@ try:
         st.markdown("**Call Credit Spreads (defined-risk)**")
         _dc = sp._df(_vl.get("call_spreads", []))
         if len(_dc):
-            _disp = _dc.drop(columns=["Strategy", "Put Legs"])
+            _disp = _dc.drop(columns=["Strategy", "Put Legs",
+                                      "Put Max Profit (Best)", "Call Max Profit (Best)"])
             # Breakeven only means something for Long Straddle/Strangle -- this
             # section is call credit spreads only, so it's always "-"; drop it.
             if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
