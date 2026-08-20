@@ -196,6 +196,52 @@ Seven reports plus a closing caveat, in order:
   decision (new cost, new dependency) than anything else in this project.
   Not pursued further absent that decision being made deliberately.
 
+  CORRECTION, same day: "closed" above was too hasty -- caught by the user
+  pointing out the failed test simulated the WRONG usage pattern (fetch fresh
+  on every scan) for a signal that doesn't need sub-daily freshness (a 3-4wk
+  trend doesn't meaningfully shift hour to hour). Re-tested with a single
+  CLEAN attempt (not back-to-back with a prior one, which is what actually
+  tanked the earlier chunked retry -- that run was almost certainly still
+  paying the first call's cooldown, not proving chunking itself fails):
+  89% success (2,583/2,910) in 54s. That's genuinely usable for a ONCE-PER-
+  DAY cached refresh, the same pattern already used for this backtest's own
+  disk cache. Verdict softened: feasible as a once-daily background refresh,
+  not as a per-scan pull.
+
+  EFFECTIVENESS, tested with the feasibility question now answered: added a
+  trailing-4wk-return pool as a THIRD tier alongside the existing volume/gain
+  pools (using only already-cached historical data, no new Yahoo calls).
+  Result: positive, and the first ranking variant of four to actually work --
+  73.0% overall reachable (was 69.1%), 74.5% of the missed-good population
+  (was 70.8%). Makes sense given the missed-good population's defining trait
+  (a quiet, persistent move) is exactly what trailing return measures
+  directly, unlike any volume-based variant.
+
+  FULL END-TO-END CHECK (the real question, not just reachability): applied
+  the improved Stage 1 filter to Stage 2's actual flags and recomputed boom
+  recall/precision/Score-correlation the same way the main reports do --
+  revealing something bigger than the return-based question itself. TRUE
+  end-to-end boom recall (Stage 1 AND Stage 2 combined) is 35.2%, not the
+  ~49% reported throughout every round of tuning this session -- every prior
+  recall number measured Stage 2's rules in isolation, since building this
+  combined check was exactly the "much bigger effort" flagged as unattempted
+  from the start of this file's Stage-1 commentary. That's the real, honest
+  baseline for what the live app achieves, not a new regression -- nothing
+  about Stage 2's rules changed; the measurement just finally accounts for
+  Stage 1's gate. Against THAT baseline, adding the return-based tier moves
+  recall 35.2% -> 36.4% (+1.2pp), precision flat (51.9% -> 51.8%), but Score
+  correlation is slightly WORSE (peak +0.343 -> +0.334, current +0.214 ->
+  +0.206) -- small but consistent in both directions, not noise. A real but
+  modest net effect, well short of what the isolated +3.9pp reachability
+  number implied -- boom recall depends on the specific flags that catch
+  specific booms, a narrower bar than "any flag became reachable." Given the
+  real infra cost (new daily cache, ~10-15% pull failures to handle, a
+  slightly worse Score) against a +1.2pp recall gain, this doesn't clear the
+  bar every other shipped fix this session cleared (real gain, no cost
+  anywhere). Left as a documented, evidence-backed option, not shipped --
+  the user's call given it's a genuine engineering-effort-vs-gain tradeoff,
+  not a clear win or a clear rejection.
+
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
 the screen isn't just noise; it doesn't guarantee the edge repeats going
