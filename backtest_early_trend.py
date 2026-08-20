@@ -126,6 +126,24 @@ Seven reports plus a closing caveat, in order:
   those names, it isn't a variant of "rank by volume surge, averaged over a
   different window."
 
+  HOW GOOD IS WHAT STAGE 1 MISSES (checked 2026-08-20): raises the stakes on
+  the above rather than answering it. Split all tracked flags into reachable
+  vs. unreachable (same window-based methodology) and compared outcomes, not
+  just counts. Of the 2,379 unreachable flags, 1,220 (51%) were part of a real
+  boom -- 16% of every tracked flag in the whole backtest is a genuine missed
+  catch, not noise. More strikingly, the unreachable group's outcomes are
+  BETTER on average than the reachable group's: median peak gain +39.6% vs.
+  +31.1%, mean +102.4% vs. +56.8% (driven by real outliers -- HYMC +974%,
+  ONDS +972%, MXL +640-800% across several flags, DMRA +701%, SEZL +714%).
+  Likely explanation: a name that's never one of today's loudest volume/gain
+  movers is, close to by definition, less "discovered" yet -- and less
+  discovered means more room left to run. Stage 1's reachability limitation
+  isn't randomly dropping a third of the good stuff; it's structurally biased
+  toward filtering out exactly the quieter, earlier-stage names this screen
+  exists to find. Still no fix identified (see the ranking-criterion tests
+  above, both negative) -- this just means the open problem matters more than
+  it looked like when it was framed as a bare reachability percentage.
+
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
 the screen isn't just noise; it doesn't guarantee the edge repeats going
