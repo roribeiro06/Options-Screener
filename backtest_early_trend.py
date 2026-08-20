@@ -430,7 +430,7 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     if n > 2 * et.RS_DAYS:
         ret_4w = price_now / float(closes.iloc[-et.RS_DAYS]) - 1
         ret_prior_4w = float(closes.iloc[-et.RS_DAYS]) / float(closes.iloc[-2 * et.RS_DAYS]) - 1
-        checks["rs_accel"] = ret_4w > ret_prior_4w
+        checks["rs_accel"] = ret_4w > ret_prior_4w - et.RS_ACCEL_TOLERANCE_PP
         if spy_closes is not None:
             spy_upto = spy_closes.loc[:closes.index[-1]]
             if len(spy_upto) >= et.RS_DAYS:

@@ -295,6 +295,22 @@ MAX_WEEK_CONCENTRATION_PCT = 0.15    # no single week may explain more than this
                                       # fraction of the total gain, to count as sustained
 RS_WEEKS = 4
 RS_DAYS = RS_WEEKS * 5
+RS_ACCEL_TOLERANCE_PP = 0.02   # allow the last 4wk return to trail the prior 4wk return by up
+                               # to this much and still count as "accelerating enough" -- rs_accel
+                               # showed a real gap in backtest report 8's single-blocker sample
+                               # (2026-08-19): a tight cluster of 8/30 missed-boom examples sat
+                               # between 0 and -1.98pp of deceleration, then a clean 1.66pp jump
+                               # to a much wider, less-clustered tail (-3.64pp to -35.95pp). 2pp
+                               # captures the cluster without reaching into the tail. Deliberately
+                               # NOT converted to a full soft score factor (unlike window_high/
+                               # sma_rising) or given a larger tolerance -- this check is explicitly
+                               # what keeps the screen from degrading into a plain momentum
+                               # screener (see module docstring), and report 9's correlation
+                               # evidence for rs_accel only covers stocks that already passed this
+                               # gate (positive acceleration only, by construction) -- there's no
+                               # direct evidence for how far deceleration can be tolerated beyond
+                               # this cluster, so the tolerance stays small and evidence-bounded
+                               # rather than removing the gate altogether.
 BENCHMARK = "SPY"
 
 # ---- Growth vs. defensive: volatility floor + threshold scaling ------------
@@ -473,7 +489,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         return None
     ret_4w = price_now / float(closes.iloc[-RS_DAYS]) - 1
     ret_prior_4w = float(closes.iloc[-RS_DAYS]) / float(closes.iloc[-2 * RS_DAYS]) - 1
-    if not (ret_4w > ret_prior_4w):
+    if not (ret_4w > ret_prior_4w - RS_ACCEL_TOLERANCE_PP):
         return None   # not actually accelerating, just "up"
 
     spy_ret_4w = None
