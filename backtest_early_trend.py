@@ -115,11 +115,24 @@ Needs no Tradier token (yfinance-only, via wheel_screener._ticker). Takes a
 while to run (thousands of tickers x years of history) -- run it locally,
 not as part of the live app.
 """
+import os
 import sys
+import pickle
+import datetime as dt
 import statistics as stats
 from collections import Counter, defaultdict
 
 import pandas as pd
+
+# stdout defaults to block-buffered (not line-buffered) when redirected to a file --
+# a `python backtest_early_trend.py > log.txt` run's progress lines can sit in an
+# internal buffer for minutes before actually reaching the file, making `tail`/`grep`
+# on the log look frozen even while the run is progressing normally. Force line
+# buffering so redirected-output monitoring reflects real-time progress.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 import early_trend as et
 import discover
@@ -127,6 +140,72 @@ from sp500_tickers import SP500_TICKERS
 from russell2500_tickers import RUSSELL2500_TICKERS
 
 BACKTEST_UNIVERSE = sorted(set(SP500_TICKERS) | set(RUSSELL2500_TICKERS))
+
+# One backtest RUN evaluates the same price history against whatever rules are
+# currently in early_trend.py -- while tuning thresholds, that means re-running
+# against the same ~2,900 tickers' history several times in one session (as
+# happened 2026-08-19: two full runs plus a ~730-ticker sample, all within a
+# couple hours). Only the RULE EVALUATION needs to re-run each time (fast, local,
+# no network); the underlying OHLCV history from Yahoo Finance does not change
+# same-day. Without a cache, every run re-fetches everything from scratch --
+# slow, and repeated heavy same-day use visibly triggered Yahoo's own rate-
+# limiting that day (a run that normally finishes in ~9min stalled at a handful
+# of tickers after 15+min). This cache is same-day-scoped so a run on a LATER
+# day still picks up new trading days, and caches misses (delisted tickers) too
+# so they aren't re-requested every run. Scoped to the backtest only -- the live
+# scan (early_trend.run_scan(), via et._history_df with no caching) should
+# always fetch fresh data.
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".backtest_cache")
+
+
+def _cache_path(symbol, tag):
+    return os.path.join(CACHE_DIR, f"{symbol.replace('/', '_')}_{tag}.pkl")
+
+
+def _cache_read(path):
+    if not os.path.exists(path):
+        return None, False
+    try:
+        with open(path, "rb") as f:
+            cached_date, val = pickle.load(f)
+        if cached_date == dt.date.today().isoformat():
+            return val, True
+    except Exception:
+        pass   # corrupt/unreadable cache entry -- fall through and refetch
+    return None, False
+
+
+def _cache_write(path, val):
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump((dt.date.today().isoformat(), val), f)
+    except Exception as e:
+        print(f"{path}: cache write ERROR {e}", file=sys.stderr)
+
+
+def _cached_history_df(symbol, period):
+    path = _cache_path(symbol, period)
+    val, hit = _cache_read(path)
+    if hit:
+        return val
+    df = et._history_df(symbol, period=period)
+    _cache_write(path, df)
+    return df
+
+
+def _cached_market_cap(symbol):
+    # Same rationale as _cached_history_df -- discover.market_cap() is a second,
+    # separate yfinance network call per ticker (fast_info, not history), doubling
+    # the request volume per backtest run for no benefit within the same day.
+    path = _cache_path(symbol, "mcap")
+    val, hit = _cache_read(path)
+    if hit:
+        return val
+    mc = discover.market_cap(symbol)
+    _cache_write(path, mc)
+    return mc
+
 
 PERIOD = "3y"    # history window pulled per ticker
 STEP = 5          # sample every STEP trading days (weekly) when re-running the
@@ -315,7 +394,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     # here, so it's intentionally NOT in `checks` below (nothing to diagnose as a "blocker").
 
     price_now = float(closes.iloc[-1])
-    checks["price_above_sma"] = bool(pd.notna(sma_now) and price_now > sma_now)
+    checks["price_above_sma"] = bool(pd.notna(sma_now)
+                                     and price_now >= sma_now * (1 - et.PRICE_ABOVE_SMA_TOLERANCE_PCT))
 
     base_end = n - et.BREAKOUT_RECENT_DAYS
     base_start = base_end - et.BASE_DAYS
@@ -650,7 +730,7 @@ def main():
     print(f"Backtest universe: {len(BACKTEST_UNIVERSE)} tickers "
           f"({len(SP500_TICKERS)} S&P 500 + {len(RUSSELL2500_TICKERS)} Russell 2500, deduped), "
           f"period={PERIOD}, step={STEP}d")
-    spy_df = et._history_df("SPY", period=PERIOD)
+    spy_df = _cached_history_df("SPY", PERIOD)
     if spy_df is None:
         print("Could not fetch SPY history -- aborting", file=sys.stderr)
         sys.exit(1)
@@ -660,8 +740,9 @@ def main():
     skipped_by_cap = 0
     for idx, sym in enumerate(BACKTEST_UNIVERSE):
         try:
-            df = et._history_df(sym, period=PERIOD)
+            df = _cached_history_df(sym, PERIOD)
             if df is None or len(df) < 300:
+                print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: skipped (insufficient history)")
                 continue
             closes, volumes = df["Close"], df["Volume"]
 
@@ -672,7 +753,7 @@ def main():
             # outright, so boom DETECTION still runs on the full universe -- that's
             # what lets the recall report show the cap floor's own opportunity cost
             # separately from rule-tuning misses.
-            mc = discover.market_cap(sym)
+            mc = _cached_market_cap(sym)
             cap_ok = bool(mc and mc >= et.MIN_MARKET_CAP)
 
             hits = scan_flags(sym, closes, volumes, spy_closes)
@@ -703,10 +784,9 @@ def main():
                     diagnosed.append((sym, b, best))
             all_booms.extend(booms)
 
-            if hits or booms:
-                cap_note = "cap-ok" if cap_ok else f"BELOW ${et.MIN_MARKET_CAP:,.0f}, excluded"
-                print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: {len(hits)} flags ({cap_note}), "
-                      f"{len(booms)} booms ({sum(1 for b in booms if b['caught'])} caught)")
+            cap_note = "cap-ok" if cap_ok else f"BELOW ${et.MIN_MARKET_CAP:,.0f}, excluded"
+            print(f"[{idx + 1}/{len(BACKTEST_UNIVERSE)}] {sym}: {len(hits)} flags ({cap_note}), "
+                  f"{len(booms)} booms ({sum(1 for b in booms if b['caught'])} caught)")
         except Exception as e:
             print(f"{sym}: ERROR {e}", file=sys.stderr)
 

@@ -167,6 +167,34 @@ SMA_TREND_LOOKBACK = 10   # trading days back to confirm the SMA itself is risin
 # context) and the underlying gate stays soft, i.e. still not a hard pass/fail -- just no
 # longer part of the ranking formula. Whether the SMA is even COMPUTABLE at all (enough
 # history) remains a hard requirement -- that's a data availability question, not a signal.
+PRICE_ABOVE_SMA_TOLERANCE_PCT = 0.08   # price must be within this % BELOW the 150-day SMA
+                                       # (not just strictly above it) -- report 8 on the
+                                       # round-14 backtest surfaced price_above_sma as a
+                                       # top-4 blocker (10%) once window_high/sma_rising had
+                                       # been resolved. Sampled 23 cap-eligible single-blocker
+                                       # examples (2026-08-19): a clean cluster from -0.4% to
+                                       # -7.9% below the SMA (17/23), then a sharp gap to a
+                                       # riskier tail from -17.3% to -30.0% (6/23, e.g. CNC,
+                                       # GRAL -- names that had crashed hard and were
+                                       # rebounding, a materially different risk profile from
+                                       # "early move the slow average hasn't caught up to
+                                       # yet"). 8% sits right at the cluster's own tightest
+                                       # point (AGIO, -7.91%), capturing the whole cluster
+                                       # without reaching into the tail -- same "tightest
+                                       # defensible value, not extra margin" discipline as
+                                       # MIN_VOLATILITY_PCT's dial-back after its 0.25
+                                       # overshoot (see that constant's comment). Deliberately
+                                       # NOT converted to a soft score factor like window_high/
+                                       # sma_rising -- no evidence yet that "how far below the
+                                       # SMA" is itself predictive one way or the other, so a
+                                       # tolerance is the smaller, better-evidenced move here.
+                                       # Full backtest confirmed (2026-08-19): cap-eligible boom
+                                       # recall 44% -> 46%, precision held flat (51% -> 50%,
+                                       # within noise), Score correlation unchanged (+0.26/+0.26,
+                                       # still the top signal). price_above_sma's report-8 share
+                                       # dropped from a top-3 blocker (10%, 117 cases) to a minor
+                                       # one (4%, 42 cases), with no other blocker growing to
+                                       # take its place.
 BASE_WEEKS = 8
 BASE_DAYS = BASE_WEEKS * 5
 BASE_RANGE_PCT = 0.30     # the prior base must be range-bound within this high-low band
@@ -371,7 +399,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     sma_trend = (sma_now - sma_then) / sma_then if sma_then > 0 else 0.0
 
     price_now = float(closes.iloc[-1])
-    if not (price_now > sma_now):
+    if price_now < sma_now * (1 - PRICE_ABOVE_SMA_TOLERANCE_PCT):
         return None
 
     base_end = n - BREAKOUT_RECENT_DAYS

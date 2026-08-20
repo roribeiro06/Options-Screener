@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.backtest_cache/
 .venv/
 .streamlit/secrets.toml
 .claude/
