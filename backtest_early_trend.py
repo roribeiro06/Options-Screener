@@ -140,9 +140,45 @@ Seven reports plus a closing caveat, in order:
   discovered means more room left to run. Stage 1's reachability limitation
   isn't randomly dropping a third of the good stuff; it's structurally biased
   toward filtering out exactly the quieter, earlier-stage names this screen
-  exists to find. Still no fix identified (see the ranking-criterion tests
-  above, both negative) -- this just means the open problem matters more than
-  it looked like when it was framed as a bare reachability percentage.
+  exists to find.
+
+  WHAT DISTINGUISHES THE MISSED-GOOD NAMES, AND A THIRD FAILED FIX (checked
+  2026-08-20): compared market cap / baseline liquidity / price across three
+  groups -- reachable, "missed good" (unreachable + real boom), and
+  "unreachable other" (unreachable, no boom). Reachable names are ~2.5x
+  bigger cap and ~5x more liquid than EITHER unreachable group (median $8.94B
+  cap / $91.6M daily $ volume vs. ~$3.4-3.8B / ~$17M for both unreachable
+  groups) -- a real, mechanical bias: a mega-cap moving 3% generates more
+  absolute dollar volume than a $3B stock moving 40%, so Stage 1's raw-
+  volume-surge ranking structurally favors already-large, already-liquid
+  names. BUT the missed-good and unreachable-other groups look statistically
+  IDENTICAL on cap/liquidity/price -- so liquidity alone doesn't separate
+  good misses from bad ones within the unreachable population; loosening the
+  liquidity floor would pull in both proportionally, not selectively surface
+  winners.
+
+  Tested a concrete fix motivated by this: a LIQUIDITY-TIERED candidate pool,
+  reserving 35% of CANDIDATE_POOL specifically for a $25M-$75M daily-$-volume
+  band (ranked within that band, not against mega-caps) using data already in
+  Stage 1's existing batched call, no new per-ticker cost. Result: negative,
+  a wash (69.1% -> 69.0% overall reachable, 70.8% -> 70.5% of the genuinely-
+  good population). This is the THIRD variation on "rank by some flavor of
+  today's volume/price anomaly" to fail (single-day peak, 3-day-sustained,
+  now liquidity-tiered) -- a pattern, not bad luck. The missed-good
+  population's defining trait is a QUIET, persistent, moderate move, which by
+  definition isn't an outlier on any given day; reserving pool slots for
+  smaller-cap names just fills them with whichever small-cap DID have an
+  extreme day (news spikes, noise), crowding out the quietly-trending names
+  the same way mega-caps crowd them out of the unified ranking. Any surge/
+  anomaly-based ranking is structurally the wrong tool for finding sustained
+  accumulation, however it's sliced. A real fix would need Stage 1 to rank by
+  MULTI-WEEK price behavior across the whole ~7,000-ticker universe directly
+  (e.g. trailing 3-4wk return) instead of today's snapshot stats -- exactly
+  the kind of full-universe history pull the 3-stage funnel was designed to
+  avoid for cost/latency reasons. Not attempted -- a genuinely different,
+  bigger architectural question (new data source, real live-app cost
+  tradeoffs, unclear feasibility within Tradier's free/sandbox API limits),
+  not a ranking-criterion tweak.
 
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
