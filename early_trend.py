@@ -291,7 +291,7 @@ WINDOW_HIGH_SCORE_FLOOR = 0.5      # window_high went from a hard 2% tolerance -
                                    # weighting, since this is one backtest round's evidence for a
                                    # newly-flipped factor, not something to lean on heavily yet --
                                    # re-verify direction holds on the next full run.
-VOLUME_MULT = 1.35         # breakout-window peak volume vs 50-day average, required.
+VOLUME_MULT = 1.35         # breakout-window peak volume vs 50-day average.
                            # Lowered from 1.5 after report 8 (post volatility-floor fix) showed
                            # volume co-leading the remaining blockers (16%, near-tied with
                            # window_high). Sampled 25 cap-eligible single-blocker examples: no
@@ -302,6 +302,32 @@ VOLUME_MULT = 1.35         # breakout-window peak volume vs 50-day average, requ
                            # Given the 25% volatility-floor overshoot cost 11pp of precision,
                            # deliberately conservative here: 1.35 captures the clear cluster plus
                            # a bit more (~14/25 examples) without reaching into the weak tail.
+                           #
+                           # CONVERTED from a hard gate to a soft score factor (2026-08-20),
+                           # same playbook as window_high/sma_rising: no clean threshold to
+                           # widen (checked again, still smooth/gapless), one of the WEAKEST raw
+                           # correlations with outcome in every report 9 this whole session
+                           # (+0.06 to +0.08, near the bottom every time), and a concrete real
+                           # example (AAON, +102% boom) that never shows volume confirmation on
+                           # ANY day across its whole 80-day run-up despite genuinely elevated
+                           # volatility throughout -- a quiet-drift pattern the hard gate
+                           # structurally cannot catch, not a near-miss. Unlike window_high's
+                           # conversion, this one's outcome is genuinely uncertain going in: the
+                           # weak correlation could mean "this gate is filtering on real signal
+                           # the raw correlation doesn't capture" just as easily as "this gate
+                           # isn't adding anything." See VOLUME_SCORE_FLOOR below.
+                           #
+                           # VERDICT: positive, and the biggest single-round recall gain of the
+                           # whole session. Full backtest: cap-eligible recall 49.3% -> 53% (the
+                           # weak-correlation risk didn't materialize -- this WAS mostly filtering
+                           # on noise, not signal the raw correlation missed), precision flat
+                           # (50.7% -> 51.0%), Score correlation dipped slightly (+0.28/+0.27 ->
+                           # +0.27/+0.26, ~0.01 -- within the round-to-round noise band seen in
+                           # earlier rounds with no causal change). volume disappeared entirely
+                           # from report 8's blocker list, same as window_high/sma_rising did.
+VOLUME_SCORE_FLOOR = 0.5   # same role as WINDOW_HIGH_SCORE_FLOOR -- keeps a name with
+                           # genuinely weak volume from being crushed to a near-zero score by
+                           # this one factor alone, now that it's no longer a hard reject.
 EXTENSION_LOOKBACK_DAYS = 63   # ~3 months
 EXTENSION_CAP_PCT = 0.40   # exclude names already up more than this over the last
                            # EXTENSION_LOOKBACK_DAYS -- the explicit "don't chase an
@@ -507,8 +533,8 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())
-    if avg_vol_50 <= 0 or recent_vol_peak < VOLUME_MULT * avg_vol_50:
-        return None
+    if avg_vol_50 <= 0:
+        return None   # can't compute at all -- data availability, not a signal
 
     ret_3mo = None
     if n > EXTENSION_LOOKBACK_DAYS:
@@ -587,7 +613,11 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     # This hand-tuned formula generalizes better to the future than a model that was allowed
     # to freely weight the same inputs. Not revisited without materially more history to fit
     # on, or a different modeling approach entirely -- not just a re-run of this one.
-    volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 1.5)
+    #
+    # v3.2 (2026-08-20): volume converted from a hard gate to a soft factor, same reasoning
+    # as VOLUME_MULT's comment above -- floored at VOLUME_SCORE_FLOOR so a weak-volume name
+    # gets ranked down, not rejected outright.
+    volume_score = max(min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 1.5), VOLUME_SCORE_FLOOR)
     rs_score = 1.5 * max(ret_4w - (spy_ret_4w or 0.0), 0.0) + max(ret_4w - ret_prior_4w, 0.0)
     growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
     window_high_score = max(1.5 - window_high_ratio, WINDOW_HIGH_SCORE_FLOOR)

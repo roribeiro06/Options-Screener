@@ -77,9 +77,12 @@ with st.expander("Legend - how to read this table", expanded=False):
         "~2 trading weeks (positive = clearly inflecting upward), shown for context. A "
         "backtest run found this barely correlated with actual outcome either way, so it's "
         "not a Score factor -- just informational.\n"
-        "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. Must "
-        "clear \"Breakout volume >= X times 50-day avg\" -- confirms real buying interest, not "
-        "just drift on light volume.\n"
+        "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. No "
+        "longer a hard cutoff -- a backtest showed it was mostly filtering on noise, including "
+        "real, sizeable moves (a genuine winner that grinds up on unremarkable volume the "
+        "whole way, never spiking) that the old hard requirement would have rejected outright. "
+        "Now a Score factor instead: higher volume confirmation scores higher, weak volume "
+        "scores lower, but nothing is excluded outright over this alone.\n"
         "- **4wk Return % / Prior 4wk %** -- the acceleration check: the last ~4 weeks' return "
         "must beat the 4 weeks before that. This is what separates *speeding up* from merely "
         "*being up* -- a plain momentum screener only checks the second one.\n"
@@ -139,7 +142,7 @@ with st.sidebar:
         breakout_recent = st.number_input("Breakout must be within (trading days)", 1, 30, et.BREAKOUT_RECENT_DAYS)
         breakout_band = st.number_input("Max %% above pivot (still counts as fresh)", 1, 50,
                                         int(et.BREAKOUT_BAND_PCT * 100))
-        vol_mult = st.number_input("Breakout volume >= X times 50-day avg", 1.0, 5.0, et.VOLUME_MULT, 0.1)
+        vol_mult = st.number_input("Breakout volume target (x 50-day avg, scores higher above this, not a cutoff)", 1.0, 5.0, et.VOLUME_MULT, 0.1)
         ext_cap = st.number_input("Exclude if already up more than %% (3mo)", 5, 200,
                                   int(et.EXTENSION_CAP_PCT * 100))
         ext_cap_long = st.number_input("Exclude if already up more than %% (6mo)", 5, 300,

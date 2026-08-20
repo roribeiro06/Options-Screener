@@ -567,7 +567,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
 
     avg_vol_50 = float(volumes.iloc[-50:].mean())
     recent_vol_peak = float(volumes.iloc[base_end:].max())
-    checks["volume"] = bool(avg_vol_50 > 0 and recent_vol_peak >= et.VOLUME_MULT * avg_vol_50)
+    # volume is no longer a hard pass/fail gate either (converted 2026-08-20, same reasoning
+    # as sma_rising/window_high above) -- not in `checks` below for the same reason.
 
     if n > et.EXTENSION_LOOKBACK_DAYS:
         window_3mo = closes.iloc[-et.EXTENSION_LOOKBACK_DAYS:]
