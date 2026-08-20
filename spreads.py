@@ -58,7 +58,7 @@ ROR_ANN_MIN      = 0.25    # defined-risk: min annualized return-on-risk
 SPREAD_POP_MIN   = 0.70    # at least 70% POP (own band, independent of puts/calls)
 SPREAD_POP_MAX   = 1.0     # no upper cap
 SPREAD_DTE_MIN   = 7       # spreads have their OWN expiration window
-SPREAD_DTE_MAX   = 40      # no long-dated contracts
+SPREAD_DTE_MAX   = 60      # no long-dated contracts
 LONG_DTE_MAX     = 90      # long strangle/straddle's earnings-catalyst expiration can run past
                            # SPREAD_DTE_MAX (see screen_spreads), but not indefinitely
 SPREAD_MIN_OTM_OVER_IV = 0.15  # each short leg's OTM must be >= this fraction of its IV. 0 to disable.
