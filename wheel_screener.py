@@ -60,6 +60,12 @@ OPEN_POSITIONS = [
      "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17"},
     {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
      "contracts": 1, "entry_credit": 6.4999, "entry_date": "2026-08-17"},
+    # Put side of a planned iron condor -- call side not opened yet, so this
+    # is tracked as a plain put_spread until the call side is added.
+    {"ticker": "GOOG", "type": "put_spread", "short_strike": 305, "long_strike": 290,
+     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19"},
+    {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
+     "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
