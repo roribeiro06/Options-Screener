@@ -86,11 +86,34 @@ Seven reports plus a closing caveat, in order:
   opportunity cost as a separate, explicit number from rule-tuning misses.
   (Checked the Stage 1 liquidity floor too, MIN_DOLLAR_VOLUME -- the same 8
   examples all cleared it comfortably, so it wasn't added; a spot check, not
-  an exhaustive one.) Stage 1's actual candidate-pool SELECTION (today's
-  volume surge, live-only) remains untested here and would need a much larger
-  effort to backtest properly (simulating what the daily candidate list would
-  have looked like on every past trading day) -- a known, open limitation,
-  not one this backtest can currently answer.
+  an exhaustive one.)
+
+  STAGE 1 CANDIDATE-POOL REACHABILITY (checked 2026-08-19, not yet built into
+  this script's regular reports -- see that session's scratchpad
+  stage1_backtest.py / stage1_pool_size_test.py for the actual code): the
+  above closed the market-cap gap but left one more "is this rule quality or
+  is this an artifact of what the live app would never even see" question
+  open -- Stage 1's real candidate-pool SELECTION (today's top-by-volume-surge
+  + top-by-%-gain, live-only) had never been reconstructed against history at
+  all. Built an aligned date x ticker matrix from this backtest's own cached
+  OHLCV data (avg_volume computed on the 50 days BEFORE today, no lookahead)
+  to answer it directly: of all Stage-2 flags found in this backtest, 69%
+  would have been in Stage 1's candidate pool on at least one day during their
+  BREAKOUT_RECENT_DAYS "fresh" window -- i.e., actually reachable by the live
+  app at some point, not just a rules-in-isolation artifact. The remaining 31%
+  never would have been. Tested whether widening CANDIDATE_POOL/MOVER_POOL
+  fixes this: it doesn't, with sharply diminishing returns -- 1.5x the pool
+  size only recovers reachability to 73% (+4pp) for +47% more unique tickers
+  needing a live history pull per scan; even 3x only reaches 76% (+7pp) for
+  +175% more scan cost. This means the missing 31% mostly aren't near-misses
+  sitting just past the current cutoff -- their single best day's volume/gain
+  genuinely isn't competitive against the whole market's daily top movers, no
+  matter how far the list is extended. That points at Stage 1's RANKING
+  CRITERION itself (not its size) as the real limitation -- a genuinely
+  different, bigger redesign question (what should rank a candidate day-to-day
+  instead of/in addition to raw volume surge), left open rather than guessed
+  at without evidence. Pool sizes were deliberately NOT changed as a result of
+  this test.
 
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
