@@ -202,6 +202,27 @@ BREAKOUT_RECENT_DAYS = 10  # a breakout must have happened within this many trad
                            # days to still count as "fresh"
 BREAKOUT_BAND_PCT = 0.08   # ...and price must still be within this % above the pivot
                            # (the "not already extended past the breakout" filter)
+BREAKOUT_BAND_TOLERANCE_PP = 0.06   # extra absolute room ON TOP OF the (already vol-scaled)
+                                    # band above -- extension_band tied for #2 blocker (12%)
+                                    # in report 8 after price_above_sma was resolved. Sampled
+                                    # 30 cap-eligible single-blocker examples (2026-08-19) and
+                                    # found TWO different failure modes hiding under one check:
+                                    # 11/30 had NEGATIVE extension (price had pulled back
+                                    # BELOW the pivot on that sampled day -- a stalled/failed
+                                    # breakout, not an "already extended" one; deliberately NOT
+                                    # addressed here, since loosening the upper band can't fix
+                                    # a lower-bound problem and conflating the two would muddy
+                                    # what's actually being tuned). Of the remaining 19 genuinely
+                                    # "too far above pivot" cases, overage above each stock's own
+                                    # effective band clustered tightly from +0.8pp to +5.5pp
+                                    # (9/19), then a clean gap to a much wider, riskier tail from
+                                    # +8.3pp to +68.3pp (10/19, e.g. CRNX +68.3pp -- genuinely
+                                    # already-spiked, not early). 6pp captures the whole tight
+                                    # cluster without reaching into the tail. Added as a flat
+                                    # points addition (not a further multiplicative scale-up) so
+                                    # it doesn't compound with vol_scale -- a small, fixed grace
+                                    # margin regardless of how volatile the stock already made
+                                    # the band.
 BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new high --
                                # not just a new high relative to a shorter window. A
                                # shorter lookback can mistake a stock clawing back toward
@@ -419,8 +440,9 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     days_since = len(recent) - 1 - recent.index.get_loc(broke.index[0])
 
     extension = (price_now - pivot) / pivot
-    if not (0 <= extension <= eff_breakout_band):
-        return None   # either hasn't broken out, or already run too far past it
+    if not (0 <= extension <= eff_breakout_band + BREAKOUT_BAND_TOLERANCE_PP):
+        return None   # either hasn't broken out (or pulled back below the pivot), or
+                       # already run too far past it
 
     lookback_n = min(BREAKOUT_LOOKBACK_DAYS, n)
     window_high = float(closes.iloc[-lookback_n:].max())

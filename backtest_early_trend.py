@@ -408,7 +408,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     checks["broke_out"] = bool((recent > pivot).any())
 
     extension = (price_now - pivot) / pivot if pivot > 0 else None
-    checks["extension_band"] = bool(extension is not None and 0 <= extension <= eff_breakout_band)
+    checks["extension_band"] = bool(extension is not None
+                                    and 0 <= extension <= eff_breakout_band + et.BREAKOUT_BAND_TOLERANCE_PP)
 
     # window_high is likewise no longer a hard gate (same 2026-08-19 conversion) -- not in
     # `checks` below for the same reason as sma_rising above.
