@@ -571,6 +571,22 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     # v2's dropped freshness factor). Corrected here: window_high_score now rewards being
     # FARTHER from the 52wk high, not closer; sma_trend_score is dropped from the formula
     # entirely (sma_trend_pct is still computed/returned for display, just not scored).
+    #
+    # MULTI-VARIATE MODEL, tried and rejected (2026-08-20): the user asked, given a full
+    # rewrite of Score was on the table, whether a proper statistical model (fit weights
+    # across ALL raw signals at once, handling collinearity properly -- the "proper multi-
+    # variate check" this v2 note above said base_range_pct needed) would beat this hand-
+    # tuned formula. Built one: Ridge-regularized linear regression on all 12 raw signals,
+    # with a genuine TEMPORAL train/test split (train on flags through 2025-08-26, test on
+    # flags after -- unlike every threshold fix this session, which validated against the
+    # same window it was tuned on). Result: the model beat this formula IN-SAMPLE (+0.306 vs
+    # +0.284 correlation with outcome) but LOST to it on the held-out, genuinely unseen test
+    # period (+0.202 vs +0.216) -- textbook overfitting, and the cross-validated regularization
+    # search independently picked the strongest setting available, itself a sign there wasn't
+    # enough real linear signal in ~4,000 correlated flags to support a more flexible fit.
+    # This hand-tuned formula generalizes better to the future than a model that was allowed
+    # to freely weight the same inputs. Not revisited without materially more history to fit
+    # on, or a different modeling approach entirely -- not just a re-run of this one.
     volume_score = min(recent_vol_peak / avg_vol_50 / VOLUME_MULT, 1.5)
     rs_score = 1.5 * max(ret_4w - (spy_ret_4w or 0.0), 0.0) + max(ret_4w - ret_prior_4w, 0.0)
     growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
