@@ -172,13 +172,29 @@ Seven reports plus a closing caveat, in order:
   the same way mega-caps crowd them out of the unified ranking. Any surge/
   anomaly-based ranking is structurally the wrong tool for finding sustained
   accumulation, however it's sliced. A real fix would need Stage 1 to rank by
-  MULTI-WEEK price behavior across the whole ~7,000-ticker universe directly
-  (e.g. trailing 3-4wk return) instead of today's snapshot stats -- exactly
-  the kind of full-universe history pull the 3-stage funnel was designed to
-  avoid for cost/latency reasons. Not attempted -- a genuinely different,
-  bigger architectural question (new data source, real live-app cost
-  tradeoffs, unclear feasibility within Tradier's free/sandbox API limits),
-  not a ranking-criterion tweak.
+  MULTI-WEEK price behavior across the whole universe directly (e.g. trailing
+  3-4wk return) instead of today's snapshot stats -- exactly the kind of
+  full-universe history pull the 3-stage funnel was designed to avoid.
+
+  FEASIBILITY CHECKED AND CLOSED (2026-08-20): tested whether pulling recent
+  (2mo) price history for the whole S&P 500 + Russell 2500 universe (2,910
+  tickers, NOT the broader ~7,000-ticker live market -- the same fixed set
+  already used everywhere in this backtest) via a batched yf.download() is
+  fast enough for a live scan. One-shot batched call: 43s, but 463/2,910
+  tickers (16%) came back YFRateLimitError with no real data. Retried more
+  carefully -- chunked into 250-ticker batches with 2s pauses between them,
+  the "be polite about it" approach -- and it was dramatically WORSE (31/2,910,
+  1%, got real data), almost certainly because that run was still paying the
+  cooldown penalty from the first one moments earlier. That in itself is the
+  finding: this isn't a one-time hiccup, it's a rate budget that gets
+  exhausted and stays exhausted, and the live app would need this to work
+  reliably on EVERY refresh (every 10min TTL or a manual click), not once.
+  Free/unofficial yfinance access doesn't have the headroom for a routine
+  full-universe multi-week pull. VERDICT: this path is closed, not just
+  deprioritized -- a real fix would need a paid data provider with a proper
+  batched historical-data API and real rate limits, a different kind of
+  decision (new cost, new dependency) than anything else in this project.
+  Not pursued further absent that decision being made deliberately.
 
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
