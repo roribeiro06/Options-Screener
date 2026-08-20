@@ -435,7 +435,8 @@ def _diagnose_breakout_at(sym, closes, volumes, spy_closes):
     base_start = base_end - et.BASE_DAYS
     base_slice = closes.iloc[base_start:base_end]
     base_hi, base_lo = float(base_slice.max()), float(base_slice.min())
-    checks["base_range"] = bool(base_lo > 0 and (base_hi - base_lo) / base_lo <= eff_base_range)
+    checks["base_range"] = bool(base_lo > 0
+                                and (base_hi - base_lo) / base_lo <= eff_base_range + et.BASE_RANGE_TOLERANCE_PP)
     pivot = base_hi
 
     recent = closes.iloc[base_end:]

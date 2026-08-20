@@ -198,6 +198,17 @@ PRICE_ABOVE_SMA_TOLERANCE_PCT = 0.08   # price must be within this % BELOW the 1
 BASE_WEEKS = 8
 BASE_DAYS = BASE_WEEKS * 5
 BASE_RANGE_PCT = 0.30     # the prior base must be range-bound within this high-low band
+BASE_RANGE_TOLERANCE_PP = 0.02   # extra absolute room ON TOP OF the (vol-scaled) band above.
+                                 # base_range is a small, ~2% slice of remaining report-8
+                                 # misses, but checked anyway (2026-08-20) for completeness.
+                                 # Full-universe scan found only 12 cap-eligible single-blocker
+                                 # examples total -- a genuinely thin sample by this project's
+                                 # standards, but a clean pattern within it: 4/12 cluster from
+                                 # +0.8pp to +1.9pp past the effective cap, then a 7.3pp jump to
+                                 # a much wider, riskier group (+9.2pp to +91.8pp, e.g. AXTI
+                                 # +91.8pp with a +1477% boom -- a fundamentally different, much
+                                 # wider base shape, not a near-miss). 2pp captures the tight
+                                 # cluster without reaching the wider group.
 BREAKOUT_RECENT_DAYS = 10  # a breakout must have happened within this many trading
                            # days to still count as "fresh"
 BREAKOUT_BAND_PCT = 0.08   # ...and price must still be within this % above the pivot
@@ -473,7 +484,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         return None
     base_slice = closes.iloc[base_start:base_end]
     base_hi, base_lo = float(base_slice.max()), float(base_slice.min())
-    if base_lo <= 0 or (base_hi - base_lo) / base_lo > eff_base_range:
+    if base_lo <= 0 or (base_hi - base_lo) / base_lo > eff_base_range + BASE_RANGE_TOLERANCE_PP:
         return None
     pivot = base_hi
 
@@ -525,6 +536,10 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         spy_upto = spy_closes.loc[:closes.index[-1]]
         if len(spy_upto) >= RS_DAYS:
             spy_ret_4w = float(spy_upto.iloc[-1]) / float(spy_upto.iloc[-RS_DAYS]) - 1
+            # CHECKED, left as a hard cutoff (2026-08-20): full-universe scan for cap-eligible
+            # single-blocker misses found only 2 examples total (ASAN -0.86pp, SGI -2.21pp) --
+            # genuinely too thin a sample to derive any defensible tolerance from (2 points
+            # isn't a cluster). Left untouched rather than guess at a number with no evidence.
             if not (ret_4w > spy_ret_4w):
                 return None   # not actually outperforming the market
 
