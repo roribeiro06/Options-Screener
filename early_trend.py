@@ -223,6 +223,22 @@ BREAKOUT_BAND_TOLERANCE_PP = 0.06   # extra absolute room ON TOP OF the (already
                                     # it doesn't compound with vol_scale -- a small, fixed grace
                                     # margin regardless of how volatile the stock already made
                                     # the band.
+# NEGATIVE extension (price back BELOW the pivot on the sampled day) was deliberately left
+# alone when BREAKOUT_BAND_TOLERANCE_PP was added above -- it's a different failure mode than
+# being too far ABOVE the pivot (a stalled/failed breakout, or a normal shakeout/retest that's
+# still alive, vs. genuinely too extended). TESTED and REJECTED (2026-08-19): sampled 19 real
+# cap-eligible single-blocker cases with negative extension specifically. A 5% tolerance
+# (capturing 12/19 down to -4.52%) passed every reference-case check but the full backtest
+# showed a real precision cost (51% -> 48%, for only a 49% -> 51% recall gain). Dialed back to
+# a tighter 2% (the 8-example sub-cluster from -0.62% to -1.91%, with its own clean gap before
+# the next group at -3.50%) -- STILL a net cost (51% -> 49% precision for only 49% -> 50%
+# recall). Reverted both attempts; extension stays strictly >= 0. Unlike every other tolerance
+# added this session, this one actually demonstrated the "sampling only from confirmed eventual
+# booms, never from matched failures" blind spot that every threshold-tracing sample in this
+# project technically shares -- most of the time the full-backtest precision check absorbs that
+# risk without incident, but not here. Don't re-attempt this specific tolerance without a
+# genuinely different approach (e.g., distinguishing "shallow retest with volume holding up"
+# from "breakdown on rising volume" -- a shape question, not just a magnitude one).
 BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new high --
                                # not just a new high relative to a shorter window. A
                                # shorter lookback can mistake a stock clawing back toward
