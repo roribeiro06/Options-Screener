@@ -237,8 +237,20 @@ BREAKOUT_BAND_TOLERANCE_PP = 0.06   # extra absolute room ON TOP OF the (already
 # booms, never from matched failures" blind spot that every threshold-tracing sample in this
 # project technically shares -- most of the time the full-backtest precision check absorbs that
 # risk without incident, but not here. Don't re-attempt this specific tolerance without a
-# genuinely different approach (e.g., distinguishing "shallow retest with volume holding up"
-# from "breakdown on rising volume" -- a shape question, not just a magnitude one).
+# genuinely different approach -- e.g. distinguishing "shallow retest with volume holding up"
+# from "breakdown on rising volume", a SHAPE question, not just magnitude. That was tried too
+# (2026-08-20): scanned every sampled day across the WHOLE universe (unbiased, not drawn from
+# confirmed booms this time) for "everything passes except a shallow pullback" and split by
+# that day's own volume vs its 50-day average. Result: the "quiet retest is healthy" hypothesis
+# is backwards, not just unsupported -- the high-volume pullback group (n=1108) had a HIGHER
+# 21d median forward return (+1.9%) and positive rate (57%) than the low-volume group (n=1294,
+# +0.5%/52%), though the gap mostly closes by 63d. More importantly, NEITHER pullback group
+# clearly beat the real-flag benchmark (extension >= 0, n=8874, +0.8%/53% at 21d) at either
+# horizon. This explains the earlier magnitude-based rejection rather than contradicting it --
+# pullbacks genuinely underperform "still above pivot" flags regardless of the volume shape on
+# the way down. Extension_band's negative side is closed as a question for now: two genuinely
+# different approaches (magnitude tolerance, volume-shape) both tested properly and both came
+# back negative.
 BREAKOUT_LOOKBACK_WEEKS = 52   # a full year, so "new high" means a genuine new high --
                                # not just a new high relative to a shorter window. A
                                # shorter lookback can mistake a stock clawing back toward

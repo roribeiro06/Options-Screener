@@ -115,6 +115,17 @@ Seven reports plus a closing caveat, in order:
   at without evidence. Pool sizes were deliberately NOT changed as a result of
   this test.
 
+  Tried one concrete alternative ranking criterion (2026-08-20): 3-day trailing
+  SUSTAINED volume surge (3-day volume sum vs 3x the 50-day average) instead of
+  single-day peak volume surge, on the hypothesis that some of the unreachable
+  31% might be sustained-accumulation names that never have one single extreme
+  day. Result: negative. Used alone, the 3-day metric reached FEWER flags than
+  the current single-day metric (67% vs 69%); added as a second pool alongside
+  the current one, it only gained +1pp (69% -> 70%). The missing population
+  isn't a volume-signal-smoothing problem -- whatever would actually surface
+  those names, it isn't a variant of "rank by volume surge, averaged over a
+  different window."
+
 This is a RULES backtest, not a portfolio backtest -- no position sizing, no
 slippage, it never actually buys anything. A positive edge here is evidence
 the screen isn't just noise; it doesn't guarantee the edge repeats going
