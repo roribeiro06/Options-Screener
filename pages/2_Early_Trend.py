@@ -223,7 +223,7 @@ with st.sidebar:
 
     st.markdown("---")
     top_n = st.number_input(
-        "Show top N by Score", 5, 200, 20,
+        "Show top N by Score", 5, 200, 5,
         help="The rules find more real setups now than they used to (a backtest-validated "
              "accuracy improvement, not a bug) -- this just limits the table to the "
              "highest-ranked names instead of loosening the rules that found them."
