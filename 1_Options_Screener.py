@@ -126,6 +126,20 @@ def _leg_lines(text):
     return lines
 
 
+def _avg_max_range(lo, hi):
+    """'$avg-$hi' -- the target premium to quote an advisor: the midpoint
+    between worst- and best-case, not the conservative worst case alone, but
+    capped at the best case rather than assuming you'll always get it. E.g.
+    bid/ask $0.90/$1.10 -> "$1.00-$1.10". Degrades to a single number if only
+    one side is available (or they're equal)."""
+    if pd.isna(hi):
+        return f"${lo:.2f}" if pd.notna(lo) else "-"
+    if pd.isna(lo):
+        return f"${hi:.2f}"
+    avg = (lo + hi) / 2
+    return f"${hi:.2f}" if avg == hi else f"${avg:.2f}-${hi:.2f}"
+
+
 def _contract_summary(row):
     """Copy-paste summary for a financial advisor: Ticker / # of contracts /
     expiration date / Sell/Buy $strike Put or Call line(s) / premium. Built
@@ -142,13 +156,13 @@ def _contract_summary(row):
     # Iron condor: the table keeps it as one combined row, but the user's
     # broker has no native iron condor order type -- it has to be placed as
     # two separate spread orders, so format the summary that way too, each
-    # side with its own independent (best-case) premium.
+    # side with its own independent worst-to-best target premium.
     if pd.notna(row.get("Put Max Profit (Best)")) and pd.notna(row.get("Call Max Profit (Best)")):
         return "\n".join(header + [
             "", "Put Spread", *_leg_lines(str(row["Put Legs"])),
-            f"Premium: ${row['Put Max Profit (Best)']:.2f}",
+            f"Premium: {_avg_max_range(row.get('Put Max Profit'), row['Put Max Profit (Best)'])}",
             "", "Call Spread", *_leg_lines(str(row["Call Legs"])),
-            f"Premium: ${row['Call Max Profit (Best)']:.2f}",
+            f"Premium: {_avg_max_range(row.get('Call Max Profit'), row['Call Max Profit (Best)'])}",
         ])
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
@@ -158,11 +172,11 @@ def _contract_summary(row):
         # so Strike vs CurrentPrice alone tells us which one it is without
         # needing a separate type column (Contract Lookup doesn't carry one).
         # The rest of the app is worst-case (bid) throughout, but this summary
-        # is a starting point for what to tell the advisor -- use the higher
-        # end of the spread (Ask), not the conservative bid used elsewhere.
+        # is a target to quote the advisor -- the bid-to-ask midpoint through
+        # the ask, not the conservative bid used elsewhere.
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
         strike_lines = [f"Sell ${row['Strike']:g} {'Call' if is_call else 'Put'}"]
-        per_share = row.get("Ask")
+        prem_txt = _avg_max_range(row.get("Premium"), row.get("Ask"))
     else:
         # Multi-leg: one leg per line (vertical), spelled-out Put/Call.
         strike_lines = []
@@ -172,12 +186,14 @@ def _contract_summary(row):
                 strike_lines.extend(_leg_lines(str(v)))
         if not strike_lines:
             strike_lines = ["-"]
-        # Put/call credit spread: best-case (higher) side; long straddle/
-        # strangle: MaxLoss IS the debit paid, already the higher (ask) side.
-        # (Iron condor never reaches here -- handled separately above.)
-        per_share = (row["Max Profit (Best)"] if pd.notna(row.get("Max Profit (Best)"))
-                    else row.get("MaxLoss"))
-    prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
+        if pd.notna(row.get("Max Profit (Best)")):
+            # Put/call credit spread: worst-to-best target credit.
+            prem_txt = _avg_max_range(row.get("Max Profit"), row["Max Profit (Best)"])
+        else:
+            # Long straddle/strangle: MaxLoss IS the debit paid, a single
+            # number, not a worst/best range -- nothing to average.
+            per_share = row.get("MaxLoss")
+            prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
     return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"])
 
 
@@ -374,15 +390,26 @@ with st.form("lookup_form"):
     lk_go = st.form_submit_button("Search")
 
 if lk_go and lk_ticker:
+    # Persist the query, not just react to lk_go: a form_submit_button's True
+    # value only lasts for the one script run it was clicked on. Selecting a
+    # row below triggers its own on_select="rerun", and on that rerun lk_go
+    # is False again -- gating this whole section on it directly made the
+    # results (and the row you just clicked) disappear instead of showing
+    # the summary. Keying off session_state instead survives any rerun.
+    st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
+                                        lk_smax or None, lk_start, lk_end)
+
+_lq = st.session_state.get("lookup_query")
+if _lq:
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end = _lq
     try:
-        _res = scan_lookup(lk_ticker, lk_kind,
-                           lk_smin or None, lk_smax or None, lk_start, lk_end)
+        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end)
         if len(_res):
-            _label = "cash-secured put" if lk_kind == "put" else "covered call"
-            st.write(f"**{len(_res)} {_label} contracts** for {lk_ticker} ({lk_start} to {lk_end}).")
+            _label = "cash-secured put" if _q_kind == "put" else "covered call"
+            st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker} ({_q_start} to {_q_end}).")
             _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
             st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
-                               f"{lk_ticker}_{lk_kind}_lookup.csv", "text/csv")
+                               f"{_q_ticker}_{_q_kind}_lookup.csv", "text/csv")
         else:
             st.write("No sellable contracts in that range (for puts try strikes below the price; for calls, above).")
     except Exception as _e:
@@ -406,7 +433,8 @@ for _key, _title in _SPREAD_SECTIONS:
         # click-to-copy summary can quote the put spread and call spread as
         # two independent legs (see spreads.py SPREAD_COLS) -- never shown
         # in the table itself, the row stays a single combined iron condor.
-        _disp = _sub.drop(columns=["Strategy", "Put Max Profit (Best)", "Call Max Profit (Best)"])
+        _disp = _sub.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
+                                   "Call Max Profit", "Call Max Profit (Best)"])
         for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
                 _disp = _disp.drop(columns=[_lc])
@@ -474,8 +502,9 @@ try:
         st.markdown("**Call Credit Spreads (defined-risk)**")
         _dc = sp._df(_vl.get("call_spreads", []))
         if len(_dc):
-            _disp = _dc.drop(columns=["Strategy", "Put Legs",
-                                      "Put Max Profit (Best)", "Call Max Profit (Best)"])
+            _disp = _dc.drop(columns=["Strategy", "Put Legs", "Put Max Profit",
+                                      "Put Max Profit (Best)", "Call Max Profit",
+                                      "Call Max Profit (Best)"])
             # Breakeven only means something for Long Straddle/Strangle -- this
             # section is call credit spreads only, so it's always "-"; drop it.
             if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():

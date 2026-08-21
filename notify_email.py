@@ -139,7 +139,8 @@ def _spreads_html(ds):
             continue
         # Iron condor's per-side best-case credit columns exist only for the
         # app's click-to-copy summary (see spreads.py SPREAD_COLS) -- never shown.
-        disp = sub.drop(columns=["Strategy", "Put Max Profit (Best)", "Call Max Profit (Best)"])
+        disp = sub.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
+                                 "Call Max Profit", "Call Max Profit (Best)"])
         for lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
             if lc in disp.columns and (disp[lc].fillna("") == "").all():
                 disp = disp.drop(columns=[lc])
@@ -158,8 +159,9 @@ def _discover_html(dp, dspreads):
             return f"<h3>{title}</h3><p class='empty'>None qualify right now.</p>"
         return f"<h3>{title}</h3>{_table(df, fmt)}"
 
-    disp = (dspreads.drop(columns=["Strategy", "Put Legs",
-                                   "Put Max Profit (Best)", "Call Max Profit (Best)"])
+    disp = (dspreads.drop(columns=["Strategy", "Put Legs", "Put Max Profit",
+                                   "Put Max Profit (Best)", "Call Max Profit",
+                                   "Call Max Profit (Best)"])
            if len(dspreads) else dspreads)
     return (_section("Puts", dp, ws._fmt)
             + _section("Call Credit Spreads (defined-risk)", disp, sp._fmt))

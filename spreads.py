@@ -69,14 +69,14 @@ SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "E
                "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "Breakeven",
                "AvgPremium", "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
                "OpenInt", "EarningsDate",
-               # Iron condor only -- each side's own best-case credit, NaN everywhere else.
-               # Not for display (always dropped from the visible table in
+               # Iron condor only -- each side's own worst/best-case credit, NaN everywhere
+               # else. Not for display (always dropped from the visible table in
                # 1_Options_Screener.py): exists purely so the click-to-copy summary can
                # quote the put spread and call spread as two independent legs, since the
                # user's broker has no native iron condor order type and has to place them
                # as two separate spread orders anyway.
-               "Put Max Profit (Best)", "Call Max Profit (Best)"]
-PCT_COLS = {"OTM_%", "Width_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}
+               "Put Max Profit", "Put Max Profit (Best)", "Call Max Profit", "Call Max Profit (Best)"]
+PCT_COLS = {"OTM_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}   # Width_% is folded into Width in _fmt
 
 
 def _find_by_delta(chain, opt_type, target, tol):
@@ -300,9 +300,11 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
                          credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr)
-        # Each side's own best-case credit (see SPREAD_COLS) -- not displayed,
-        # just carried through for the click-to-copy summary.
+        # Each side's own worst/best-case credit (see SPREAD_COLS) -- not
+        # displayed, just carried through for the click-to-copy summary.
+        r["Put Max Profit"] = round(ps["credit"], 2)
         r["Put Max Profit (Best)"] = round(ps["credit_best"], 2)
+        r["Call Max Profit"] = round(cs["credit"], 2)
         r["Call Max Profit (Best)"] = round(cs["credit_best"], 2)
         if r["AnnROR_%"] >= ROR_ANN_MIN:
             seen.add(key)
@@ -602,9 +604,16 @@ def screen_spreads(symbol):
 def _df(rows):
     if not rows:
         return pd.DataFrame(columns=SPREAD_COLS)
-    # rank within each ticker by composite Score, same system as puts/calls
-    return pd.DataFrame(rows).sort_values(["Ticker", "Score"],
-                                          ascending=[True, False])[SPREAD_COLS]
+    # rank within each ticker by composite Score, same system as puts/calls.
+    # reindex (not plain [SPREAD_COLS] selection) because the iron-condor-only
+    # columns (Put/Call Max Profit (Best), etc.) don't exist at all in a rows
+    # list that's entirely put/call credit spreads or long straddle/strangle
+    # (e.g. Discover's call-credit-spread-only results) -- plain bracket
+    # indexing raises KeyError for a column missing from every row, reindex
+    # creates it filled with NaN instead, same as when the column IS present
+    # on some rows but NaN on others.
+    return (pd.DataFrame(rows).sort_values(["Ticker", "Score"], ascending=[True, False])
+           .reindex(columns=SPREAD_COLS))
 
 
 def _fmt(df):
@@ -645,7 +654,16 @@ def _fmt(df):
         d["MaxLoss"] = [_ml(v, n) for v, n in zip(d["MaxLoss"], d["# of contracts"])]
     elif "MaxLoss" in d.columns:
         d["MaxLoss"] = d["MaxLoss"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
-    for c in ("CurrentPrice", "Width"):
-        if c in d.columns:
-            d[c] = d[c].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
+    # Width: "$width (width % of price)" -- folds the old separate Width_% column in here.
+    if "Width" in d.columns and "Width_%" in d.columns:
+        def _w(v, p):
+            if pd.isna(v):
+                return "-"
+            return f"${v:.2f} ({p*100:.1f}%)" if pd.notna(p) else f"${v:.2f}"
+        d["Width"] = [_w(v, p) for v, p in zip(d["Width"], d["Width_%"])]
+        d = d.drop(columns=["Width_%"])
+    elif "Width" in d.columns:
+        d["Width"] = d["Width"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
+    if "CurrentPrice" in d.columns:
+        d["CurrentPrice"] = d["CurrentPrice"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
     return d
