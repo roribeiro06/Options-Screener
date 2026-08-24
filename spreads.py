@@ -625,6 +625,71 @@ def _blocked_by_open_position(strategy, occupied):
     return True   # Iron condor / Long Straddle / Long Strangle
 
 
+def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
+                   exp_start=None, exp_end=None):
+    """Manual lookup: every viable put_spread/call_spread for a ticker within
+    the given SHORT-strike and expiration range -- the long leg is auto-picked
+    at the live SPREAD_WIDTH_PCT, same as the main screener, but every listed
+    short strike is shown regardless of whether it passes the screener's POP/
+    AnnROR/OTM criteria or the MIN_OPEN_INTEREST floor. No delta targeting, no
+    earnings-window exclusion, no open-position-side filtering -- same "show
+    everything, you decide" ethos as wheel_screener.lookup_contracts."""
+    opt_type = "put" if kind == "put_spread" else "call"
+    price = ws.td_quote(symbol)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = ws.get_earnings_date(symbol)
+    today = dt.date.today()
+    strat = "Put credit spread" if kind == "put_spread" else "Call credit spread"
+    rows = []
+    for exp, exp_date, dte in _all_expirations(symbol, today):
+        if exp_start and exp_date < exp_start:
+            continue
+        if exp_end and exp_date > exp_end:
+            continue
+        chain = ws.td_chain(symbol, exp)
+        for short_strike in sorted({o["strike"] for o in chain if o["type"] == opt_type}):
+            # sell side only: OTM puts below price, OTM calls above -- same convention as lookup_contracts
+            if opt_type == "put" and short_strike >= price:
+                continue
+            if opt_type == "call" and short_strike <= price:
+                continue
+            if strike_min is not None and short_strike < strike_min:
+                continue
+            if strike_max is not None and short_strike > strike_max:
+                continue
+            short = _leg_at(chain, opt_type, short_strike)
+            if not short or (short.get("bid") or 0) <= 0:
+                continue
+            long_strike = _long_strike(chain, opt_type, short_strike)
+            if long_strike is None:
+                continue
+            long_leg = _leg_at(chain, opt_type, long_strike)
+            if not long_leg:
+                continue
+            width = abs(short_strike - long_strike)
+            if width <= 0:
+                continue
+            credit = (short["bid"] or 0) - (long_leg["ask"] or 0)          # worst case
+            credit_best = (short["ask"] or 0) - (long_leg["bid"] or 0)      # best case
+            max_loss = width - credit
+            if max_loss <= 0:
+                continue
+            pop = 1 - abs(short.get("delta") or 0)
+            iv = short.get("iv") or 0
+            otm = ((price - short_strike) / price if opt_type == "put"
+                  else (short_strike - price) / price)
+            oi = _leg_liquidity(short, long_leg)
+            if opt_type == "put":
+                put_legs, call_legs = f"sell {short_strike:g}P / buy {long_strike:g}P", ""
+            else:
+                put_legs, call_legs = "", f"sell {short_strike:g}C / buy {long_strike:g}C"
+            rows.append(_defined_row(symbol, price, exp, dte, earnings, strat, put_legs, call_legs,
+                                     credit, credit_best, width, max_loss, pop, iv, otm, oi))
+    return rows
+
+
 def _df(rows):
     if not rows:
         return pd.DataFrame(columns=SPREAD_COLS)

@@ -252,8 +252,11 @@ def scan_spreads(tickers, sc):
 
 @st.cache_data(ttl=600, show_spinner=True)
 def scan_lookup(ticker, kind, smin, smax, estart, eend):
-    rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
-    return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
+    if kind in ("put", "call"):
+        rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
+        return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
+    rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend)
+    return sp._df(rows)
 
 
 @st.cache_data(ttl=600)
@@ -375,12 +378,18 @@ if ec:
 st.markdown("---")
 st.header("Contract Lookup")
 st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
-           "(cash-secured puts) or calls (covered calls, as if you held the shares) - even ones that don't pass "
-           "the criteria above. Puts show strikes below the price, calls above it. Same stats (Score, yields, IV, liquidity).")
+           "(cash-secured puts), calls (covered calls, as if you held the shares), or put/call credit "
+           "spreads - even ones that don't pass the criteria above. Puts/put spreads show strikes below "
+           "the price, calls/call spreads above it. For spreads, Strike min/max filters the SHORT leg; "
+           "the long leg is auto-picked at the live Spread width % (sidebar). Same stats (Score, yields, "
+           "IV, liquidity) as everywhere else.")
 with st.form("lookup_form"):
-    _c1, _c2, _c3, _c4 = st.columns([1.2, 1, 1, 1])
+    _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
     lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
-    lk_kind = _c2.radio("Type", ["put", "call"], horizontal=True)
+    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread"], horizontal=True,
+                        format_func=lambda k: {"put": "Put", "call": "Call",
+                                               "put_spread": "Put Spread",
+                                               "call_spread": "Call Spread"}[k])
     lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
     lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
     _d1, _d2 = st.columns(2)
@@ -405,13 +414,24 @@ if _lq:
     try:
         _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end)
         if len(_res):
-            _label = "cash-secured put" if _q_kind == "put" else "covered call"
+            _label = {"put": "cash-secured put", "call": "covered call",
+                      "put_spread": "put credit spread", "call_spread": "call credit spread"}[_q_kind]
             st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker} ({_q_start} to {_q_end}).")
-            _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
+            if _q_kind in ("put", "call"):
+                _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
+            else:
+                _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit (Best)", "Call Max Profit (Best)"])
+                for _lk_lc in ("Put Legs", "Call Legs"):     # drop the always-empty side
+                    if _lk_lc in _lk_disp.columns and (_lk_disp[_lk_lc].fillna("") == "").all():
+                        _lk_disp = _lk_disp.drop(columns=[_lk_lc])
+                if "Breakeven" in _lk_disp.columns and (_lk_disp["Breakeven"] == "-").all():
+                    _lk_disp = _lk_disp.drop(columns=["Breakeven"])
+                _selectable_table(_res, sp._fmt(_lk_disp), "lookup_tbl")
             st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
                                f"{_q_ticker}_{_q_kind}_lookup.csv", "text/csv")
         else:
-            st.write("No sellable contracts in that range (for puts try strikes below the price; for calls, above).")
+            st.write("No sellable contracts in that range (for puts/put spreads try strikes below the price; "
+                     "for calls/call spreads, above).")
     except Exception as _e:
         st.error(f"Lookup failed: {_e}")
 
