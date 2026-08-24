@@ -553,6 +553,14 @@ def screen_spreads(symbol):
     all_exps = _all_expirations(symbol, today)
     expirations = [c for c in all_exps if SPREAD_DTE_MIN <= c[2] <= SPREAD_DTE_MAX]
 
+    # Don't suggest more of a strategy that would stack on top of a side
+    # you're already holding open on this ticker (OPEN_POSITIONS) -- e.g. an
+    # open put spread blocks new put spreads AND call spreads/iron condor/
+    # straddle/strangle here are excluded too (every strategy below except a
+    # plain put or call credit spread touches both sides). See
+    # ws.open_position_sides and the filter on `rows` below.
+    occupied = ws.open_position_sides(symbol)
+
     # Long strangle/straddle only ever use the SINGLE expiration closest to
     # (on or after) a confirmed catalyst date -- this ticker's own earnings,
     # OR (see _catalyst_dates) a related ticker's -- the standard way to
@@ -566,20 +574,23 @@ def screen_spreads(symbol):
     # capped at SPREAD_DTE_MAX -- but only up to LONG_DTE_MAX; a catalyst
     # further out than that is too far away to be worth tying up capital in
     # a long-premium position waiting for it. No known catalyst at all (own
-    # or peer) -> no expiration qualifies.
+    # or peer) -> no expiration qualifies. Skipped entirely when any side is
+    # already occupied -- straddle/strangle would just get filtered out below,
+    # so there's no point spending the catalyst search / extra chain fetch.
     long_exp, long_catalyst = None, None
     best = None
-    for cat_date, source in _catalyst_dates(symbol):
-        candidates = [c for c in all_exps if today <= cat_date <= c[1] and c[2] <= LONG_DTE_MAX]
-        if not candidates:
-            continue
-        cand = min(candidates, key=lambda c: (c[1] - cat_date).days)
-        dist = (cand[1] - cat_date).days
-        if best is None or dist < best[0]:
-            best = (dist, cand, cat_date, source)
-    if best is not None:
-        _, long_exp, cat_date, source = best
-        long_catalyst = f"{cat_date.isoformat()}" if source == symbol else f"{cat_date.isoformat()} (via {source})"
+    if not occupied:
+        for cat_date, source in _catalyst_dates(symbol):
+            candidates = [c for c in all_exps if today <= cat_date <= c[1] and c[2] <= LONG_DTE_MAX]
+            if not candidates:
+                continue
+            cand = min(candidates, key=lambda c: (c[1] - cat_date).days)
+            dist = (cand[1] - cat_date).days
+            if best is None or dist < best[0]:
+                best = (dist, cand, cat_date, source)
+        if best is not None:
+            _, long_exp, cat_date, source = best
+            long_catalyst = f"{cat_date.isoformat()}" if source == symbol else f"{cat_date.isoformat()} (via {source})"
 
     rows = []
     seen = set()
@@ -598,7 +609,20 @@ def screen_spreads(symbol):
         chain = ws.td_chain(symbol, exp)
         rows += _for_expiration_long(symbol, price, exp, dte, long_catalyst, chain)
 
+    if occupied:
+        rows = [r for r in rows if not _blocked_by_open_position(r["Strategy"], occupied)]
     return rows
+
+
+def _blocked_by_open_position(strategy, occupied):
+    """Put/call credit spread only conflicts with its own side; every other
+    strategy here (iron condor, long straddle, long strangle) touches both
+    sides, so either side already occupied blocks it."""
+    if strategy == "Put credit spread":
+        return "put" in occupied
+    if strategy == "Call credit spread":
+        return "call" in occupied
+    return True   # Iron condor / Long Straddle / Long Strangle
 
 
 def _df(rows):

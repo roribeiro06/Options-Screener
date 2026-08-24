@@ -507,6 +507,25 @@ def avg_premium_range(symbol, otm, dte, kind="put", iv=None):
     return _lookup()
 
 
+def open_position_sides(symbol):
+    """Which side(s) -- 'put', 'call' -- already have an open position on this
+    ticker, from OPEN_POSITIONS. Used to keep the screener (puts/calls/spreads,
+    including Discover) from suggesting more of the same directional exposure
+    on a ticker you're already committed to -- e.g. an open INTC put spread
+    blocks new INTC puts/put spreads, but INTC call spreads still show.
+    Contract Lookup deliberately ignores this -- it's a manual override tool
+    for looking up any strike/expiration regardless of screener criteria."""
+    sides = set()
+    for p in OPEN_POSITIONS:
+        if p["ticker"] != symbol:
+            continue
+        if p["type"] in ("put", "put_spread"):
+            sides.add("put")
+        elif p["type"] in ("call", "call_spread"):
+            sides.add("call")
+    return sides
+
+
 def contracts_for_target(cash_per_contract, target=None):
     """How many contracts (whole number) to tie up at least `target` dollars of capital."""
     t = CASH_TARGET if target is None else target
@@ -780,6 +799,8 @@ def _best_per_expiration(rows):
 
 
 def screen_puts(symbol):
+    if "put" in open_position_sides(symbol):   # already holding put-side exposure here
+        return [], []
     price = td_quote(symbol)
     if not price:
         raise RuntimeError("no quote")
@@ -819,6 +840,8 @@ def screen_puts(symbol):
 
 
 def screen_calls(symbol, cost_basis):
+    if "call" in open_position_sides(symbol):   # already holding call-side exposure here
+        return [], []
     price = td_quote(symbol)
     if not price:
         raise RuntimeError("no quote")
