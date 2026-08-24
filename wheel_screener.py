@@ -61,10 +61,13 @@ OPEN_POSITIONS = [
      "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17"},
     {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
      "contracts": 1, "entry_credit": 6.4999, "entry_date": "2026-08-17"},
-    # Put side of a planned iron condor -- call side not opened yet, so this
-    # is tracked as a plain put_spread until the call side is added.
+    # Iron condor -- tracked as separate put_spread/call_spread entries since
+    # OPEN_POSITIONS has no combined iron_condor type. Put side opened
+    # 08/19/2026; call side (below) completed it on 08/24/2026.
     {"ticker": "GOOG", "type": "put_spread", "short_strike": 305, "long_strike": 290,
      "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19"},
+    {"ticker": "GOOG", "type": "call_spread", "short_strike": 385, "long_strike": 405,
+     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.839971, "entry_date": "2026-08-24"},
     {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
      "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
     {"ticker": "DKNG", "type": "call", "strike": 27.5, "expiration": "2026-09-18",
@@ -73,6 +76,8 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-18", "contracts": 30, "entry_credit": 1.049913, "entry_date": "2026-08-21"},
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
      "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21"},
+    {"ticker": "TSM", "type": "put", "strike": 380, "expiration": "2026-09-18",
+     "contracts": 2, "entry_credit": 4.8999, "entry_date": "2026-08-24"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
