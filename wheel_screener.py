@@ -67,6 +67,12 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19"},
     {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
      "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
+    {"ticker": "DKNG", "type": "call", "strike": 27.5, "expiration": "2026-09-18",
+     "contracts": 11, "entry_credit": 0.668782, "entry_date": "2026-08-21"},
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 150, "long_strike": 155,
+     "expiration": "2026-09-18", "contracts": 30, "entry_credit": 1.049913, "entry_date": "2026-08-21"},
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
+     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
