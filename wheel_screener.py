@@ -531,6 +531,35 @@ def open_position_sides(symbol):
     return sides
 
 
+_SECTOR_CACHE = {}
+# GICS "Technology" plus "Communication Services" -- GOOG/META land in the
+# latter under GICS, but this app's own PEER_TICKERS already treats them as
+# part of the same tech cluster as MSFT/AMZN/AAPL, so the Concentration of
+# Positions table follows the same judgment rather than the raw GICS split.
+TECH_SECTORS = {"Technology", "Communication Services"}
+
+
+def get_sector_bucket(symbol):
+    """'Tech' or 'Non-Tech' for this ticker, for the Concentration of
+    Positions table. Stocks carry a GICS "sector" via yfinance; ETFs don't,
+    so falls back to "category" (e.g. SMH has no sector but category
+    "Technology"). Cached in-process (module-level dict) since this barely
+    changes and yfinance's .info call is slow -- shared across
+    notify_email.py and the Streamlit app, unlike Streamlit's own
+    st.cache_data, which only exists in the app process."""
+    if symbol in _SECTOR_CACHE:
+        return _SECTOR_CACHE[symbol]
+    bucket = "Non-Tech"
+    try:
+        info = _ticker(symbol).info
+        if (info.get("sector") or info.get("category")) in TECH_SECTORS:
+            bucket = "Tech"
+    except Exception:
+        pass
+    _SECTOR_CACHE[symbol] = bucket
+    return bucket
+
+
 def contracts_for_target(cash_per_contract, target=None):
     """How many contracts (whole number) to tie up at least `target` dollars of capital."""
     t = CASH_TARGET if target is None else target

@@ -269,6 +269,11 @@ def scan_positions():
     return positions.build_positions_table()
 
 
+@st.cache_data(ttl=3600, show_spinner=True)
+def scan_concentration():
+    return positions.build_concentration_table()
+
+
 @st.cache_data(ttl=600, show_spinner=True)
 def scan_closed_positions():
     return positions.build_closed_positions_table()
@@ -576,6 +581,23 @@ try:
         st.caption("Skipped: " + " | ".join(_epos))
 except Exception as _e:
     st.caption(f"(positions unavailable: {_e})")
+
+st.markdown("---")
+st.header("Concentration of Positions")
+st.caption("Every OPEN_POSITIONS entry's MaxLoss (same figure as the Open Positions table's own MaxLoss "
+           "column above), broken out by sector -- **Tech** vs **Non-Tech**, via each ticker's yfinance "
+           "GICS sector (Technology **and** Communication Services both count as Tech, since GOOG/META "
+           "land in the latter under GICS but this app's own peer-correlation list already treats them as "
+           "part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH have no sector and fall back to "
+           "their category instead) -- by **Put** / **Call** / **Multi-Leg** (all spreads/condors), same "
+           "split as the Financials tables. Each cell is $total (% of your total MaxLoss across every open "
+           "position) -- how concentrated your worst-case risk is in one corner of the book. A covered call "
+           "with no cost basis in `HOLDINGS` (undefined MaxLoss) is excluded from every sum, same as "
+           "Financials. Sector lookups are cached for an hour since they barely change.")
+try:
+    st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
+except Exception as _e:
+    st.caption(f"(concentration unavailable: {_e})")
 
 st.markdown("---")
 st.header("Closed Positions (last 30 days)")

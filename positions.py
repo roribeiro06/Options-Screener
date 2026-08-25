@@ -397,3 +397,45 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     entries = (_pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
               + _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today))
     return _pivot_table("G/L (Unrealized + Realized)", gl, entries)
+
+
+CONCENTRATION_ROWS = ["Tech", "Non-Tech"]
+
+
+def build_concentration_table():
+    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss
+    (same convention as the Open Positions table's own MaxLoss column --
+    _max_loss_per_share, NOT the risk-scaled _pivot_max_loss_per_share the
+    Financials tables use) broken out by sector (ws.get_sector_bucket --
+    Tech vs Non-Tech) x strategy (Put/Call/Multi-Leg, via
+    _TYPE_LABEL_TO_PIVOT), each cell shown as "$total (X%)" of the grand
+    total across every position -- how much of your worst-case risk sits in
+    one corner of the book. Total row/column included. A position with an
+    undefined Max Loss (a covered call with no HOLDINGS cost basis) is
+    excluded from every sum, same as the Financials tables above."""
+    import pandas as pd
+    cols = PIVOT_COLS + ["Total"]
+    rows_ = CONCENTRATION_ROWS + ["Total"]
+    grid = {r: {c: 0.0 for c in cols} for r in rows_}
+
+    for pos in ws.OPEN_POSITIONS:
+        b = _TYPE_LABEL_TO_PIVOT.get(TYPE_LABELS.get(pos["type"]))
+        if not b:
+            continue
+        loss = _max_loss_per_share(pos)
+        if loss != loss:
+            continue
+        loss_total = loss * 100 * pos["contracts"]
+        sector = ws.get_sector_bucket(pos["ticker"])
+        for r in (sector, "Total"):
+            grid[r][b] += loss_total
+            grid[r]["Total"] += loss_total
+
+    grand_total = grid["Total"]["Total"]
+
+    def _cell(v):
+        pct = (v / grand_total) if grand_total else float("nan")
+        return f"{_fmt_dollar(v)} ({_fmt_pct(pct)})"
+
+    return pd.DataFrame([(r, *[_cell(grid[r][c]) for c in cols]) for r in rows_],
+                        columns=["Sector"] + cols)
