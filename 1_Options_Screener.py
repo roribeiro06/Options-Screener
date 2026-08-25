@@ -269,6 +269,11 @@ def scan_positions():
     return positions.build_positions_table()
 
 
+@st.cache_data(ttl=600, show_spinner=True)
+def scan_premium_change():
+    return positions.build_premium_change_table()
+
+
 @st.cache_data(ttl=3600, show_spinner=True)
 def scan_concentration():
     return positions.build_concentration_table()
@@ -581,6 +586,25 @@ try:
         st.caption("Skipped: " + " | ".join(_epos))
 except Exception as _e:
     st.caption(f"(positions unavailable: {_e})")
+
+st.markdown("---")
+st.header("Premium: Today vs Yesterday")
+st.caption("The contract's own price (NOT MaxLoss/risk) for every open put and every open call, today vs "
+           "yesterday -- e.g. an NVDA 230 put priced at \\$3.50 yesterday and \\$3.00 today. **Today** = "
+           "live ask (cost to buy the contract back right now, same basis as Open Positions' own "
+           "CostToClose). **Yesterday** = that contract's own prevclose from the same live quote -- no "
+           "separate snapshot needed. A position opened TODAY has no real \"yesterday\" -- excluded from "
+           "yesterday's total (but still counted in today's), so the two totals reflect what you actually "
+           "held on each day, not a hypothetical same-basket comparison. Puts and calls only -- a spread "
+           "has two legs, so there's no single contract price to compare. Same refresh cadence as the rest "
+           "of the app.")
+try:
+    _dprem, _eprem = scan_premium_change()
+    st.dataframe(_dprem, hide_index=True, use_container_width=True)
+    if _eprem:
+        st.caption("Skipped: " + " | ".join(_eprem))
+except Exception as _e:
+    st.caption(f"(premium change unavailable: {_e})")
 
 st.markdown("---")
 st.header("Concentration of Positions")

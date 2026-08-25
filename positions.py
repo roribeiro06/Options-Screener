@@ -453,3 +453,55 @@ def build_concentration_table():
 
     return pd.DataFrame([(r, *[_cell(grid[r][c]) for c in cols]) for r in rows_],
                         columns=["Sector"] + cols)
+
+
+def build_premium_change_table():
+    """Total premium (the contract's own price, NOT MaxLoss/risk) of open
+    puts and open calls, today vs yesterday -- e.g. an NVDA 230 put priced
+    at $3.50 yesterday and $3.00 today. Today = live ask (cost to buy the
+    contract back right now, same basis as Open Positions' own CostToClose
+    column); yesterday = that contract's own prevclose, straight from the
+    same live chain fetch Tradier already returns -- no separate snapshot/
+    database needed. A position opened TODAY has no real "yesterday" -- it's
+    excluded from yesterday's total (but still counted in today's), so the
+    two totals reflect what you actually held on each day, not a
+    hypothetical same-basket comparison. Puts and calls only, not spreads --
+    a multi-leg position has two legs, so there's no single contract price
+    to compare the way there is for a plain put/call. A contract with no
+    prevclose available (illiquid/newly listed) is skipped from that side's
+    yesterday sum rather than counted as $0. Returns (dataframe, errors)."""
+    import pandas as pd
+    today = dt.date.today()
+    totals = {"Put": {"today": 0.0, "yesterday": 0.0},
+             "Call": {"today": 0.0, "yesterday": 0.0}}
+    errs = []
+    for pos in ws.OPEN_POSITIONS:
+        kind = pos["type"]
+        if kind not in ("put", "call"):
+            continue
+        bucket = "Put" if kind == "put" else "Call"
+        ticker, strike, exp, contracts = pos["ticker"], pos["strike"], pos["expiration"], pos["contracts"]
+        try:
+            chain = ws.td_chain(ticker, exp)
+            if not chain:
+                raise RuntimeError("no option chain (expired or invalid expiration?)")
+            leg = _leg_prices(chain, kind, strike)
+            if not leg:
+                raise RuntimeError("contract not found")
+        except Exception as e:
+            errs.append(f"{ticker} {strike:g}{kind[0].upper()} {exp}: {e}")
+            continue
+        _bid, ask, prevclose = leg
+        totals[bucket]["today"] += ask * 100 * contracts
+        entry_date_str = pos.get("entry_date")
+        opened_today = bool(entry_date_str) and dt.date.fromisoformat(entry_date_str) == today
+        if not opened_today and prevclose:
+            totals[bucket]["yesterday"] += prevclose * 100 * contracts
+
+    rows = []
+    for bucket in ("Put", "Call"):
+        y, t = totals[bucket]["yesterday"], totals[bucket]["today"]
+        change = t - y
+        pct = (change / y) if y else float("nan")
+        rows.append((bucket, _fmt_dollar(y), _fmt_dollar(t), _fmt_dollar_signed(change), _fmt_pct(pct)))
+    return pd.DataFrame(rows, columns=["Type", "Yesterday", "Today", "Change $", "Change %"]), errs
