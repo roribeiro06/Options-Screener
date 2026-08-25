@@ -593,7 +593,7 @@ st.caption("Every OPEN_POSITIONS entry's Max Loss, cross-tabbed by sector -- **T
            "**Put** vs **Call** (put spreads join plain puts, call spreads join plain calls, not a "
            "separate Multi-Leg bucket -- a put spread is still bullish-put-side risk; an iron condor's "
            "two legs, tracked as separate put_spread/call_spread entries in OPEN_POSITIONS, split across "
-           "both columns accordingly). Each cell packs two figures: Max Loss on the left, \"$total (X%)\" "
+           "both columns accordingly). Each cell packs two figures: Max Loss on the left, \"\\$total (X%)\" "
            "of your total Max Loss across every position -- the SAME risk-scaled convention every "
            "Financials table above already uses (covered calls excluded entirely, a stock-to-zero worst "
            "case being unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in "
