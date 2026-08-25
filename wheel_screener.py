@@ -538,17 +538,32 @@ _SECTOR_CACHE = {}
 # Positions table follows the same judgment rather than the raw GICS split.
 TECH_SECTORS = {"Technology", "Communication Services"}
 
+# Manual overrides -- win over both the sector/category lookup below,
+# same "manual entry wins" precedent as EARNINGS_DATES. For names where the
+# raw GICS/category classification misses the real tech exposure:
+#   SPCX: GICS "Industrials" (aerospace) -- but the business is a tech
+#     company (reusable rockets, Starlink satellite internet), not a
+#     traditional industrial/manufacturing name.
+#   EWY:  category "Focused Region" (South Korea), not tech at all by
+#     category -- but its two largest holdings, Samsung Electronics and SK
+#     Hynix, are both massive AI-memory chipmakers, so its return stream is
+#     effectively a memory/AI-chip proxy, not a generic country fund.
+SECTOR_OVERRIDES = {"SPCX": "Tech", "EWY": "Tech"}
+
 
 def get_sector_bucket(symbol):
     """'Tech' or 'Non-Tech' for this ticker, for the Concentration of
-    Positions table. Stocks carry a GICS "sector" via yfinance; ETFs don't,
-    so falls back to "category" (e.g. SMH has no sector but category
-    "Technology"). Cached in-process (module-level dict) since this barely
-    changes and yfinance's .info call is slow -- shared across
-    notify_email.py and the Streamlit app, unlike Streamlit's own
-    st.cache_data, which only exists in the app process."""
+    Positions table. SECTOR_OVERRIDES wins first; otherwise stocks carry a
+    GICS "sector" via yfinance, ETFs don't so falls back to "category" (e.g.
+    SMH has no sector but category "Technology"). Cached in-process
+    (module-level dict) since this barely changes and yfinance's .info call
+    is slow -- shared across notify_email.py and the Streamlit app, unlike
+    Streamlit's own st.cache_data, which only exists in the app process."""
     if symbol in _SECTOR_CACHE:
         return _SECTOR_CACHE[symbol]
+    if symbol in SECTOR_OVERRIDES:
+        _SECTOR_CACHE[symbol] = SECTOR_OVERRIDES[symbol]
+        return SECTOR_OVERRIDES[symbol]
     bucket = "Non-Tech"
     try:
         info = _ticker(symbol).info
