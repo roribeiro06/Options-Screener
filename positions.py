@@ -410,89 +410,66 @@ _TYPE_TO_CONCENTRATION_BUCKET = {"put": "Put", "put_spread": "Put",
                                  "call": "Call", "call_spread": "Call"}
 
 
+CONCENTRATION_METRICS = ["Max Loss", "Premium Yesterday", "Premium Today",
+                         "Premium Change $", "Premium Change %"]
+
+
 def build_concentration_table():
-    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss --
-    _pivot_max_loss_per_share, the SAME risk-scaled convention every
-    Financials table on this page already uses: covered calls are NaN (a
-    stock-to-zero worst case is unrealistic enough that they're excluded
-    outright, not just discounted -- a covered call genuinely has no
-    meaningful "max loss" in that sense), puts are scaled to a more
-    realistic 20% tail estimate net of premium, spreads are unchanged
-    (width - credit, already a real defined-risk worst case) -- broken out
-    by sector (ws.get_sector_bucket -- Tech vs Non-Tech) x directional side
-    (Put/Call, via _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain
-    puts, call spreads join plain calls, not a separate Multi-Leg bucket),
-    each cell shown as "$total (X%)" of the grand total across every
-    position. Total row/column included. A position with an undefined Max
-    Loss (the covered calls, plus a put/call with no HOLDINGS cost basis
-    where relevant) is excluded from every sum, same as the Financials
-    tables above."""
-    import pandas as pd
-    cols = CONCENTRATION_COLS + ["Total"]
-    rows_ = CONCENTRATION_ROWS + ["Total"]
-    grid = {r: {c: 0.0 for c in cols} for r in rows_}
+    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss AND
+    contract premium (today vs yesterday), cross-tabbed by sector (Tech/
+    Non-Tech) x directional side (Put/Call, via _TYPE_TO_CONCENTRATION_
+    BUCKET -- put spreads join plain puts, call spreads join plain calls,
+    not a separate Multi-Leg bucket) x metric (rows: Max Loss, Premium
+    Yesterday/Today/Change $/Change %) -- one live chain fetch per position
+    feeds both halves.
 
-    for pos in ws.OPEN_POSITIONS:
-        b = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
-        if not b:
-            continue
-        loss = _pivot_max_loss_per_share(pos)
-        if loss != loss:
-            continue
-        loss_total = loss * 100 * pos["contracts"]
-        sector = ws.get_sector_bucket(pos["ticker"])
-        for r in (sector, "Total"):
-            grid[r][b] += loss_total
-            grid[r]["Total"] += loss_total
+    Max Loss uses _pivot_max_loss_per_share, the SAME risk-scaled
+    convention every Financials table on this page already uses: covered
+    calls are NaN (a stock-to-zero worst case is unrealistic enough that
+    they're excluded outright, not just discounted); puts are scaled to a
+    more realistic 20% tail estimate net of premium; spreads are unchanged
+    (width - credit). Shown as "$total (X%)" of the grand total Max Loss
+    across every position.
 
-    grand_total = grid["Total"]["Total"]
+    Premium is the contract's own price, NOT Max Loss/risk -- e.g. an NVDA
+    230 put priced at $3.50 yesterday and $3.00 today. Single-leg: Today =
+    live ask (same basis as Open Positions' own CostToClose); Yesterday =
+    that contract's own prevclose. Spread: both legs netted the SAME way
+    the rest of the app already prices one to close -- Today = short leg's
+    ask minus long leg's bid; Yesterday = short leg's prevclose minus long
+    leg's prevclose. A position opened TODAY has no real "yesterday" --
+    excluded from yesterday's Premium total (still counted in today's), so
+    the two reflect what was actually held each day, not a hypothetical
+    same-basket comparison. A leg with no prevclose available skips that
+    position's yesterday contribution rather than counting it as $0.
 
-    def _cell(v):
-        pct = (v / grand_total) if grand_total else float("nan")
-        return f"{_fmt_dollar(v)} ({_fmt_pct(pct)})"
-
-    return pd.DataFrame([(r, *[_cell(grid[r][c]) for c in cols]) for r in rows_],
-                        columns=["Sector"] + cols)
-
-
-def build_premium_change_table():
-    """Total premium (the contract's own price, NOT MaxLoss/risk) of every
-    open position, today vs yesterday -- e.g. an NVDA 230 put priced at
-    $3.50 yesterday and $3.00 today. Bucketed by directional side (Put/
-    Call, via _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain puts,
-    call spreads join plain calls, same grouping as the Concentration of
-    Positions table).
-
-    Single-leg (put/call): Today = live ask (cost to buy the contract back
-    right now, same basis as Open Positions' own CostToClose); Yesterday =
-    that contract's own prevclose.
-
-    Spread (put_spread/call_spread): both legs, netted the SAME way the
-    rest of the app already prices a spread to close -- Today = short leg's
-    ask minus long leg's bid (identical to Open Positions' own CostToClose
-    formula for a spread: buy back the short leg, sell the long leg);
-    Yesterday = short leg's prevclose minus long leg's prevclose (no bid/
-    ask distinction for a historical closing print).
-
-    All from the same live chain fetch Tradier already returns -- no
-    separate snapshot/database needed. A position opened TODAY has no real
-    "yesterday" -- excluded from yesterday's total (still counted in
-    today's), so the two totals reflect what was actually held each day,
-    not a hypothetical same-basket comparison. A leg with no prevclose
-    available (illiquid/newly listed) skips that position's yesterday
-    contribution entirely rather than counting it as $0. Returns
-    (dataframe, errors)."""
+    Total row-group and column included for both metrics. A position with
+    an undefined Max Loss (the covered calls, plus a put/call with no
+    HOLDINGS cost basis where relevant) is excluded from every Max Loss
+    sum, same as the Financials tables above. Returns (dataframe, errors)."""
     import pandas as pd
     today = dt.date.today()
-    totals = {"Put": {"today": 0.0, "yesterday": 0.0},
-             "Call": {"today": 0.0, "yesterday": 0.0}}
+    cols = CONCENTRATION_COLS + ["Total"]
+    sectors = CONCENTRATION_ROWS + ["Total"]
+    grid = {s: {c: {"maxloss": 0.0, "prem_y": 0.0, "prem_t": 0.0} for c in cols} for s in sectors}
     errs = []
+
     for pos in ws.OPEN_POSITIONS:
         kind = pos["type"]
         bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(kind)
         if not bucket:
             continue
-        ticker, exp, contracts = pos["ticker"], pos["expiration"], pos["contracts"]
+        sector = ws.get_sector_bucket(pos["ticker"])
+        contracts = pos["contracts"]
+
+        loss = _pivot_max_loss_per_share(pos)
+        if loss == loss:
+            loss_total = loss * 100 * contracts
+            for r in (sector, "Total"):
+                grid[r][bucket]["maxloss"] += loss_total
+                grid[r]["Total"]["maxloss"] += loss_total
+
+        ticker, exp = pos["ticker"], pos["expiration"]
         label = f"{ticker} {exp}"
         try:
             chain = ws.td_chain(ticker, exp)
@@ -520,16 +497,41 @@ def build_premium_change_table():
         except Exception as e:
             errs.append(f"{label}: {e}")
             continue
-        totals[bucket]["today"] += today_val * 100 * contracts
+
+        today_total = today_val * 100 * contracts
+        for r in (sector, "Total"):
+            grid[r][bucket]["prem_t"] += today_total
+            grid[r]["Total"]["prem_t"] += today_total
+
         entry_date_str = pos.get("entry_date")
         opened_today = bool(entry_date_str) and dt.date.fromisoformat(entry_date_str) == today
         if not opened_today and prevclose_val:
-            totals[bucket]["yesterday"] += prevclose_val * 100 * contracts
+            y_total = prevclose_val * 100 * contracts
+            for r in (sector, "Total"):
+                grid[r][bucket]["prem_y"] += y_total
+                grid[r]["Total"]["prem_y"] += y_total
+
+    grand_maxloss = grid["Total"]["Total"]["maxloss"]
+
+    def _maxloss_cell(v):
+        pct = (v / grand_maxloss) if grand_maxloss else float("nan")
+        return f"{_fmt_dollar(v)} ({_fmt_pct(pct)})"
+
+    def _chg_pct_cell(cell):
+        y, t = cell["prem_y"], cell["prem_t"]
+        return _fmt_pct((t - y) / y if y else float("nan"))
 
     rows = []
-    for bucket in ("Put", "Call"):
-        y, t = totals[bucket]["yesterday"], totals[bucket]["today"]
-        change = t - y
-        pct = (change / y) if y else float("nan")
-        rows.append((bucket, _fmt_dollar(y), _fmt_dollar(t), _fmt_dollar_signed(change), _fmt_pct(pct)))
-    return pd.DataFrame(rows, columns=["Type", "Yesterday", "Today", "Change $", "Change %"]), errs
+    for sector in sectors:
+        rows.append((sector, "Max Loss",
+                    *[_maxloss_cell(grid[sector][c]["maxloss"]) for c in cols]))
+        rows.append((sector, "Premium Yesterday",
+                    *[_fmt_dollar(grid[sector][c]["prem_y"]) for c in cols]))
+        rows.append((sector, "Premium Today",
+                    *[_fmt_dollar(grid[sector][c]["prem_t"]) for c in cols]))
+        rows.append((sector, "Premium Change $",
+                    *[_fmt_dollar_signed(grid[sector][c]["prem_t"] - grid[sector][c]["prem_y"]) for c in cols]))
+        rows.append((sector, "Premium Change %",
+                    *[_chg_pct_cell(grid[sector][c]) for c in cols]))
+
+    return pd.DataFrame(rows, columns=["Sector", "Metric"] + cols), errs

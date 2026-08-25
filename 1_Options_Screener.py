@@ -270,11 +270,6 @@ def scan_positions():
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_premium_change():
-    return positions.build_premium_change_table()
-
-
-@st.cache_data(ttl=3600, show_spinner=True)
 def scan_concentration():
     return positions.build_concentration_table()
 
@@ -588,49 +583,38 @@ except Exception as _e:
     st.caption(f"(positions unavailable: {_e})")
 
 st.markdown("---")
-st.header("Premium: Today vs Yesterday")
-st.caption("The contract's own price (NOT MaxLoss/risk) for every open position, today vs yesterday -- "
-           "e.g. an NVDA 230 put priced at \\$3.50 yesterday and \\$3.00 today. Bucketed by directional "
-           "side, **Put** vs **Call** -- put spreads join plain puts, call spreads join plain calls, same "
-           "grouping as Concentration of Positions. For a single-leg put/call, **Today** = live ask (cost "
-           "to buy the contract back right now, same basis as Open Positions' own CostToClose); "
-           "**Yesterday** = that contract's own prevclose. For a spread, both legs are netted the SAME way "
-           "the rest of the app already prices one to close: **Today** = short leg's ask minus long leg's "
-           "bid (identical to Open Positions' own CostToClose for a spread); **Yesterday** = short leg's "
-           "prevclose minus long leg's prevclose. All from the same live quote -- no separate snapshot "
-           "needed. A position opened TODAY has no real \"yesterday\" -- excluded from yesterday's total "
-           "(but still counted in today's), so the two totals reflect what you actually held on each day, "
-           "not a hypothetical same-basket comparison. Same refresh cadence as the rest of the app.")
-try:
-    _dprem, _eprem = scan_premium_change()
-    st.dataframe(_dprem, hide_index=True, use_container_width=True)
-    if _eprem:
-        st.caption("Skipped: " + " | ".join(_eprem))
-except Exception as _e:
-    st.caption(f"(premium change unavailable: {_e})")
-
-st.markdown("---")
 st.header("Concentration of Positions")
-st.caption("Every OPEN_POSITIONS entry's Max Loss -- the SAME risk-scaled convention every Financials "
-           "table on this page already uses (see Open Positions above): covered calls are excluded "
-           "entirely (a stock-to-zero worst case is unrealistic enough that a covered call genuinely has "
-           "no meaningful \"max loss\" in that sense, not just a discounted one); puts are scaled to a "
-           "more realistic 20% tail-risk estimate net of premium; spreads are unchanged (width - credit, "
-           "already a real defined-risk worst case) -- broken out by sector -- **Tech** vs **Non-Tech**, "
-           "via each ticker's yfinance GICS sector (Technology **and** Communication Services both count "
-           "as Tech, since GOOG/META land in the latter under GICS but this app's own peer-correlation "
-           "list already treats them as part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH "
-           "have no sector and fall back to their category instead; SPCX/EWY/QQQ/AMZN are manually "
-           "overridden to Tech -- see SECTOR_OVERRIDES in wheel_screener.py) -- by directional side, "
-           "**Put** vs **Call** (unlike the Financials tables above, put spreads join plain puts and "
-           "call spreads join plain calls here instead of a separate Multi-Leg bucket -- a put spread is "
-           "still bullish-put-side risk). An iron condor's two legs (tracked as separate put_spread/"
-           "call_spread entries in OPEN_POSITIONS) split across both columns accordingly. Each cell is "
-           "$total (% of your total Max Loss across every open position) -- how concentrated your "
-           "worst-case risk is in one corner of the book. Sector lookups are cached for an hour since "
-           "they barely change.")
+st.caption("Every OPEN_POSITIONS entry's Max Loss AND contract premium (today vs yesterday), cross-tabbed "
+           "by sector -- **Tech** vs **Non-Tech**, via each ticker's yfinance GICS sector (Technology "
+           "**and** Communication Services both count as Tech, since GOOG/META land in the latter under "
+           "GICS but this app's own peer-correlation list already treats them as part of the same tech "
+           "cluster as MSFT/AMZN/AAPL; ETFs like SMH have no sector and fall back to their category "
+           "instead; SPCX/EWY/QQQ/AMZN are manually overridden to Tech -- see SECTOR_OVERRIDES in "
+           "wheel_screener.py) -- by directional side, **Put** vs **Call** (put spreads join plain puts, "
+           "call spreads join plain calls, not a separate Multi-Leg bucket -- a put spread is still "
+           "bullish-put-side risk; an iron condor's two legs, tracked as separate put_spread/call_spread "
+           "entries in OPEN_POSITIONS, split across both columns accordingly) -- by metric (rows):\n\n"
+           "- **Max Loss**: the SAME risk-scaled convention every Financials table above already uses -- "
+           "covered calls excluded entirely (a stock-to-zero worst case is unrealistic enough that a "
+           "covered call genuinely has no meaningful \"max loss\" in that sense); puts scaled to a more "
+           "realistic 20% tail-risk estimate net of premium; spreads unchanged (width - credit). Shown as "
+           "$total (% of your total Max Loss across every position) -- how concentrated your worst-case "
+           "risk is in one corner of the book.\n"
+           "- **Premium Yesterday/Today/Change $/Change %**: the contract's own price, NOT Max Loss/risk "
+           "-- e.g. an NVDA 230 put priced at \\$3.50 yesterday and \\$3.00 today. Single-leg: Today = "
+           "live ask (same basis as Open Positions' own CostToClose); Yesterday = that contract's own "
+           "prevclose. Spread: both legs netted the SAME way the rest of the app already prices one to "
+           "close -- Today = short leg's ask minus long leg's bid; Yesterday = short leg's prevclose minus "
+           "long leg's prevclose. A position opened TODAY is excluded from yesterday's total (still "
+           "counted in today's), so the two reflect what was actually held each day, not a hypothetical "
+           "same-basket comparison.\n\n"
+           "Total row-group and column included for both metrics. Same refresh cadence as the rest of "
+           "the app.")
 try:
-    st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
+    _dconc, _econc = scan_concentration()
+    st.dataframe(_dconc, hide_index=True, use_container_width=True)
+    if _econc:
+        st.caption("Skipped: " + " | ".join(_econc))
 except Exception as _e:
     st.caption(f"(concentration unavailable: {_e})")
 
