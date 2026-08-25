@@ -403,15 +403,19 @@ CONCENTRATION_ROWS = ["Tech", "Non-Tech"]
 
 
 def build_concentration_table():
-    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss
-    (same convention as the Open Positions table's own MaxLoss column --
-    _max_loss_per_share, NOT the risk-scaled _pivot_max_loss_per_share the
-    Financials tables use) broken out by sector (ws.get_sector_bucket --
-    Tech vs Non-Tech) x strategy (Put/Call/Multi-Leg, via
-    _TYPE_LABEL_TO_PIVOT), each cell shown as "$total (X%)" of the grand
-    total across every position -- how much of your worst-case risk sits in
-    one corner of the book. Total row/column included. A position with an
-    undefined Max Loss (a covered call with no HOLDINGS cost basis) is
+    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss --
+    _pivot_max_loss_per_share, the SAME risk-scaled convention every
+    Financials table on this page already uses: covered calls are NaN (a
+    stock-to-zero worst case is unrealistic enough that they're excluded
+    outright, not just discounted -- a covered call genuinely has no
+    meaningful "max loss" in that sense), puts are scaled to a more
+    realistic 20% tail estimate net of premium, spreads are unchanged
+    (width - credit, already a real defined-risk worst case) -- broken out
+    by sector (ws.get_sector_bucket -- Tech vs Non-Tech) x strategy (Put/
+    Call/Multi-Leg, via _TYPE_LABEL_TO_PIVOT), each cell shown as
+    "$total (X%)" of the grand total across every position. Total row/
+    column included. A position with an undefined Max Loss (the covered
+    calls, plus a put/call with no HOLDINGS cost basis where relevant) is
     excluded from every sum, same as the Financials tables above."""
     import pandas as pd
     cols = PIVOT_COLS + ["Total"]
@@ -422,7 +426,7 @@ def build_concentration_table():
         b = _TYPE_LABEL_TO_PIVOT.get(TYPE_LABELS.get(pos["type"]))
         if not b:
             continue
-        loss = _max_loss_per_share(pos)
+        loss = _pivot_max_loss_per_share(pos)
         if loss != loss:
             continue
         loss_total = loss * 100 * pos["contracts"]

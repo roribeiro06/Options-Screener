@@ -584,16 +584,20 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Concentration of Positions")
-st.caption("Every OPEN_POSITIONS entry's MaxLoss (same figure as the Open Positions table's own MaxLoss "
-           "column above), broken out by sector -- **Tech** vs **Non-Tech**, via each ticker's yfinance "
-           "GICS sector (Technology **and** Communication Services both count as Tech, since GOOG/META "
-           "land in the latter under GICS but this app's own peer-correlation list already treats them as "
-           "part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH have no sector and fall back to "
-           "their category instead) -- by **Put** / **Call** / **Multi-Leg** (all spreads/condors), same "
-           "split as the Financials tables. Each cell is $total (% of your total MaxLoss across every open "
-           "position) -- how concentrated your worst-case risk is in one corner of the book. A covered call "
-           "with no cost basis in `HOLDINGS` (undefined MaxLoss) is excluded from every sum, same as "
-           "Financials. Sector lookups are cached for an hour since they barely change.")
+st.caption("Every OPEN_POSITIONS entry's Max Loss -- the SAME risk-scaled convention every Financials "
+           "table on this page already uses (see Open Positions above): covered calls are excluded "
+           "entirely (a stock-to-zero worst case is unrealistic enough that a covered call genuinely has "
+           "no meaningful \"max loss\" in that sense, not just a discounted one); puts are scaled to a "
+           "more realistic 20% tail-risk estimate net of premium; spreads are unchanged (width - credit, "
+           "already a real defined-risk worst case) -- broken out by sector -- **Tech** vs **Non-Tech**, "
+           "via each ticker's yfinance GICS sector (Technology **and** Communication Services both count "
+           "as Tech, since GOOG/META land in the latter under GICS but this app's own peer-correlation "
+           "list already treats them as part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH "
+           "have no sector and fall back to their category instead; SPCX/EWY/QQQ/AMZN are manually "
+           "overridden to Tech -- see SECTOR_OVERRIDES in wheel_screener.py) -- by **Put** / **Call** / "
+           "**Multi-Leg** (all spreads/condors), same split as the Financials tables. Each cell is $total "
+           "(% of your total Max Loss across every open position) -- how concentrated your worst-case risk "
+           "is in one corner of the book. Sector lookups are cached for an hour since they barely change.")
 try:
     st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
 except Exception as _e:
