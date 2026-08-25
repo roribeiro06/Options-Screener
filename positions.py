@@ -400,6 +400,14 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
 
 
 CONCENTRATION_ROWS = ["Tech", "Non-Tech"]
+# Unlike PIVOT_COLS (Put/Call/Multi-Leg, used by the Financials tables above,
+# which keeps spreads as their own bucket), this table groups by directional
+# side instead -- a put spread is still bullish-put-side risk, so it joins
+# plain puts under "Put", and a call spread joins plain calls under "Call".
+# Same mapping open_position_sides() uses to gate the screener by side.
+CONCENTRATION_COLS = ["Put", "Call"]
+_TYPE_TO_CONCENTRATION_BUCKET = {"put": "Put", "put_spread": "Put",
+                                 "call": "Call", "call_spread": "Call"}
 
 
 def build_concentration_table():
@@ -411,19 +419,21 @@ def build_concentration_table():
     meaningful "max loss" in that sense), puts are scaled to a more
     realistic 20% tail estimate net of premium, spreads are unchanged
     (width - credit, already a real defined-risk worst case) -- broken out
-    by sector (ws.get_sector_bucket -- Tech vs Non-Tech) x strategy (Put/
-    Call/Multi-Leg, via _TYPE_LABEL_TO_PIVOT), each cell shown as
-    "$total (X%)" of the grand total across every position. Total row/
-    column included. A position with an undefined Max Loss (the covered
-    calls, plus a put/call with no HOLDINGS cost basis where relevant) is
-    excluded from every sum, same as the Financials tables above."""
+    by sector (ws.get_sector_bucket -- Tech vs Non-Tech) x directional side
+    (Put/Call, via _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain
+    puts, call spreads join plain calls, not a separate Multi-Leg bucket),
+    each cell shown as "$total (X%)" of the grand total across every
+    position. Total row/column included. A position with an undefined Max
+    Loss (the covered calls, plus a put/call with no HOLDINGS cost basis
+    where relevant) is excluded from every sum, same as the Financials
+    tables above."""
     import pandas as pd
-    cols = PIVOT_COLS + ["Total"]
+    cols = CONCENTRATION_COLS + ["Total"]
     rows_ = CONCENTRATION_ROWS + ["Total"]
     grid = {r: {c: 0.0 for c in cols} for r in rows_}
 
     for pos in ws.OPEN_POSITIONS:
-        b = _TYPE_LABEL_TO_PIVOT.get(TYPE_LABELS.get(pos["type"]))
+        b = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
         if not b:
             continue
         loss = _pivot_max_loss_per_share(pos)

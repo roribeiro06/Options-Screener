@@ -594,10 +594,14 @@ st.caption("Every OPEN_POSITIONS entry's Max Loss -- the SAME risk-scaled conven
            "as Tech, since GOOG/META land in the latter under GICS but this app's own peer-correlation "
            "list already treats them as part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH "
            "have no sector and fall back to their category instead; SPCX/EWY/QQQ/AMZN are manually "
-           "overridden to Tech -- see SECTOR_OVERRIDES in wheel_screener.py) -- by **Put** / **Call** / "
-           "**Multi-Leg** (all spreads/condors), same split as the Financials tables. Each cell is $total "
-           "(% of your total Max Loss across every open position) -- how concentrated your worst-case risk "
-           "is in one corner of the book. Sector lookups are cached for an hour since they barely change.")
+           "overridden to Tech -- see SECTOR_OVERRIDES in wheel_screener.py) -- by directional side, "
+           "**Put** vs **Call** (unlike the Financials tables above, put spreads join plain puts and "
+           "call spreads join plain calls here instead of a separate Multi-Leg bucket -- a put spread is "
+           "still bullish-put-side risk). An iron condor's two legs (tracked as separate put_spread/"
+           "call_spread entries in OPEN_POSITIONS) split across both columns accordingly. Each cell is "
+           "$total (% of your total Max Loss across every open position) -- how concentrated your "
+           "worst-case risk is in one corner of the book. Sector lookups are cached for an hour since "
+           "they barely change.")
 try:
     st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
 except Exception as _e:
