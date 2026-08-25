@@ -3,14 +3,18 @@
 notify_email.py -- run the FULL screener headlessly and email the results
 (cash-secured puts, covered calls, multi-leg spreads, Discover -- the live
 scan for high-open-interest tickers outside the watchlist, see discover.py
--- and your Open/Closed Positions plus their Financials tables, see
-positions.py). Discover's live scan
+-- and your Open/Closed Positions plus their Financials and Concentration
+of Positions tables, see positions.py). Discover's live scan
 is by far the slowest part of this script (a broad ~7,000-ticker universe
 plus a yfinance market-cap check per surviving candidate) -- expect this to
 noticeably lengthen every run, which happens every 30 min during market
 hours per the schedule below. Open Positions adds one live options-chain
 call per tracked position (cheap next to Discover, but still real API load
-on every run).
+on every run); Concentration of Positions adds one more yfinance sector/
+category lookup per DISTINCT ticker in OPEN_POSITIONS on top of that --
+each GitHub Actions run is a fresh process, so wheel_screener's in-process
+sector cache doesn't carry over between runs, meaning every run re-fetches
+every ticker's sector fresh.
 
 Designed to be run on a schedule by GitHub Actions (see .github/workflows/screener-email.yml).
 Only emails during US market hours (9:30-16:00 ET, weekdays); silently exits otherwise, so
@@ -127,6 +131,15 @@ def build_closed_positions():
     return df
 
 
+def build_concentration():
+    """Same Max Loss + premium-change-today-vs-yesterday cross-tab as the
+    app's Concentration of Positions section -- see positions.py."""
+    df, errs = positions.build_concentration_table()
+    for e in errs:
+        print(f"CONCENTRATION: {e}", file=sys.stderr)
+    return df
+
+
 def _table(df, fmt):
     return fmt(df).to_html(index=False, border=0)
 
@@ -167,7 +180,8 @@ def _discover_html(dp, dspreads):
             + _section("Call Credit Spreads (defined-risk)", disp, sp._fmt))
 
 
-def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, closed_pos, now_et):
+def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, closed_pos,
+               concentration, now_et):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
              "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
              "h3{margin:16px 0 4px}"
@@ -209,6 +223,7 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"<h2>Discover: High-Open-Interest Contracts (outside your watchlist)</h2>{discover_body}"
             f"{empty_section('Open Positions', open_pos, positions._fmt, 'No open positions tracked.')}"
             f"{financials_html('Financials (unrealized)', open_fin)}"
+            f"{empty_section('Concentration of Positions', concentration, lambda d: d, 'No open positions tracked.')}"
             f"{empty_section('Closed Positions (last 30 days)', closed_pos, positions._fmt, 'No closed positions in the last 30 days.')}"
             f"{financials_html('Financials (realized)', closed_fin)}"
             f"<h2>Financials (Open + Closed combined)</h2>{combined_fin.to_html(index=False, border=0)}"
@@ -252,6 +267,7 @@ def main():
     d_puts, d_spreads = build_discover()
     open_pos = build_positions()
     closed_pos = build_closed_positions()
+    concentration = build_concentration()
     # Open/closed positions count toward "is there anything worth sending" too --
     # your portfolio status is reason enough to send even on a quiet screener day.
     total    = (len(puts) + len(calls) + len(spreads) + len(d_puts) + len(d_spreads)
@@ -263,7 +279,8 @@ def main():
     subject = (f"Screener: {len(puts)} puts, {len(calls)} calls, {len(spreads)} spreads, "
                f"{len(d_puts) + len(d_spreads)} discovered, {len(open_pos)} open positions "
                f"- {now_et:%b %d %I:%M %p ET}")
-    send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos, now_et),
+    send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos,
+                             concentration, now_et),
         user, pw, to)
     print(f"Sent: {subject} -> {to}")
 
