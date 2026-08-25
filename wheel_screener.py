@@ -548,7 +548,14 @@ TECH_SECTORS = {"Technology", "Communication Services"}
 #     category -- but its two largest holdings, Samsung Electronics and SK
 #     Hynix, are both massive AI-memory chipmakers, so its return stream is
 #     effectively a memory/AI-chip proxy, not a generic country fund.
-SECTOR_OVERRIDES = {"SPCX": "Tech", "EWY": "Tech"}
+#   QQQ:  category "Large Growth" (broad Nasdaq-100 index fund), but more
+#     than half its weight sits in mega-cap tech names, so its return
+#     stream tracks tech far more than a generic large-cap fund.
+#   AMZN: GICS "Consumer Cyclical" -- same quirk as GOOG/META landing in
+#     Communication Services, except AMZN doesn't even get that override.
+#     This app's own PEER_TICKERS already treats it as part of the same
+#     mega-cap tech cluster as MSFT/GOOG/META/AAPL.
+SECTOR_OVERRIDES = {"SPCX": "Tech", "EWY": "Tech", "QQQ": "Tech", "AMZN": "Tech"}
 
 
 def get_sector_bucket(symbol):
