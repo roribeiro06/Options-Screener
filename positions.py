@@ -410,17 +410,16 @@ _TYPE_TO_CONCENTRATION_BUCKET = {"put": "Put", "put_spread": "Put",
                                  "call": "Call", "call_spread": "Call"}
 
 
-CONCENTRATION_METRICS = ["Max Loss", "Premium Yesterday", "Premium Today",
-                         "Premium Change $", "Premium Change %"]
+CONCENTRATION_METRICS = ["Max Loss", "Premium Change"]
 
 
 def build_concentration_table():
     """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss AND
-    contract premium (today vs yesterday), cross-tabbed by sector (Tech/
-    Non-Tech) x directional side (Put/Call, via _TYPE_TO_CONCENTRATION_
-    BUCKET -- put spreads join plain puts, call spreads join plain calls,
-    not a separate Multi-Leg bucket) x metric (rows: Max Loss, Premium
-    Yesterday/Today/Change $/Change %) -- one live chain fetch per position
+    contract premium change (today vs yesterday), cross-tabbed by sector
+    (Tech/Non-Tech) x directional side (Put/Call, via
+    _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain puts, call
+    spreads join plain calls, not a separate Multi-Leg bucket) x metric
+    (rows: Max Loss, Premium Change) -- one live chain fetch per position
     feeds both halves.
 
     Max Loss uses _pivot_max_loss_per_share, the SAME risk-scaled
@@ -431,17 +430,19 @@ def build_concentration_table():
     (width - credit). Shown as "$total (X%)" of the grand total Max Loss
     across every position.
 
-    Premium is the contract's own price, NOT Max Loss/risk -- e.g. an NVDA
-    230 put priced at $3.50 yesterday and $3.00 today. Single-leg: Today =
-    live ask (same basis as Open Positions' own CostToClose); Yesterday =
-    that contract's own prevclose. Spread: both legs netted the SAME way
-    the rest of the app already prices one to close -- Today = short leg's
-    ask minus long leg's bid; Yesterday = short leg's prevclose minus long
-    leg's prevclose. A position opened TODAY has no real "yesterday" --
-    excluded from yesterday's Premium total (still counted in today's), so
-    the two reflect what was actually held each day, not a hypothetical
-    same-basket comparison. A leg with no prevclose available skips that
-    position's yesterday contribution rather than counting it as $0.
+    Premium Change is the contract's own price move, NOT Max Loss/risk --
+    e.g. an NVDA 230 put priced at $3.50 yesterday and $3.00 today is a
+    -$0.50 change. Shown as "$change (X%)", same concise style as the Max
+    Loss row. Single-leg: today's value = live ask (same basis as Open
+    Positions' own CostToClose); yesterday's = that contract's own
+    prevclose. Spread: both legs netted the SAME way the rest of the app
+    already prices one to close -- today = short leg's ask minus long leg's
+    bid; yesterday = short leg's prevclose minus long leg's prevclose. A
+    position opened TODAY has no real "yesterday" -- excluded from
+    yesterday's total (still counted in today's), so the two reflect what
+    was actually held each day, not a hypothetical same-basket comparison.
+    A leg with no prevclose available skips that position's yesterday
+    contribution rather than counting it as $0.
 
     Total row-group and column included for both metrics. A position with
     an undefined Max Loss (the covered calls, plus a put/call with no
@@ -517,21 +518,17 @@ def build_concentration_table():
         pct = (v / grand_maxloss) if grand_maxloss else float("nan")
         return f"{_fmt_dollar(v)} ({_fmt_pct(pct)})"
 
-    def _chg_pct_cell(cell):
+    def _prem_change_cell(cell):
         y, t = cell["prem_y"], cell["prem_t"]
-        return _fmt_pct((t - y) / y if y else float("nan"))
+        change = t - y
+        pct = (change / y) if y else float("nan")
+        return f"{_fmt_dollar_signed(change)} ({_fmt_pct(pct)})"
 
     rows = []
     for sector in sectors:
         rows.append((sector, "Max Loss",
                     *[_maxloss_cell(grid[sector][c]["maxloss"]) for c in cols]))
-        rows.append((sector, "Premium Yesterday",
-                    *[_fmt_dollar(grid[sector][c]["prem_y"]) for c in cols]))
-        rows.append((sector, "Premium Today",
-                    *[_fmt_dollar(grid[sector][c]["prem_t"]) for c in cols]))
-        rows.append((sector, "Premium Change $",
-                    *[_fmt_dollar_signed(grid[sector][c]["prem_t"] - grid[sector][c]["prem_y"]) for c in cols]))
-        rows.append((sector, "Premium Change %",
-                    *[_chg_pct_cell(grid[sector][c]) for c in cols]))
+        rows.append((sector, "Premium Change",
+                    *[_prem_change_cell(grid[sector][c]) for c in cols]))
 
     return pd.DataFrame(rows, columns=["Sector", "Metric"] + cols), errs
