@@ -410,44 +410,42 @@ _TYPE_TO_CONCENTRATION_BUCKET = {"put": "Put", "put_spread": "Put",
                                  "call": "Call", "call_spread": "Call"}
 
 
-CONCENTRATION_METRICS = ["Max Loss", "Premium Change"]
-
-
 def build_concentration_table():
-    """Concentration of Positions: every OPEN_POSITIONS entry's Max Loss AND
-    contract premium change (today vs yesterday), cross-tabbed by sector
-    (Tech/Non-Tech) x directional side (Put/Call, via
-    _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain puts, call
-    spreads join plain calls, not a separate Multi-Leg bucket) x metric
-    (rows: Max Loss, Premium Change) -- one live chain fetch per position
-    feeds both halves.
+    """Concentration of Positions: one row per sector (Tech/Non-Tech/Total)
+    x directional side (Put/Call/Total, via _TYPE_TO_CONCENTRATION_BUCKET --
+    put spreads join plain puts, call spreads join plain calls, not a
+    separate Multi-Leg bucket). Each cell packs two figures together --
+    Max Loss on the left, contract premium change (today vs yesterday) on
+    the right -- e.g. "$17,415.00 (10.2%) | -13.8% chg". One live chain
+    fetch per position feeds both halves.
 
-    Max Loss uses _pivot_max_loss_per_share, the SAME risk-scaled
-    convention every Financials table on this page already uses: covered
-    calls are NaN (a stock-to-zero worst case is unrealistic enough that
-    they're excluded outright, not just discounted); puts are scaled to a
-    more realistic 20% tail estimate net of premium; spreads are unchanged
-    (width - credit). Shown as "$total (X%)" of the grand total Max Loss
-    across every position.
+    Max Loss (left, "$total (X%)") uses _pivot_max_loss_per_share, the SAME
+    risk-scaled convention every Financials table on this page already
+    uses: covered calls are NaN (a stock-to-zero worst case is unrealistic
+    enough that they're excluded outright, not just discounted); puts are
+    scaled to a more realistic 20% tail estimate net of premium; spreads
+    are unchanged (width - credit). The percentage is this cell's share of
+    the grand total Max Loss across every position.
 
-    Premium Change is the contract's own price move, NOT Max Loss/risk --
-    e.g. an NVDA 230 put priced at $3.50 yesterday and $3.00 today is a
-    -$0.50 change. Shown as "$change (X%)", same concise style as the Max
-    Loss row. Single-leg: today's value = live ask (same basis as Open
-    Positions' own CostToClose); yesterday's = that contract's own
-    prevclose. Spread: both legs netted the SAME way the rest of the app
-    already prices one to close -- today = short leg's ask minus long leg's
-    bid; yesterday = short leg's prevclose minus long leg's prevclose. A
-    position opened TODAY has no real "yesterday" -- excluded from
-    yesterday's total (still counted in today's), so the two reflect what
-    was actually held each day, not a hypothetical same-basket comparison.
-    A leg with no prevclose available skips that position's yesterday
-    contribution rather than counting it as $0.
+    Premium change (right, "X% chg") is the contract's own price move, NOT
+    Max Loss/risk -- e.g. an NVDA 230 put priced at $3.50 yesterday and
+    $3.00 today is -14.3%. Only the percentage is shown here (the dollar
+    change lives implicitly in the Max Loss side's own dollar figure).
+    Single-leg: today's value = live ask (same basis as Open Positions' own
+    CostToClose); yesterday's = that contract's own prevclose. Spread: both
+    legs netted the SAME way the rest of the app already prices one to
+    close -- today = short leg's ask minus long leg's bid; yesterday =
+    short leg's prevclose minus long leg's prevclose. A position opened
+    TODAY has no real "yesterday" -- excluded from yesterday's total (still
+    counted in today's), so the two reflect what was actually held each
+    day, not a hypothetical same-basket comparison. A leg with no prevclose
+    available skips that position's yesterday contribution rather than
+    counting it as $0.
 
-    Total row-group and column included for both metrics. A position with
-    an undefined Max Loss (the covered calls, plus a put/call with no
-    HOLDINGS cost basis where relevant) is excluded from every Max Loss
-    sum, same as the Financials tables above. Returns (dataframe, errors)."""
+    Total row and column included. A position with an undefined Max Loss
+    (the covered calls, plus a put/call with no HOLDINGS cost basis where
+    relevant) is excluded from every Max Loss sum, same as the Financials
+    tables above. Returns (dataframe, errors)."""
     import pandas as pd
     today = dt.date.today()
     cols = CONCENTRATION_COLS + ["Total"]
@@ -514,21 +512,14 @@ def build_concentration_table():
 
     grand_maxloss = grid["Total"]["Total"]["maxloss"]
 
-    def _maxloss_cell(v):
-        pct = (v / grand_maxloss) if grand_maxloss else float("nan")
-        return f"{_fmt_dollar(v)} ({_fmt_pct(pct)})"
-
-    def _prem_change_cell(cell):
+    def _cell(cell):
+        v = cell["maxloss"]
+        loss_pct = (v / grand_maxloss) if grand_maxloss else float("nan")
         y, t = cell["prem_y"], cell["prem_t"]
-        change = t - y
-        pct = (change / y) if y else float("nan")
-        return f"{_fmt_dollar_signed(change)} ({_fmt_pct(pct)})"
+        chg_pct = ((t - y) / y) if y else float("nan")
+        # Plain ASCII, not a unicode delta -- keeps CSV export / any non-UTF8
+        # console (e.g. a Windows GitHub Actions runner) safe.
+        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)}) | {_fmt_pct(chg_pct)} chg"
 
-    rows = []
-    for sector in sectors:
-        rows.append((sector, "Max Loss",
-                    *[_maxloss_cell(grid[sector][c]["maxloss"]) for c in cols]))
-        rows.append((sector, "Premium Change",
-                    *[_prem_change_cell(grid[sector][c]) for c in cols]))
-
-    return pd.DataFrame(rows, columns=["Sector", "Metric"] + cols), errs
+    rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
+    return pd.DataFrame(rows, columns=["Sector"] + cols), errs
