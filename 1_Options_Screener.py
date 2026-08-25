@@ -598,9 +598,10 @@ st.caption("Every OPEN_POSITIONS entry's Max Loss, cross-tabbed by sector -- **T
            "Financials table above already uses (covered calls excluded entirely, a stock-to-zero worst "
            "case being unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in "
            "that sense; puts scaled to a more realistic 20% tail-risk estimate net of premium; spreads "
-           "unchanged, width - credit) -- and, on the right, that cell's contract premium change (today "
-           "vs yesterday's live ask/prevclose, netted across both legs for a spread the same way Open "
-           "Positions' own CostToClose prices one) shown as \"X% chg\" -- e.g. \"\\$17,415.00 (10.2%) | "
+           "unchanged, width - credit) -- and, on the right (extra spacing pushes it as far right as one "
+           "plain-text cell can go), that cell's contract premium change (today vs yesterday's live ask/"
+           "prevclose, netted across both legs for a spread the same way Open Positions' own CostToClose "
+           "prices one) shown as a signed \"+X.X%\"/\"-X.X% chg\" -- e.g. \"\\$17,415.00 (10.2%)     |  "
            "-13.8% chg\". A position opened TODAY has no real \"yesterday\" for that percentage, so it's "
            "excluded from the comparison rather than treated as a same-basket hypothetical. Total row and "
            "column included. Same refresh cadence as the rest of the app.")

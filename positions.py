@@ -416,8 +416,9 @@ def build_concentration_table():
     put spreads join plain puts, call spreads join plain calls, not a
     separate Multi-Leg bucket). Each cell packs two figures together --
     Max Loss on the left, contract premium change (today vs yesterday) on
-    the right -- e.g. "$17,415.00 (10.2%) | -13.8% chg". One live chain
-    fetch per position feeds both halves.
+    the right (extra spacing pushes it as far right as one plain-text cell
+    can go) -- e.g. "$17,415.00 (10.2%)     |  -13.8% chg". One live
+    chain fetch per position feeds both halves.
 
     Max Loss (left, "$total (X%)") uses _pivot_max_loss_per_share, the SAME
     risk-scaled convention every Financials table on this page already
@@ -427,10 +428,12 @@ def build_concentration_table():
     are unchanged (width - credit). The percentage is this cell's share of
     the grand total Max Loss across every position.
 
-    Premium change (right, "X% chg") is the contract's own price move, NOT
-    Max Loss/risk -- e.g. an NVDA 230 put priced at $3.50 yesterday and
-    $3.00 today is -14.3%. Only the percentage is shown here (the dollar
-    change lives implicitly in the Max Loss side's own dollar figure).
+    Premium change (right, "+X.X%"/"-X.X% chg" -- always signed, unlike Max
+    Loss's own percentage which is never negative) is the contract's own
+    price move, NOT Max Loss/risk -- e.g. an NVDA 230 put priced at $3.50
+    yesterday and $3.00 today is -14.3%. Only the percentage is shown here
+    (the dollar change lives implicitly in the Max Loss side's own dollar
+    figure).
     Single-leg: today's value = live ask (same basis as Open Positions' own
     CostToClose); yesterday's = that contract's own prevclose. Spread: both
     legs netted the SAME way the rest of the app already prices one to
@@ -512,14 +515,24 @@ def build_concentration_table():
 
     grand_maxloss = grid["Total"]["Total"]["maxloss"]
 
+    def _fmt_pct_signed(v):
+        # +X.X% / -X.X% -- Max Loss's own percentage never needs a leading
+        # "+" (it's always a positive share of the total), but this one can
+        # go either direction, so it gets the explicit sign.
+        return f"{v*100:+.1f}%" if v == v else "-"
+
     def _cell(cell):
         v = cell["maxloss"]
         loss_pct = (v / grand_maxloss) if grand_maxloss else float("nan")
         y, t = cell["prem_y"], cell["prem_t"]
         chg_pct = ((t - y) / y) if y else float("nan")
         # Plain ASCII, not a unicode delta -- keeps CSV export / any non-UTF8
-        # console (e.g. a Windows GitHub Actions runner) safe.
-        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)}) | {_fmt_pct(chg_pct)} chg"
+        # console (e.g. a Windows GitHub Actions runner) safe. Extra spacing
+        # before the "|" pushes the change % as far right within the cell as
+        # a single plain-text string can go (no per-substring alignment
+        # inside one cell without HTML, which Streamlit's dataframe doesn't
+        # render).
+        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)})     |  {_fmt_pct_signed(chg_pct)} chg"
 
     rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
     return pd.DataFrame(rows, columns=["Sector"] + cols), errs
