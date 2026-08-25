@@ -589,15 +589,18 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Premium: Today vs Yesterday")
-st.caption("The contract's own price (NOT MaxLoss/risk) for every open put and every open call, today vs "
-           "yesterday -- e.g. an NVDA 230 put priced at \\$3.50 yesterday and \\$3.00 today. **Today** = "
-           "live ask (cost to buy the contract back right now, same basis as Open Positions' own "
-           "CostToClose). **Yesterday** = that contract's own prevclose from the same live quote -- no "
-           "separate snapshot needed. A position opened TODAY has no real \"yesterday\" -- excluded from "
-           "yesterday's total (but still counted in today's), so the two totals reflect what you actually "
-           "held on each day, not a hypothetical same-basket comparison. Puts and calls only -- a spread "
-           "has two legs, so there's no single contract price to compare. Same refresh cadence as the rest "
-           "of the app.")
+st.caption("The contract's own price (NOT MaxLoss/risk) for every open position, today vs yesterday -- "
+           "e.g. an NVDA 230 put priced at \\$3.50 yesterday and \\$3.00 today. Bucketed by directional "
+           "side, **Put** vs **Call** -- put spreads join plain puts, call spreads join plain calls, same "
+           "grouping as Concentration of Positions. For a single-leg put/call, **Today** = live ask (cost "
+           "to buy the contract back right now, same basis as Open Positions' own CostToClose); "
+           "**Yesterday** = that contract's own prevclose. For a spread, both legs are netted the SAME way "
+           "the rest of the app already prices one to close: **Today** = short leg's ask minus long leg's "
+           "bid (identical to Open Positions' own CostToClose for a spread); **Yesterday** = short leg's "
+           "prevclose minus long leg's prevclose. All from the same live quote -- no separate snapshot "
+           "needed. A position opened TODAY has no real \"yesterday\" -- excluded from yesterday's total "
+           "(but still counted in today's), so the two totals reflect what you actually held on each day, "
+           "not a hypothetical same-basket comparison. Same refresh cadence as the rest of the app.")
 try:
     _dprem, _eprem = scan_premium_change()
     st.dataframe(_dprem, hide_index=True, use_container_width=True)

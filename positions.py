@@ -456,20 +456,32 @@ def build_concentration_table():
 
 
 def build_premium_change_table():
-    """Total premium (the contract's own price, NOT MaxLoss/risk) of open
-    puts and open calls, today vs yesterday -- e.g. an NVDA 230 put priced
-    at $3.50 yesterday and $3.00 today. Today = live ask (cost to buy the
-    contract back right now, same basis as Open Positions' own CostToClose
-    column); yesterday = that contract's own prevclose, straight from the
-    same live chain fetch Tradier already returns -- no separate snapshot/
-    database needed. A position opened TODAY has no real "yesterday" -- it's
-    excluded from yesterday's total (but still counted in today's), so the
-    two totals reflect what you actually held on each day, not a
-    hypothetical same-basket comparison. Puts and calls only, not spreads --
-    a multi-leg position has two legs, so there's no single contract price
-    to compare the way there is for a plain put/call. A contract with no
-    prevclose available (illiquid/newly listed) is skipped from that side's
-    yesterday sum rather than counted as $0. Returns (dataframe, errors)."""
+    """Total premium (the contract's own price, NOT MaxLoss/risk) of every
+    open position, today vs yesterday -- e.g. an NVDA 230 put priced at
+    $3.50 yesterday and $3.00 today. Bucketed by directional side (Put/
+    Call, via _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain puts,
+    call spreads join plain calls, same grouping as the Concentration of
+    Positions table).
+
+    Single-leg (put/call): Today = live ask (cost to buy the contract back
+    right now, same basis as Open Positions' own CostToClose); Yesterday =
+    that contract's own prevclose.
+
+    Spread (put_spread/call_spread): both legs, netted the SAME way the
+    rest of the app already prices a spread to close -- Today = short leg's
+    ask minus long leg's bid (identical to Open Positions' own CostToClose
+    formula for a spread: buy back the short leg, sell the long leg);
+    Yesterday = short leg's prevclose minus long leg's prevclose (no bid/
+    ask distinction for a historical closing print).
+
+    All from the same live chain fetch Tradier already returns -- no
+    separate snapshot/database needed. A position opened TODAY has no real
+    "yesterday" -- excluded from yesterday's total (still counted in
+    today's), so the two totals reflect what was actually held each day,
+    not a hypothetical same-basket comparison. A leg with no prevclose
+    available (illiquid/newly listed) skips that position's yesterday
+    contribution entirely rather than counting it as $0. Returns
+    (dataframe, errors)."""
     import pandas as pd
     today = dt.date.today()
     totals = {"Put": {"today": 0.0, "yesterday": 0.0},
@@ -477,26 +489,42 @@ def build_premium_change_table():
     errs = []
     for pos in ws.OPEN_POSITIONS:
         kind = pos["type"]
-        if kind not in ("put", "call"):
+        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(kind)
+        if not bucket:
             continue
-        bucket = "Put" if kind == "put" else "Call"
-        ticker, strike, exp, contracts = pos["ticker"], pos["strike"], pos["expiration"], pos["contracts"]
+        ticker, exp, contracts = pos["ticker"], pos["expiration"], pos["contracts"]
+        label = f"{ticker} {exp}"
         try:
             chain = ws.td_chain(ticker, exp)
             if not chain:
                 raise RuntimeError("no option chain (expired or invalid expiration?)")
-            leg = _leg_prices(chain, kind, strike)
-            if not leg:
-                raise RuntimeError("contract not found")
+            if kind in ("put", "call"):
+                strike = pos["strike"]
+                leg = _leg_prices(chain, kind, strike)
+                if not leg:
+                    raise RuntimeError("contract not found")
+                _bid, today_val, prevclose_val = leg
+                label = f"{ticker} {strike:g}{kind[0].upper()} {exp}"
+            else:
+                opt_type = "put" if kind == "put_spread" else "call"
+                short_strike, long_strike = pos["short_strike"], pos["long_strike"]
+                short_leg = _leg_prices(chain, opt_type, short_strike)
+                long_leg = _leg_prices(chain, opt_type, long_strike)
+                if not (short_leg and long_leg):
+                    raise RuntimeError("leg(s) not found")
+                _s_bid, s_ask, s_prev = short_leg
+                l_bid, _l_ask, l_prev = long_leg
+                today_val = s_ask - l_bid
+                prevclose_val = (s_prev - l_prev) if (s_prev and l_prev) else 0
+                label = f"{ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}"
         except Exception as e:
-            errs.append(f"{ticker} {strike:g}{kind[0].upper()} {exp}: {e}")
+            errs.append(f"{label}: {e}")
             continue
-        _bid, ask, prevclose = leg
-        totals[bucket]["today"] += ask * 100 * contracts
+        totals[bucket]["today"] += today_val * 100 * contracts
         entry_date_str = pos.get("entry_date")
         opened_today = bool(entry_date_str) and dt.date.fromisoformat(entry_date_str) == today
-        if not opened_today and prevclose:
-            totals[bucket]["yesterday"] += prevclose * 100 * contracts
+        if not opened_today and prevclose_val:
+            totals[bucket]["yesterday"] += prevclose_val * 100 * contracts
 
     rows = []
     for bucket in ("Put", "Call"):
