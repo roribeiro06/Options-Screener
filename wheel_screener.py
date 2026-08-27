@@ -78,8 +78,16 @@ OPEN_POSITIONS = [
      "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21"},
     {"ticker": "TSM", "type": "put", "strike": 380, "expiration": "2026-09-18",
      "contracts": 2, "entry_credit": 4.8999, "entry_date": "2026-08-24"},
+    # LLY 1150P -- two separate tax lots (opened at different times/premiums),
+    # kept as two entries rather than combined so each reconciles individually.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-09-18",
      "contracts": 1, "entry_credit": 18.9996, "entry_date": "2026-08-26"},
+    {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-09-18",
+     "contracts": 1, "entry_credit": 20.9996, "entry_date": "2026-08-27"},
+    {"ticker": "NVDA", "type": "call_spread", "short_strike": 250, "long_strike": 260,
+     "expiration": "2026-09-18", "contracts": 27, "entry_credit": 0.714041, "entry_date": "2026-08-27"},
+    {"ticker": "SKHY", "type": "put_spread", "short_strike": 145, "long_strike": 138,
+     "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
