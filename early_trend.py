@@ -537,18 +537,25 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         return None   # can't compute at all -- data availability, not a signal
 
     ret_3mo = None
+    sustained = False   # did a genuinely spread-out multi-month move rescue this flag from
+                         # an extension cap? Tracked (not just used-and-discarded) because
+                         # Score needs it too, see window_high_score below.
     if n > EXTENSION_LOOKBACK_DAYS:
         window_3mo = closes.iloc[-EXTENSION_LOOKBACK_DAYS:]
         ret_3mo = price_now / float(window_3mo.iloc[0]) - 1
-        if ret_3mo > eff_extension_cap and not _is_sustained_move(window_3mo, ret_3mo):
-            return None   # already spiked -- exactly what this screen is trying NOT to catch
+        if ret_3mo > eff_extension_cap:
+            if not _is_sustained_move(window_3mo, ret_3mo):
+                return None   # already spiked -- exactly what this screen is trying NOT to catch
+            sustained = True
 
     ret_6mo = None
     if n > EXTENSION_LOOKBACK_DAYS_LONG:
         window_6mo = closes.iloc[-EXTENSION_LOOKBACK_DAYS_LONG:]
         ret_6mo = price_now / float(window_6mo.iloc[0]) - 1
-        if ret_6mo > eff_extension_cap_long and not _is_sustained_move(window_6mo, ret_6mo):
-            return None   # last 3 months looked fine, but it already had its bigger run before that
+        if ret_6mo > eff_extension_cap_long:
+            if not _is_sustained_move(window_6mo, ret_6mo):
+                return None   # last 3 months looked fine, but it already had its bigger run before that
+            sustained = True
 
     if n <= 2 * RS_DAYS:
         return None
@@ -621,6 +628,20 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
     rs_score = 1.5 * max(ret_4w - (spy_ret_4w or 0.0), 0.0) + max(ret_4w - ret_prior_4w, 0.0)
     growth_score = min(volatility_pct / REFERENCE_VOLATILITY_PCT, 3.0)
     window_high_score = max(1.5 - window_high_ratio, WINDOW_HIGH_SCORE_FLOOR)
+    # v3.3 (2026-08-27), user-prompted: window_high_score's whole premise -- a name closer to
+    # its 52wk high has less room left to re-rate -- doesn't hold for a `sustained` flag (see
+    # above). A full-universe backtest confirmed the premise IS correct in general (n=4,513
+    # flags: near-high median peak gain +28.6% vs far-from-high +86.6%) but also found 35/37
+    # sustained flags sit at exactly 100% of their 52wk high (by definition -- a persistently
+    # re-rating name IS its own high almost the whole way up) with median peak gain +58.0%,
+    # roughly 2x a typical near-high flag (real examples: MU +251%, STX +298%, TNGX +246%,
+    # HYMC +351%). Since there's essentially no "far from high" comparison population within
+    # `sustained` flags to derive a precise number from (37 total, only 2 not near-high), this
+    # exempts them from the penalty at the formula's existing ceiling rather than fitting a new
+    # bonus constant to noise -- same "skip the check entirely, don't just loosen it" logic
+    # already applied to the extension caps just above, not a new assumption.
+    if sustained:
+        window_high_score = 1.5
     score = volume_score * (1 + rs_score) * growth_score * window_high_score
 
     asof = closes.index[-1]
@@ -641,6 +662,7 @@ def _evaluate_breakout_at(sym, closes, volumes, spy_closes):
         "spy_ret_4w_pct": round(spy_ret_4w * 100, 2) if spy_ret_4w is not None else None,
         "ret_3mo_pct": round(ret_3mo * 100, 2) if ret_3mo is not None else None,
         "ret_6mo_pct": round(ret_6mo * 100, 2) if ret_6mo is not None else None,
+        "sustained_move": sustained,
         "score": round(score, 4),
     }
 

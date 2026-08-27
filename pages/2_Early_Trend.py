@@ -82,16 +82,23 @@ with st.expander("Legend - how to read this table", expanded=False):
         "fresh year high right now). Not a hard cutoff, and NOT what you'd assume -- a "
         "backtest run showed names farther below their own high actually did BETTER going "
         "forward than names already sitting near it (more room to re-rate, not yet as widely "
-        "recognized), so Score rewards distance from the high here, not closeness to it.\n"
+        "recognized), so Score rewards distance from the high here, not closeness to it. "
+        "EXCEPTION: this penalty is skipped entirely for a name whose move is SUSTAINED (see "
+        "Notes below) -- a persistently re-rating name is basically always near its own high, "
+        "and a full-universe check found that population did roughly 2x better than an ordinary "
+        "near-high flag (median peak gain +58% vs +28.6%, real examples: MU +251%, STX +298%, "
+        "TNGX +246%), so penalizing it the same way as a name that's simply topping out was "
+        "actively wrong, not just imprecise.\n"
         "- **Notes** -- a plain-English readout of whatever else is actually driving that row's "
         "Score: the 4-week acceleration vs. its own prior 4 weeks and vs. SPY, volume "
         "confirmation (no longer a hard requirement, so light volume shows up here rather than "
-        "as a rejection), whether a >60%-in-6-months move looks gradual/sustained rather than a "
-        "single spike, and any options-positioning tilt toward calls when the chain data is "
-        "usable. Built only from numbers the scan already computes -- not a probability or a "
-        "forecast of anything. The full detail behind every one of these signals (SMA trend, raw "
-        "volume ratio, trailing 3mo/6mo returns, options OI/IV skew) lives in `early_trend.py`'s "
-        "own scan output even where it's not broken out as a separate table column here."
+        "as a rejection), whether the move is SUSTAINED -- spread out over months rather than a "
+        "single spike, which also exempts it from the % of 52wk High penalty above -- and any "
+        "options-positioning tilt toward calls when the chain data is usable. Built only from "
+        "numbers the scan already computes -- not a probability or a forecast of anything. The "
+        "full detail behind every one of these signals (SMA trend, raw volume ratio, trailing "
+        "3mo/6mo returns, options OI/IV skew) lives in `early_trend.py`'s own scan output even "
+        "where it's not broken out as a separate table column here."
     )
 
 
@@ -153,10 +160,12 @@ def _build_note(r):
         parts.append(f"volume hasn't confirmed yet (only {vr:.1f}x average) -- moving on light "
                      f"interest, a softer sign since this stopped being a hard requirement")
 
-    ret6mo = r.get("ret_6mo_pct")
-    if ret6mo is not None and ret6mo > 60:
-        parts.append(f"already up {ret6mo:.0f}% over 6 months, but the gain looks gradual and "
-                     f"sustained rather than a single spike, which is why it still qualifies")
+    if r.get("sustained_move"):
+        ret6mo = r.get("ret_6mo_pct")
+        gain_note = f"up {ret6mo:.0f}% over 6 months" if ret6mo is not None else "up sharply"
+        parts.append(f"already {gain_note}, but no single week explains much of that -- a gradual, "
+                     f"persistent re-rating rather than a spike, which is why it still qualifies and "
+                     f"isn't marked down for sitting near its high the way a typical flag would be")
 
     oi_skew = r.get("oi_skew")
     if oi_skew is not None and oi_skew > 0.55:
