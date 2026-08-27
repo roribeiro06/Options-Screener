@@ -197,12 +197,23 @@ def _contract_summary(row):
     return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"])
 
 
+@st.fragment
 def _selectable_table(raw_df, disp_df, key):
     """Same interactive/sortable table as before, plus click-a-row to get an
     advisor-ready summary box underneath. raw_df must be in the same row
     order as disp_df (disp_df is normally just _fmt(raw_df), maybe with a
     few columns dropped) so the click maps back to the real, unformatted
-    numbers rather than the display strings."""
+    numbers rather than the display strings.
+
+    @st.fragment is load-bearing here, not decorative: without it, clicking
+    a row triggers a FULL script rerun -- every scan_*() call on the page
+    re-executes, and if ANY of their caches happen to have expired (esp.
+    Discover's live ~7,000-ticker scan, ttl=600) that section does a slow
+    live re-fetch as a side effect of an unrelated click elsewhere on the
+    page. Wrapping this in a fragment scopes the dataframe's on_select
+    rerun to just this one table -- it re-renders using the SAME raw_df/
+    disp_df already passed in (no re-fetch), without touching any other
+    section."""
     event = st.dataframe(disp_df, hide_index=True, use_container_width=True,
                          on_select="rerun", selection_mode="single-row", key=key)
     sel = event.selection.rows if event is not None else []
