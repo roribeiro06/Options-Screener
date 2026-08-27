@@ -46,18 +46,28 @@ if not os.environ.get("TRADIER_TOKEN"):
 
 with st.expander("Legend - how to read this table", expanded=False):
     st.markdown(
-        "- **Pivot** -- the prior base's high; the level price had to close above to count as a "
-        "breakout at all. The pivot must also be close to a genuine 52-week high, not just a "
-        "high relative to a shorter window -- otherwise a stock recovering toward an OLDER high "
-        "(e.g. clawing back after an earnings-gap crash) could look like a fresh breakout when "
-        "it's really just returning to a level it's already failed at before.\n"
-        "- **Days Since Breakout** -- trading days since price first closed above the pivot. "
-        "Lower = fresher. Only breakouts within the sidebar's \"Breakout must be within\" window "
-        "show up here at all -- older ones age out.\n"
-        "- **Above Pivot %** -- how far price has already run past the pivot. This is the main "
+        "- **Score** -- the ranking number: combines volume confirmation, how much the RS "
+        "acceleration exceeds zero (weighted higher vs. SPY than vs. the stock's own past), the "
+        "stock's own volatility (higher = more of a growth-style mover, scored higher), and "
+        "distance from the 52wk high (farther = scored higher, see below), then nudged by the "
+        "options tilt if available. Higher = a better setup by these specific rules. Only "
+        "meaningful for ranking *within* one scan -- it isn't a probability or a return "
+        "forecast, and isn't comparable across different criteria settings. (This formula has "
+        "been revised more than once after backtest evidence directly contradicted an intuitive "
+        "assumption: a v1 factor rewarding being barely past the pivot was actually INVERTED -- "
+        "worse-scored flags outperformed better-scored ones; freshness was dropped after showing "
+        "~zero correlation with outcome; and when % of 52wk High first replaced a hard pass/fail "
+        "cutoff, the FIRST version scored proximity-to-high as a positive -- a full backtest run "
+        "showed that was backwards too. Re-check this with backtest_early_trend.py before "
+        "trusting Score too heavily.)\n"
+        "- **Above Pivot %** -- how far price has already run past the pivot (the prior base's "
+        "high, the level it had to close above to count as a breakout at all). This is the main "
         "\"don't chase it\" gauge: capped by \"Max % above pivot\" in the sidebar (plus a small "
         "fixed 6-point grace margin found by backtest to cut real near-misses without letting "
         "genuinely extended names back in), so nothing already far past its breakout shows up.\n"
+        "- **Days Since Breakout** -- trading days since price first closed above the pivot. "
+        "Lower = fresher. Only breakouts within the sidebar's \"Breakout must be within\" window "
+        "show up here at all -- older ones age out.\n"
         "- **Base Range %** -- how tight the prior consolidation was (high-low range as a % of "
         "the low) before it broke out. Tighter/lower generally reads as a more coiled, "
         "higher-quality base, not a random bounce. The allowed max scales up for a more "
@@ -67,58 +77,21 @@ with st.expander("Legend - how to read this table", expanded=False):
         "excludes calm, defensive names (utilities, insurers, staples) and keeps this a "
         "growth/short-term screen rather than a slow-compounder one. It also scales up the base "
         "range, extension caps, and breakout band for names more volatile than a 30% baseline, "
-        "and feeds directly into Score below.\n"
+        "and feeds directly into Score above.\n"
         "- **% of 52wk High** -- how close price is to its own trailing-year high (100% = a "
         "fresh year high right now). Not a hard cutoff, and NOT what you'd assume -- a "
         "backtest run showed names farther below their own high actually did BETTER going "
         "forward than names already sitting near it (more room to re-rate, not yet as widely "
         "recognized), so Score rewards distance from the high here, not closeness to it.\n"
-        "- **SMA Trend %** -- how much the 150-day SMA itself has moved over the last "
-        "~2 trading weeks (positive = clearly inflecting upward), shown for context. A "
-        "backtest run found this barely correlated with actual outcome either way, so it's "
-        "not a Score factor -- just informational.\n"
-        "- **Volume x Avg** -- the breakout window's peak volume vs. the 50-day average. No "
-        "longer a hard cutoff -- a backtest showed it was mostly filtering on noise, including "
-        "real, sizeable moves (a genuine winner that grinds up on unremarkable volume the "
-        "whole way, never spiking) that the old hard requirement would have rejected outright. "
-        "Now a Score factor instead: higher volume confirmation scores higher, weak volume "
-        "scores lower, but nothing is excluded outright over this alone.\n"
-        "- **4wk Return % / Prior 4wk %** -- the acceleration check: the last ~4 weeks' return "
-        "must beat the 4 weeks before that. This is what separates *speeding up* from merely "
-        "*being up* -- a plain momentum screener only checks the second one.\n"
-        "- **SPY 4wk %** -- the S&P 500 ETF's own 4-week return, for comparison. The stock's 4wk "
-        "return must beat this too -- real relative strength vs. the market, not just vs. its own "
-        "past.\n"
-        "- **3mo Return % / 6mo Return %** -- trailing returns over both windows, shown for "
-        "context. These are what \"Exclude if already up more than % (3mo)\" and \"...(6mo)\" cap "
-        "-- the main filters against catching a name that's already had its spike. The 3mo cap "
-        "alone can miss a name whose LAST few months look fine but that already ran hard before "
-        "that; the 6mo cap catches that case. EXCEPTION: a name can still show up here even above "
-        "these caps if its move was clearly SUSTAINED (no single week explains more than ~15% of "
-        "the total gain) -- a gradual multi-month re-rating (memory-chip/AI-supercycle-style) is "
-        "treated differently from a single-catalyst spike (an FDA-approval-style overnight gap) "
-        "even at the same total size.\n"
-        "- **Call OI Skew** -- from the nearest live options-chain expiration: call open interest "
-        "as a % of total (call+put) open interest. Above 50% means the options market is "
-        "positioned more toward calls than puts -- a secondary confirmation only, never a hard "
-        "filter (sandbox chain data can be thin for less-liquid names).\n"
-        "- **ATM IV Skew (C-P)** -- the at-the-money call's implied vol minus the at-the-money "
-        "put's, same chain. Positive means calls are pricing relatively richer than puts near the "
-        "money -- another options-positioning tell, same caveat as above.\n"
-        "- **Score** -- the ranking number: combines volume confirmation, how much the RS "
-        "acceleration exceeds zero (weighted higher vs. SPY than vs. the stock's own past), the "
-        "stock's own volatility (higher = more of a growth-style mover, scored higher), and "
-        "distance from the 52wk high (farther = scored higher, see above), then nudged by the "
-        "options tilt if available. Higher = a better setup by these specific rules. Only "
-        "meaningful for ranking *within* one scan -- it isn't a probability or a return "
-        "forecast, and isn't comparable across different criteria settings. (This formula has "
-        "been revised more than once after backtest evidence directly contradicted an intuitive "
-        "assumption: a v1 factor rewarding being barely past the pivot was actually INVERTED -- "
-        "worse-scored flags outperformed better-scored ones; freshness was dropped after showing "
-        "~zero correlation with outcome; and when % of 52wk High and SMA Trend % first replaced "
-        "hard pass/fail cutoffs, the FIRST version scored proximity-to-high as a positive -- a "
-        "full backtest run showed that was backwards too. Re-check this with "
-        "backtest_early_trend.py before trusting Score too heavily.)"
+        "- **Notes** -- a plain-English readout of whatever else is actually driving that row's "
+        "Score: the 4-week acceleration vs. its own prior 4 weeks and vs. SPY, volume "
+        "confirmation (no longer a hard requirement, so light volume shows up here rather than "
+        "as a rejection), whether a >60%-in-6-months move looks gradual/sustained rather than a "
+        "single spike, and any options-positioning tilt toward calls when the chain data is "
+        "usable. Built only from numbers the scan already computes -- not a probability or a "
+        "forecast of anything. The full detail behind every one of these signals (SMA trend, raw "
+        "volume ratio, trailing 3mo/6mo returns, options OI/IV skew) lives in `early_trend.py`'s "
+        "own scan output even where it's not broken out as a separate table column here."
     )
 
 
@@ -236,13 +209,16 @@ crit = (int(base_weeks), int(base_weeks) * 5, base_range / 100.0, int(breakout_r
         int(min_cap) * 1_000_000_000, int(pool), int(mover_pool), min_vol / 100.0)
 
 DISPLAY_COLS = {
-    "ticker": "Ticker", "price": "Price", "pivot": "Pivot", "days_since_breakout": "Days Since Breakout",
-    "extension_pct": "Above Pivot %", "base_range_pct": "Base Range %", "volatility_pct": "Volatility %",
-    "window_high_pct": "% of 52wk High", "sma_trend_pct": "SMA Trend %",
-    "volume_ratio": "Volume x Avg", "ret_4w_pct": "4wk Return %", "ret_prior_4w_pct": "Prior 4wk %",
-    "spy_ret_4w_pct": "SPY 4wk %", "ret_3mo_pct": "3mo Return %", "ret_6mo_pct": "6mo Return %",
-    "oi_skew": "Call OI Skew", "iv_skew": "ATM IV Skew (C-P)", "score": "Score",
+    "ticker": "Ticker", "price": "Price", "score": "Score", "extension_pct": "Above Pivot %",
+    "days_since_breakout": "Days Since Breakout", "base_range_pct": "Base Range %",
+    "volatility_pct": "Volatility %", "window_high_pct": "% of 52wk High",
 }
+# Everything else the raw scan computes (pivot, SMA trend, volume ratio, 4wk/prior-4wk/SPY
+# returns, 3mo/6mo returns, options tilt) is either narrated in Notes when it's actually
+# notable for that row, or -- SMA Trend % only -- dropped outright: backtest report 9 found
+# it barely correlated with outcome either way, so it was pure clutter with no signal behind
+# it. Trimmed from 17 raw columns to this + Notes so the table reads at a glance instead of
+# requiring a legend lookup for every header.
 
 try:
     results = scan_early_trend(crit)
@@ -256,7 +232,15 @@ try:
                    f"showing top {len(shown)} by Score.")
         st.dataframe(
             df, hide_index=True, use_container_width=True,
-            column_config={"Notes": st.column_config.TextColumn(width="large")},
+            column_config={
+                "Notes": st.column_config.TextColumn(width="large"),
+                "Price": st.column_config.NumberColumn(format="$%.2f"),
+                "Score": st.column_config.NumberColumn(format="%.2f"),
+                "Above Pivot %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Base Range %": st.column_config.NumberColumn(format="%.0f%%"),
+                "Volatility %": st.column_config.NumberColumn(format="%.0f%%"),
+                "% of 52wk High": st.column_config.NumberColumn(format="%.0f%%"),
+            },
         )
         st.caption(
             "Notes describe the specific signals behind that row's Score (built only from "
