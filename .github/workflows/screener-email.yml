@@ -3,9 +3,21 @@ name: Screener email
 # Runs every 30 min during a UTC window that covers US market hours year-round.
 # The Python script only actually emails 9:30-16:00 ET on weekdays; a manual
 # "Run workflow" (workflow_dispatch) always sends so you can test it any time.
+#
+# Minutes 6/36 (not 0/30): GitHub's own docs flag the top and half of every
+# hour as the highest-contention time for `schedule` triggers ("High load
+# times include the start of every hour... schedule your workflow to run at
+# a different time of the hour to decrease the chance of delay") -- this
+# workflow went a full trading day (2026-08-28) without firing even once
+# despite the cron being due every 30 min, while this repo's OTHER scheduled
+# workflows fired that same day (late, but they fired) -- this is the most
+# frequent cron in the repo by far, so it's the one most exposed to that
+# contention. Nudging off :00/:30 both avoids the documented hot window and
+# re-registers the trigger, which has also unstuck reports of scheduled runs
+# that silently stopped firing.
 on:
   schedule:
-    - cron: "0,30 13-21 * * 1-5"
+    - cron: "6,36 13-21 * * 1-5"
   workflow_dispatch:
 
 jobs:
