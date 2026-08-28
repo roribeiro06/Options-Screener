@@ -15,10 +15,22 @@ name: Screener email
 # contention. Nudging off :00/:30 both avoids the documented hot window and
 # re-registers the trigger, which has also unstuck reports of scheduled runs
 # that silently stopped firing.
+# Still not firing reliably even off :00/:30 -- GitHub's `schedule` trigger is
+# documented as best-effort and can be silently delayed or dropped, and this
+# is the most frequent cron in the repo (most exposed to that). Added
+# repository_dispatch as a second, independent trigger: an external cron
+# service (not subject to GitHub's own scheduler contention) can POST to
+# https://api.github.com/repos/roribeiro06/Options-Screener/dispatches with
+# {"event_type": "screener-email-tick"} (needs a GitHub PAT with Actions
+# write access, set up on the external service's side -- never store that
+# token in this repo). `schedule` stays as a free-riding backup in case it
+# starts working again; workflow_dispatch stays for on-demand manual runs.
 on:
   schedule:
     - cron: "6,36 13-21 * * 1-5"
   workflow_dispatch:
+  repository_dispatch:
+    types: [screener-email-tick]
 
 jobs:
   email:
