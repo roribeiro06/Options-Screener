@@ -16,8 +16,13 @@ Required environment variables (same GitHub repo Secrets notify_email.py uses):
   TRADIER_TOKEN        - Stage 1's candidate pool and Stage 3's options tilt both need it
   EMAIL_USER           - the Gmail address that SENDS the mail
   EMAIL_APP_PASSWORD   - a 16-char Google App Password (NOT your normal password)
-  EMAIL_TO             - where to send it (can be the same Gmail)
 Optional:
+  EARLY_TREND_EMAIL_TO - recipient(s) for THIS email specifically, comma-separated for
+                         multiple (e.g. "a@x.com,b@y.com"). Falls back to EMAIL_TO (the
+                         wheel screener's recipient) if unset, so this only needs setting
+                         if the Early Trend list should differ from the wheel screener's.
+                         Kept separate rather than reusing EMAIL_TO outright since this
+                         repo is public -- no recipient address should be hardcoded here.
   TRADIER_BASE         - defaults to the sandbox URL
   SEND_IF_EMPTY        - "1" to email even when nothing qualifies (default: skip empty)
   IGNORE_TIME          - "1" to send regardless of time (useful for a manual test run)
@@ -35,8 +40,7 @@ TARGET_HOUR_ET = 10          # 10:00 AM ET
 TIME_TOLERANCE_MIN = 20      # accept a tick up to this many minutes after the target,
                               # since GitHub Actions cron can run a few minutes late and
                               # the wrong-season UTC tick needs to be rejected outright
-TOP_N = 10   # a bit more context than the live page's adjustable default (5) -- there's
-             # no sidebar in an email to loosen this after the fact
+TOP_N = 5   # matches the live page's default "Show top N by Score"
 
 
 def _at_target_time(now_et):
@@ -90,7 +94,7 @@ def main():
 
     user = os.environ.get("EMAIL_USER")
     pw = os.environ.get("EMAIL_APP_PASSWORD")
-    to = os.environ.get("EMAIL_TO") or user
+    to = os.environ.get("EARLY_TREND_EMAIL_TO") or os.environ.get("EMAIL_TO") or user
     if not (user and pw):
         print("EMAIL_USER / EMAIL_APP_PASSWORD not set; cannot send.", file=sys.stderr)
         sys.exit(1)

@@ -28,4 +28,5 @@ jobs:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EARLY_TREND_EMAIL_TO: ${{ secrets.EARLY_TREND_EMAIL_TO }}
         run: python notify_early_trend_email.py
