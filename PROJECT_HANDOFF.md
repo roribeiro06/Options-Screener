@@ -79,6 +79,12 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   rolling 30-day window past `exit_date` (the config entry itself is permanent, only the display
   filters). Edited the same way as `PUT_TICKERS`/`HOLDINGS` -- tell Claude Code your positions, or
   edit the lists on GitHub directly; not editable from the app itself, so they survive redeploys.
+  **Auto-close:** an `OPEN_POSITIONS` entry whose expiration is 1+ day past with no matching
+  `CLOSED_POSITIONS` entry is treated as closed automatically everywhere (Open Positions,
+  Closed Positions, all three Financials tables, Concentration) with `exit_cost=0` (expired
+  worthless) -- no manual "close X" needed for the common case. If a position actually finished
+  ITM/assigned, add the real `CLOSED_POSITIONS` entry with its true `exit_cost`; an explicit entry
+  always overrides the auto-assumption (see `positions._is_expired_unclosed`).
 - **`discover.py`** — shared logic (`run_discovery()`) for finding tickers OUTSIDE `PUT_TICKERS`, from
   a broad ~7,000-ticker US-listed universe (not just the S&P 500), via one batched-quotes pass (price,
   volume, average volume, 1-day % change -- all free in that same call) feeding TWO candidate-selection

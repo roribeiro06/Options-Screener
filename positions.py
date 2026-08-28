@@ -31,6 +31,15 @@ Single-leg positions ("put"/"call") need a "strike"; spreads ("put_spread"/
 leg is what you sold, the long leg is the protective leg you bought (for a
 put_spread, both are puts; for a call_spread, both are calls). Reuses
 spreads.py's _leg_at() to find each exact contract in the chain.
+
+Auto-close (see _is_expired_unclosed/_auto_closed_entry): an OPEN_POSITIONS
+entry whose expiration is 1+ day in the past, with no matching CLOSED_POSITIONS
+entry, is treated as closed automatically -- moved out of Open Positions and
+into Closed Positions (and every Financials/Concentration table) everywhere,
+with exit_cost=0 (expired worthless, full premium kept), since that's the only
+default possible without being told otherwise. If a position actually finished
+ITM/assigned instead, add the real CLOSED_POSITIONS entry with its true
+exit_cost -- an explicit entry always overrides this assumption.
 """
 import sys
 import datetime as dt
@@ -94,6 +103,42 @@ def _max_loss_per_share(pos):
     raise RuntimeError(f"unknown position type {kind!r} for {pos.get('ticker', '?')}")
 
 
+def _pos_key(pos):
+    """Identity for matching an OPEN_POSITIONS entry to a CLOSED_POSITIONS
+    one -- ticker/type/expiration/entry_date plus whichever strike field(s)
+    this type uses."""
+    base = (pos["ticker"], pos["type"], pos["expiration"], pos.get("entry_date"))
+    if pos["type"] in ("put", "call"):
+        return base + (pos["strike"],)
+    return base + (pos["short_strike"], pos["long_strike"])
+
+
+def _has_explicit_close(pos):
+    key = _pos_key(pos)
+    return any(_pos_key(c) == key for c in ws.CLOSED_POSITIONS)
+
+
+def _is_expired_unclosed(pos, today):
+    """True once an OPEN_POSITIONS entry's expiration is at least 1 day in
+    the past and no CLOSED_POSITIONS entry already accounts for it -- rather
+    than requiring you to explicitly report every expiration, it's assumed
+    closed automatically. No exit price was given, so the only reasonable
+    default is exit_cost=0 (expired worthless, full premium kept) -- if a
+    position actually finished ITM/assigned instead, tell me so it can get a
+    real CLOSED_POSITIONS entry with the correct exit_cost; that explicit
+    entry then takes priority over this assumption (see _has_explicit_close)."""
+    exp_date = dt.date.fromisoformat(pos["expiration"])
+    if (today - exp_date).days < 1:
+        return False
+    return not _has_explicit_close(pos)
+
+
+def _auto_closed_entry(pos):
+    """Synthesize a CLOSED_POSITIONS-shaped dict for an expired-but-unclosed
+    OPEN_POSITIONS entry -- see _is_expired_unclosed."""
+    return {**pos, "exit_cost": 0, "exit_date": pos["expiration"]}
+
+
 def evaluate_position(pos, today):
     """Live-prices one OPEN_POSITIONS entry. Raises on a missing quote/contract
     so callers can report which position failed rather than silently skip it."""
@@ -143,14 +188,18 @@ def evaluate_position(pos, today):
 
 
 def build_positions_table():
-    """Evaluates every OPEN_POSITIONS entry. Returns (dataframe, errors) --
-    a position that fails (bad ticker, expired, contract not found) is
-    reported as an error string rather than silently dropped, same pattern
-    as screen_puts/screen_calls's error handling."""
+    """Evaluates every OPEN_POSITIONS entry that isn't auto-closed (see
+    _is_expired_unclosed -- an expiration 1+ day in the past with no explicit
+    CLOSED_POSITIONS entry moves to build_closed_positions_table() instead).
+    Returns (dataframe, errors) -- a position that fails (bad ticker, expired,
+    contract not found) is reported as an error string rather than silently
+    dropped, same pattern as screen_puts/screen_calls's error handling."""
     import pandas as pd
     today = dt.date.today()
     rows, errs = [], []
     for pos in ws.OPEN_POSITIONS:
+        if _is_expired_unclosed(pos, today):
+            continue
         try:
             rows.append(evaluate_position(pos, today))
         except Exception as e:
@@ -184,15 +233,26 @@ def evaluate_closed_position(pos):
             "RealizedGL_%": realized_pl_pct, "MaxLoss": round(_max_loss_per_share(pos), 2)}
 
 
+def _all_closed():
+    """CLOSED_POSITIONS plus every OPEN_POSITIONS entry that's auto-closed
+    (see _is_expired_unclosed) -- the single source both
+    build_closed_positions_table() and the Financials functions (via
+    _closed_in_window) read from, so an expired position appears consistently
+    across every view without needing an explicit CLOSED_POSITIONS entry."""
+    today = dt.date.today()
+    auto = [_auto_closed_entry(p) for p in ws.OPEN_POSITIONS if _is_expired_unclosed(p, today)]
+    return list(ws.CLOSED_POSITIONS) + auto
+
+
 def build_closed_positions_table(window_days=30):
-    """Closed positions with an exit_date within the last `window_days`
-    (default 30) of today. Returns (dataframe, errors), same error-reporting
-    pattern as build_positions_table -- a malformed entry is reported, not
-    silently dropped."""
+    """Closed positions (recorded + auto-closed, see _all_closed) with an
+    exit_date within the last `window_days` (default 30) of today. Returns
+    (dataframe, errors), same error-reporting pattern as build_positions_table
+    -- a malformed entry is reported, not silently dropped."""
     import pandas as pd
     today = dt.date.today()
     rows, errs = [], []
-    for pos in ws.CLOSED_POSITIONS:
+    for pos in _all_closed():
         try:
             exit_date = dt.date.fromisoformat(pos["exit_date"])
             if (today - exit_date).days > window_days:
@@ -248,7 +308,7 @@ def _fmt_pct(v):
 
 
 def _closed_in_window(window_days, today):
-    return [pos for pos in ws.CLOSED_POSITIONS
+    return [pos for pos in _all_closed()
             if (today - dt.date.fromisoformat(pos["exit_date"])).days <= window_days]
 
 
@@ -362,13 +422,20 @@ def _pivot_table(gl_row_label, gl_by_bucket, entries):
     return pd.DataFrame(rows, columns=["Metric"] + cols)
 
 
+def _open_unclosed(today):
+    """OPEN_POSITIONS minus whatever's auto-closed (see _is_expired_unclosed)
+    -- what build_positions_table() itself shows, reused here so the
+    Financials/Concentration tables stay consistent with it."""
+    return [p for p in ws.OPEN_POSITIONS if not _is_expired_unclosed(p, today)]
+
+
 def build_open_financials(dpos_df):
     """Pivoted Financials for OPEN_POSITIONS only (row 1 = Unrealized G/L,
     also ROR%'s basis). See _pivot_table/_pivot_max_loss_per_share for the
     Put/Call/Multi-Leg breakdown and the per-type Max Loss adjustment."""
     today = dt.date.today()
     gl = _pivot_gl(dpos_df, "UnrealizedGL_$")
-    entries = _pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
+    entries = _pivot_entries(_open_unclosed(today), lambda pos: today, today)
     return _pivot_table("G/L (Unrealized)", gl, entries)
 
 
@@ -394,7 +461,7 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     gl_open = _pivot_gl(dpos_df, "UnrealizedGL_$")
     gl_closed = _pivot_gl(dclosed_df, "RealizedGL_$")
     gl = {b: gl_open[b] + gl_closed[b] for b in PIVOT_COLS}
-    entries = (_pivot_entries(ws.OPEN_POSITIONS, lambda pos: today, today)
+    entries = (_pivot_entries(_open_unclosed(today), lambda pos: today, today)
               + _pivot_entries(closed_list, lambda pos: dt.date.fromisoformat(pos["exit_date"]), today))
     return _pivot_table("G/L (Unrealized + Realized)", gl, entries)
 
@@ -456,7 +523,7 @@ def build_concentration_table():
     grid = {s: {c: {"maxloss": 0.0, "prem_y": 0.0, "prem_t": 0.0} for c in cols} for s in sectors}
     errs = []
 
-    for pos in ws.OPEN_POSITIONS:
+    for pos in _open_unclosed(today):
         kind = pos["type"]
         bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(kind)
         if not bucket:
