@@ -749,3 +749,87 @@ def run_scan():
 
     results.sort(key=lambda r: r["score"], reverse=True)
     return results
+
+
+# ---- Display helpers, shared by pages/2_Early_Trend.py and notify_early_trend_email.py --
+# Kept here (not duplicated in each caller) since both need the exact same columns and the
+# exact same story behind a row's Score -- moved from the Streamlit page (2026-08-27) once a
+# second, non-Streamlit caller (the email digest) needed them too.
+DISPLAY_COLS = {
+    "ticker": "Ticker", "price": "Price", "score": "Score", "extension_pct": "Above Pivot %",
+    "days_since_breakout": "Days Since Breakout", "base_range_pct": "Base Range %",
+    "volatility_pct": "Volatility %", "window_high_pct": "% of 52wk High",
+}
+# Everything else the raw scan computes (pivot, SMA trend, volume ratio, 4wk/prior-4wk/SPY
+# returns, 3mo/6mo returns, options tilt) is either narrated in build_note() when it's actually
+# notable for that row, or -- SMA Trend % only -- dropped outright: backtest report 9 found
+# it barely correlated with outcome either way, so it was pure clutter with no signal behind
+# it. Trimmed from 17 raw columns to this + Notes so the table reads at a glance instead of
+# requiring a legend lookup for every header.
+
+
+def build_note(r):
+    """Plain-English summary of what's actually driving a ticker's ranking, built only
+    from the same numbers already shown in the table -- NOT a probability or prediction,
+    just an explanation of the specific signals behind that row's Score. Prioritizes the
+    raw signals backtest report 9 has repeatedly shown carry the most real correlation
+    with outcome (base tightness, RS acceleration/vs-SPY, volatility, distance from the
+    52wk high) over the weaker ones (volume), so the story matches what's actually been
+    validated to matter rather than reciting every column."""
+    parts = []
+
+    spy4w = r.get("spy_ret_4w_pct")
+    if spy4w is not None:
+        vs_spy = r["ret_4w_pct"] - spy4w
+        parts.append(
+            f"Up {r['ret_4w_pct']:.0f}% over the last 4 weeks (accelerating from "
+            f"{r['ret_prior_4w_pct']:.0f}% the 4 weeks before) and beating SPY's {spy4w:.0f}% "
+            f"by {vs_spy:.0f} points"
+        )
+    else:
+        parts.append(
+            f"Up {r['ret_4w_pct']:.0f}% over the last 4 weeks, accelerating from "
+            f"{r['ret_prior_4w_pct']:.0f}% the 4 weeks before"
+        )
+
+    br = r["base_range_pct"]
+    if br <= 20:
+        parts.append(f"broke out of a tightly coiled {br:.0f}% base")
+    elif br <= 40:
+        parts.append(f"broke out of a {br:.0f}% base")
+    else:
+        parts.append(f"broke out of a wider ({br:.0f}%) base -- typical for how volatile this name runs")
+
+    wh = r.get("window_high_pct")
+    if wh is not None:
+        if wh < 70:
+            parts.append(f"still {100 - wh:.0f}% below its own 52-week high, with real room left to re-rate")
+        elif wh >= 95:
+            parts.append("already sitting right at a fresh 52-week high")
+
+    vol_pct = r["volatility_pct"]
+    if vol_pct >= 60:
+        parts.append(f"a genuinely explosive mover ({vol_pct:.0f}% annualized volatility)")
+    elif vol_pct < 35:
+        parts.append(f"calmer than most names that clear this screen ({vol_pct:.0f}% volatility)")
+
+    vr = r["volume_ratio"]
+    if vr >= 1.5:
+        parts.append(f"volume ran {vr:.1f}x its 50-day average on the breakout -- real confirmation")
+    elif vr < 1.0:
+        parts.append(f"volume hasn't confirmed yet (only {vr:.1f}x average) -- moving on light "
+                     f"interest, a softer sign since this stopped being a hard requirement")
+
+    if r.get("sustained_move"):
+        ret6mo = r.get("ret_6mo_pct")
+        gain_note = f"up {ret6mo:.0f}% over 6 months" if ret6mo is not None else "up sharply"
+        parts.append(f"already {gain_note}, but no single week explains much of that -- a gradual, "
+                     f"persistent re-rating rather than a spike, which is why it still qualifies and "
+                     f"isn't marked down for sitting near its high the way a typical flag would be")
+
+    oi_skew = r.get("oi_skew")
+    if oi_skew is not None and oi_skew > 0.55:
+        parts.append(f"options positioning leans toward calls ({oi_skew * 100:.0f}% of open interest)")
+
+    text = "; ".join(parts) + "."
+    return text[0].upper() + text[1:]

@@ -1,0 +1,31 @@
+name: Early Trend email
+
+# Targets 10:00 AM ET daily (weekdays). GitHub Actions cron is UTC-only and
+# doesn't shift for US daylight saving, so this fires at both 14:00 UTC (10am
+# EDT, roughly Mar-Nov) and 15:00 UTC (10am EST, roughly Nov-Mar) -- the
+# script itself only actually sends on whichever tick is really ~10:00 ET,
+# same "let the script decide" pattern as screener-email.yml. A manual
+# "Run workflow" (workflow_dispatch) always sends so you can test it any time.
+on:
+  schedule:
+    - cron: "0 14,15 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Early Trend Screener and email
+        env:
+          TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+          TRADIER_BASE: "https://sandbox.tradier.com/v1"
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: python notify_early_trend_email.py
