@@ -37,7 +37,6 @@ HOLDINGS = {
     "GOOG": 359.91,
     "NVDA": 203.925,
     "SMH": 573.6451,
-    "MSFT": 424.7193,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
