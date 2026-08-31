@@ -101,13 +101,14 @@ def _leg_at(chain, opt_type, strike):
     return None
 
 
-def _long_strike(chain, opt_type, short_strike):
+def _long_strike(chain, opt_type, short_strike, width_pct=None):
+    w = SPREAD_WIDTH_PCT if width_pct is None else width_pct
     strikes = sorted({o["strike"] for o in chain if o["type"] == opt_type})
     if opt_type == "put":
-        target = short_strike * (1 - SPREAD_WIDTH_PCT)
+        target = short_strike * (1 - w)
         cand = [s for s in strikes if s < short_strike]
     else:
-        target = short_strike * (1 + SPREAD_WIDTH_PCT)
+        target = short_strike * (1 + w)
         cand = [s for s in strikes if s > short_strike]
     return min(cand, key=lambda s: abs(s - target)) if cand else None
 
@@ -626,14 +627,18 @@ def _blocked_by_open_position(strategy, occupied):
 
 
 def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
-                   exp_start=None, exp_end=None):
+                   exp_start=None, exp_end=None, width_pct=None):
     """Manual lookup: every viable put_spread/call_spread for a ticker within
     the given SHORT-strike and expiration range -- the long leg is auto-picked
-    at the live SPREAD_WIDTH_PCT, same as the main screener, but every listed
-    short strike is shown regardless of whether it passes the screener's POP/
-    AnnROR/OTM criteria or the MIN_OPEN_INTEREST floor. No delta targeting, no
-    earnings-window exclusion, no open-position-side filtering -- same "show
-    everything, you decide" ethos as wheel_screener.lookup_contracts."""
+    at `width_pct` (defaults to the live SPREAD_WIDTH_PCT if not given, same
+    as the main screener), but every listed short strike is shown regardless
+    of whether it passes the screener's POP/AnnROR/OTM criteria or the
+    MIN_OPEN_INTEREST floor. No delta targeting, no earnings-window
+    exclusion, no open-position-side filtering -- same "show everything, you
+    decide" ethos as wheel_screener.lookup_contracts. width_pct is a search
+    parameter here (unlike the module-level SPREAD_WIDTH_PCT the main
+    screener/sidebar shares) so Contract Lookup can pick its own width per
+    search without touching what Multi-Leg Strategies uses."""
     opt_type = "put" if kind == "put_spread" else "call"
     price = ws.td_quote(symbol)
     if not price:
@@ -662,7 +667,7 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
             short = _leg_at(chain, opt_type, short_strike)
             if not short or (short.get("bid") or 0) <= 0:
                 continue
-            long_strike = _long_strike(chain, opt_type, short_strike)
+            long_strike = _long_strike(chain, opt_type, short_strike, width_pct)
             if long_strike is None:
                 continue
             long_leg = _leg_at(chain, opt_type, long_strike)

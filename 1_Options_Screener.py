@@ -262,11 +262,11 @@ def scan_spreads(tickers, sc):
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_lookup(ticker, kind, smin, smax, estart, eend):
+def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None):
     if kind in ("put", "call"):
         rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
         return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
-    rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend)
+    rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend, width_pct=width_pct)
     return sp._df(rows)
 
 
@@ -397,7 +397,8 @@ st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range
            "(cash-secured puts), calls (covered calls, as if you held the shares), or put/call credit "
            "spreads - even ones that don't pass the criteria above. Puts/put spreads show strikes below "
            "the price, calls/call spreads above it. For spreads, Strike min/max filters the SHORT leg; "
-           "the long leg is auto-picked at the live Spread width % (sidebar). Same stats (Score, yields, "
+           "the long leg is auto-picked at the Spread width % set below (independent of the sidebar's "
+           "own Spread width %, which only affects Multi-Leg Strategies). Same stats (Score, yields, "
            "IV, liquidity) as everywhere else.")
 with st.form("lookup_form"):
     _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
@@ -408,10 +409,12 @@ with st.form("lookup_form"):
                                                "call_spread": "Call Spread"}[k])
     lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
     lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
-    _d1, _d2 = st.columns(2)
+    _d1, _d2, _d3 = st.columns(3)
     _today = datetime.now().date()
     lk_start = _d1.date_input("Expiration from", _today)
     lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
+    lk_width = _d3.number_input("Spread width % (spreads only)", 1, 50,
+                                int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
     lk_go = st.form_submit_button("Search")
 
 if lk_go and lk_ticker:
@@ -422,21 +425,23 @@ if lk_go and lk_ticker:
     # results (and the row you just clicked) disappear instead of showing
     # the summary. Keying off session_state instead survives any rerun.
     st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
-                                        lk_smax or None, lk_start, lk_end)
+                                        lk_smax or None, lk_start, lk_end, lk_width / 100)
 
 _lq = st.session_state.get("lookup_query")
 if _lq:
-    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end = _lq
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width = _lq
     try:
-        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end)
+        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width)
         if len(_res):
             _label = {"put": "cash-secured put", "call": "covered call",
                       "put_spread": "put credit spread", "call_spread": "call credit spread"}[_q_kind]
-            st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker} ({_q_start} to {_q_end}).")
+            _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread") else ""
+            st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker}{_width_note} ({_q_start} to {_q_end}).")
             if _q_kind in ("put", "call"):
                 _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
             else:
-                _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit (Best)", "Call Max Profit (Best)"])
+                _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
+                                              "Call Max Profit", "Call Max Profit (Best)"])
                 for _lk_lc in ("Put Legs", "Call Legs"):     # drop the always-empty side
                     if _lk_lc in _lk_disp.columns and (_lk_disp[_lk_lc].fillna("") == "").all():
                         _lk_disp = _lk_disp.drop(columns=[_lk_lc])
