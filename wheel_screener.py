@@ -90,6 +90,8 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-04", "contracts": 35, "entry_credit": 0.34998, "entry_date": "2026-08-27"},
     {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-09-18",
      "contracts": 2, "entry_credit": 4.35, "entry_date": "2026-08-28"},
+    {"ticker": "NOW", "type": "call_spread", "short_strike": 170, "long_strike": 185,
+     "expiration": "2026-10-16", "contracts": 20, "entry_credit": 2.30, "entry_date": "2026-08-31"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
