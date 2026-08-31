@@ -1,15 +1,30 @@
 name: Early Trend email
 
 # Targets 10:00 AM ET daily (weekdays). GitHub Actions cron is UTC-only and
-# doesn't shift for US daylight saving, so this fires at both 14:00 UTC (10am
-# EDT, roughly Mar-Nov) and 15:00 UTC (10am EST, roughly Nov-Mar) -- the
+# doesn't shift for US daylight saving, so this fires at both 14:06 UTC (10am
+# EDT, roughly Mar-Nov) and 15:06 UTC (10am EST, roughly Nov-Mar) -- the
 # script itself only actually sends on whichever tick is really ~10:00 ET,
 # same "let the script decide" pattern as screener-email.yml. A manual
 # "Run workflow" (workflow_dispatch) always sends so you can test it any time.
+#
+# Minute 6 (not 0): same reasoning as screener-email.yml's cron -- GitHub's own
+# docs flag the top of every hour as the highest-contention time for `schedule`
+# triggers. More importantly: `schedule` here fired exactly ONCE in this
+# workflow's first 3 days (2026-08-28 creation through 2026-08-31), landing
+# ~9 hours late and outside the 10:00 ET send window entirely -- the same
+# "schedule silently stops firing" failure screener-email.yml already hit and
+# fixed. Added repository_dispatch on the SAME "screener-email-tick" event that
+# workflow's external cron service already posts every 30 min (confirmed firing
+# reliably), rather than standing up a second external schedule -- this
+# script's own TIME_TOLERANCE_MIN=20 window picks out the one tick near 10:00
+# ET and ignores the rest, so piggybacking is safe. `schedule` stays as a
+# free-riding backup in case it starts working again.
 on:
   schedule:
-    - cron: "0 14,15 * * 1-5"
+    - cron: "6 14,15 * * 1-5"
   workflow_dispatch:
+  repository_dispatch:
+    types: [screener-email-tick]
 
 jobs:
   email:

@@ -153,10 +153,25 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
   kept only as a **fallback snapshot**: if the live scan errors inside the app, it falls back to
   whatever this last wrote.
 - **`notify_email.py`** — headless run that emails all strategies (Gmail SMTP); market-hours guarded.
+- **`notify_early_trend_email.py`** — headless daily digest of `early_trend.run_scan()`'s top 5
+  by Score (Gmail SMTP, reuses `notify_email.py`'s `send()`), targeted at 10:00 AM ET on
+  weekdays only (`TIME_TOLERANCE_MIN` = 20-min window, since GitHub Actions cron doesn't shift
+  for daylight saving so the workflow fires at both the EDT and EST UTC equivalents and the
+  script itself picks the real one). Recipient is `EARLY_TREND_EMAIL_TO` (falls back to
+  `EMAIL_TO`). `DISPLAY_COLS`/`build_note()` (bottom of `early_trend.py`) are the shared
+  table-column/plain-English-summary helpers used by both this and the Streamlit page, so they
+  always tell the same story about a row's Score.
 - **`history_premiums.json`** — the precomputed annualized-yield table (committed; refreshed weekly).
 - **`volume_leaders.json`** — fallback-only snapshot for Discover (committed; refreshed daily after
   close by the Action below). Only used if the live in-app scan fails.
 - **`.github/workflows/screener-email.yml`** — emails every 30 min during market hours (weekdays).
+  `schedule` alone proved unreliable (missed a full trading day); also triggered via
+  `repository_dispatch` (`screener-email-tick`) from an external cron service hitting the GitHub
+  API every 30 min, which `schedule` now free-rides as a backup instead of the other way around.
+- **`.github/workflows/early-trend-email.yml`** — runs `notify_early_trend_email.py` targeting
+  10:00 AM ET (weekdays); same `repository_dispatch` piggyback as screener-email.yml (same
+  `screener-email-tick` event, no separate external schedule needed) after `schedule` alone fired
+  only once in this workflow's first 3 days and landed hours outside the send window.
 - **`.github/workflows/build-history.yml`** — rebuilds history_premiums.json weekly, commits it.
 - **`.github/workflows/build-volume-leaders.yml`** — rebuilds the fallback `volume_leaders.json`
   daily after the close (weekdays 20:15 UTC), commits it. Has a manual "Run workflow" button too.
@@ -167,6 +182,8 @@ Nothing is tied to any one computer — edit the repo from anywhere and Streamli
 - `EMAIL_USER` — sending Gmail address
 - `EMAIL_APP_PASSWORD` — 16-char Google App Password
 - `EMAIL_TO` — recipient(s), comma-separated for multiple
+- `EARLY_TREND_EMAIL_TO` — optional; recipient(s) for the Early Trend digest specifically, falls
+  back to `EMAIL_TO` if unset
 Streamlit app Secrets need `TRADIER_TOKEN` (and optionally `TRADIER_BASE`).
 
 ## Key config (top of wheel_screener.py) — current values
