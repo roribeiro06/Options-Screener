@@ -806,7 +806,14 @@ def get_earnings_date(symbol):
     methods + retry), falling back to stockanalysis.com if Yahoo comes up
     empty -- Yahoo/yfinance can be flaky (rate limits, bot detection,
     library-side parsing bugs), so a single source shouldn't be the only
-    thing standing between a real catalyst and this screener seeing it."""
+    thing standing between a real catalyst and this screener seeing it.
+
+    NO_EARNINGS_TICKERS (ETFs) short-circuit to None right after the manual
+    check -- an ETF structurally never has an earnings date, so the full
+    Yahoo (2 attempts, 2 methods each, 0.6s sleep between) + stockanalysis.com
+    fallback chain below was previously run anyway, guaranteed to fail every
+    time, costing ~15-25s per ETF per cache-miss scan for a result that's
+    always None."""
     manual = EARNINGS_DATES.get(symbol)
     if manual:
         try:
@@ -815,6 +822,8 @@ def get_earnings_date(symbol):
                 return d
         except Exception:
             pass
+    if symbol in NO_EARNINGS_TICKERS:
+        return None
     tkr = _ticker(symbol)
     today = dt.date.today()
     for attempt in range(2):
