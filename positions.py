@@ -466,6 +466,60 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     return _pivot_table("G/L (Unrealized + Realized)", gl, entries)
 
 
+MONTHLY_COLS = ["Month", "# Closed", "Premium Collected", "Realized G/L", "Realized G/L %", "Cumulative G/L"]
+
+
+def build_monthly_realized_table():
+    """One row per calendar month with at least one closed position, oldest
+    first, plus a Total row -- a running ledger of realized P&L over time,
+    NOT limited to build_closed_positions_table's 30-day display window
+    (uses _all_closed(), the same permanent record -- recorded
+    CLOSED_POSITIONS plus auto-closed expired OPEN_POSITIONS, see
+    _is_expired_unclosed). Reuses evaluate_closed_position's own G/L math
+    rather than recomputing it, so this always agrees with the Closed
+    Positions table above for whatever's still in its 30-day window.
+    Premium Collected is entry_credit x 100 x contracts, same basis
+    "Potential Profit Acc." uses in the pivoted Financials tables. Months
+    with a net realized LOSS still show a negative Realized G/L % against
+    that month's own premium collected (can go below -100% if you gave back
+    more than you collected)."""
+    import pandas as pd
+    by_month = {}
+    errs = []
+    for pos in _all_closed():
+        try:
+            exit_date = dt.date.fromisoformat(pos["exit_date"])
+            r = evaluate_closed_position(pos)
+        except Exception as e:
+            errs.append(f"{pos.get('ticker', '?')}: {e}")
+            continue
+        month_key = exit_date.strftime("%Y-%m")
+        b = by_month.setdefault(month_key, {"n": 0, "premium": 0.0, "gl": 0.0})
+        b["n"] += 1
+        b["premium"] += r["EntryCredit"] * 100 * r["Contracts"]
+        b["gl"] += r["RealizedGL_$"]
+
+    rows = []
+    cum = 0.0
+    for month_key in sorted(by_month):
+        b = by_month[month_key]
+        cum += b["gl"]
+        month_label = dt.datetime.strptime(month_key, "%Y-%m").strftime("%B %Y")
+        gl_pct = (b["gl"] / b["premium"]) if b["premium"] else float("nan")
+        rows.append([month_label, b["n"], _fmt_dollar(b["premium"]),
+                    _fmt_dollar_signed(b["gl"]), _fmt_pct(gl_pct), _fmt_dollar_signed(cum)])
+
+    if rows:
+        total_n = sum(by_month[m]["n"] for m in by_month)
+        total_prem = sum(by_month[m]["premium"] for m in by_month)
+        total_gl = sum(by_month[m]["gl"] for m in by_month)
+        total_pct = (total_gl / total_prem) if total_prem else float("nan")
+        rows.append(["Total", total_n, _fmt_dollar(total_prem),
+                    _fmt_dollar_signed(total_gl), _fmt_pct(total_pct), _fmt_dollar_signed(total_gl)])
+
+    return pd.DataFrame(rows, columns=MONTHLY_COLS), errs
+
+
 CONCENTRATION_ROWS = ["Tech", "Non-Tech"]
 # Unlike PIVOT_COLS (Put/Call/Multi-Leg, used by the Financials tables above,
 # which keeps spreads as their own bucket), this table groups by directional

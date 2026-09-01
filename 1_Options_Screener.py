@@ -675,6 +675,28 @@ except Exception as _e:
     st.caption(f"(financials unavailable: {_e})")
 
 st.markdown("---")
+st.header("Realized G/L by Month")
+st.caption("Every closed position (recorded in CLOSED_POSITIONS, plus anything auto-closed after expiring "
+           "-- see Open Positions above), grouped by the calendar month it closed in. Unlike Closed "
+           "Positions' own 30-day display window, this covers your full history, oldest month first, so "
+           "it's the place to check 'did anything close last month' months after the fact. Premium "
+           "Collected is entry credit x 100 x contracts (same basis the Financials tables' Potential "
+           "Profit Acc. uses); Realized G/L % is that month's G/L against that month's own premium "
+           "collected, so a bad month can show well below -100% if you gave back more than you took in.")
+try:
+    _dmonthly, _emonthly = positions.build_monthly_realized_table()
+    if len(_dmonthly):
+        st.dataframe(_dmonthly, hide_index=True, use_container_width=True)
+        st.download_button("Download monthly realized G/L (CSV)", _dmonthly.to_csv(index=False),
+                           "monthly_realized_gl.csv", "text/csv")
+    else:
+        st.write("No closed positions recorded yet.")
+    if _emonthly:
+        st.caption("Skipped: " + " | ".join(_emonthly))
+except Exception as _e:
+    st.caption(f"(monthly realized G/L unavailable: {_e})")
+
+st.markdown("---")
 st.header("Legend - criteria in effect")
 try:
     def _on(b):

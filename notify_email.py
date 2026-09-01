@@ -140,6 +140,15 @@ def build_concentration():
     return df
 
 
+def build_monthly():
+    """Realized G/L grouped by calendar month, full history -- see the app's
+    Realized G/L by Month section / positions.build_monthly_realized_table."""
+    df, errs = positions.build_monthly_realized_table()
+    for e in errs:
+        print(f"MONTHLY: {e}", file=sys.stderr)
+    return df
+
+
 def _table(df, fmt):
     return fmt(df).to_html(index=False, border=0)
 
@@ -181,7 +190,7 @@ def _discover_html(dp, dspreads):
 
 
 def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, closed_pos,
-               concentration, now_et):
+               concentration, monthly, now_et):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
              "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
              "h3{margin:16px 0 4px}"
@@ -227,6 +236,7 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"{empty_section('Closed Positions (last 30 days)', closed_pos, positions._fmt, 'No closed positions in the last 30 days.')}"
             f"{financials_html('Financials (realized)', closed_fin)}"
             f"<h2>Financials (Open + Closed combined)</h2>{combined_fin.to_html(index=False, border=0)}"
+            f"{empty_section('Realized G/L by Month', monthly, lambda d: d, 'No closed positions recorded yet.')}"
             "</body></html>")
 
 
@@ -268,6 +278,7 @@ def main():
     open_pos = build_positions()
     closed_pos = build_closed_positions()
     concentration = build_concentration()
+    monthly = build_monthly()
     # Open/closed positions count toward "is there anything worth sending" too --
     # your portfolio status is reason enough to send even on a quiet screener day.
     total    = (len(puts) + len(calls) + len(spreads) + len(d_puts) + len(d_spreads)
@@ -280,7 +291,7 @@ def main():
                f"{len(d_puts) + len(d_spreads)} discovered, {len(open_pos)} open positions "
                f"- {now_et:%b %d %I:%M %p ET}")
     send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos,
-                             concentration, now_et),
+                             concentration, monthly, now_et),
         user, pw, to)
     print(f"Sent: {subject} -> {to}")
 
