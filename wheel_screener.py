@@ -69,8 +69,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.839971, "entry_date": "2026-08-24"},
     {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
      "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
-    {"ticker": "DKNG", "type": "call", "strike": 27.5, "expiration": "2026-09-18",
-     "contracts": 11, "entry_credit": 0.668782, "entry_date": "2026-08-21"},
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 150, "long_strike": 155,
      "expiration": "2026-09-18", "contracts": 30, "entry_credit": 1.049913, "entry_date": "2026-08-21"},
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
@@ -82,8 +80,6 @@ OPEN_POSITIONS = [
     # the earlier lot's (08/26), when the position was first opened.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-09-18",
      "contracts": 2, "entry_credit": 19.9996, "entry_date": "2026-08-26"},
-    {"ticker": "NVDA", "type": "call_spread", "short_strike": 250, "long_strike": 260,
-     "expiration": "2026-09-18", "contracts": 27, "entry_credit": 0.714041, "entry_date": "2026-08-27"},
     {"ticker": "SKHY", "type": "put_spread", "short_strike": 145, "long_strike": 138,
      "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
     {"ticker": "ORCL", "type": "call_spread", "short_strike": 167.5, "long_strike": 175,
@@ -143,6 +139,12 @@ CLOSED_POSITIONS = [
     {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-08-21",
      "contracts": 2, "entry_credit": 10.2998, "entry_date": "2026-07-21",
      "exit_cost": 1.65, "exit_date": "2026-07-28"},
+    {"ticker": "DKNG", "type": "call", "strike": 27.5, "expiration": "2026-09-18",
+     "contracts": 11, "entry_credit": 0.668782, "entry_date": "2026-08-21",
+     "exit_cost": 0.138, "exit_date": "2026-09-01"},
+    {"ticker": "NVDA", "type": "call_spread", "short_strike": 250, "long_strike": 260,
+     "expiration": "2026-09-18", "contracts": 27, "entry_credit": 0.714041, "entry_date": "2026-08-27",
+     "exit_cost": 0.11, "exit_date": "2026-09-01"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
