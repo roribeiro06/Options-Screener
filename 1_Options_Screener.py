@@ -126,23 +126,36 @@ def _leg_lines(text):
     return lines
 
 
-def _avg_max_range(lo, hi):
-    """'$avg-$hi' -- the target premium to quote an advisor: the midpoint
-    between worst- and best-case, not the conservative worst case alone, but
-    capped at the best case rather than assuming you'll always get it. E.g.
-    bid/ask $0.90/$1.10 -> "$1.00-$1.10". Degrades to a single number if only
-    one side is available (or they're equal)."""
+def _avg_max_range(lo, hi, contracts=None):
+    """'$avg-$hi (total)' -- the target premium to quote an advisor: the
+    midpoint between worst- and best-case, not the conservative worst case
+    alone, but capped at the best case rather than assuming you'll always
+    get it. E.g. bid/ask $0.90/$1.10 -> "$1.00-$1.10". The parenthetical is
+    that same per-share range x 100 x contracts (the total across the
+    stated number of contracts), same convention as every table's own
+    Premium/Max Profit column -- omitted if contracts isn't known. Degrades
+    to a single number if only one side is available (or they're equal)."""
+    if pd.isna(hi) and pd.isna(lo):
+        return "-"
     if pd.isna(hi):
-        return f"${lo:.2f}" if pd.notna(lo) else "-"
-    if pd.isna(lo):
-        return f"${hi:.2f}"
-    avg = (lo + hi) / 2
-    return f"${hi:.2f}" if avg == hi else f"${avg:.2f}-${hi:.2f}"
+        lo_disp = hi_disp = lo
+    elif pd.isna(lo):
+        lo_disp = hi_disp = hi
+    else:
+        avg = (lo + hi) / 2
+        lo_disp, hi_disp = (hi, hi) if avg == hi else (avg, hi)
+    base = f"${hi_disp:.2f}" if lo_disp == hi_disp else f"${lo_disp:.2f}-${hi_disp:.2f}"
+    if pd.isna(contracts):
+        return base
+    lo_tot, hi_tot = lo_disp * 100 * contracts, hi_disp * 100 * contracts
+    total = f"(${hi_tot:,.0f})" if lo_disp == hi_disp else f"(${lo_tot:,.0f}-${hi_tot:,.0f})"
+    return f"{base} {total}"
 
 
 def _contract_summary(row):
     """Copy-paste summary for a financial advisor: Ticker / # of contracts /
-    expiration date / Sell/Buy $strike Put or Call line(s) / premium. Built
+    expiration date / Sell/Buy $strike Put or Call line(s) / premium (with
+    the total across # of contracts in parentheses) / Current Price. Built
     from the RAW (unformatted) row so the numbers are exact dollar figures,
     not the display-formatted range strings."""
     n = row.get("# of contracts")
@@ -152,18 +165,6 @@ def _contract_summary(row):
     header = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
              f"Expiration: {exp_txt}"]
-
-    # Iron condor: the table keeps it as one combined row, but the user's
-    # broker has no native iron condor order type -- it has to be placed as
-    # two separate spread orders, so format the summary that way too, each
-    # side with its own independent worst-to-best target premium.
-    if pd.notna(row.get("Put Max Profit (Best)")) and pd.notna(row.get("Call Max Profit (Best)")):
-        return "\n".join(header + [
-            "", "Put Spread", *_leg_lines(str(row["Put Legs"])),
-            f"Premium: {_avg_max_range(row.get('Put Max Profit'), row['Put Max Profit (Best)'])}",
-            "", "Call Spread", *_leg_lines(str(row["Call Legs"])),
-            f"Premium: {_avg_max_range(row.get('Call Max Profit'), row['Call Max Profit (Best)'])}",
-        ])
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
         # Single-leg (cash-secured put / covered call): always a sell-to-open,
@@ -176,9 +177,13 @@ def _contract_summary(row):
         # the ask, not the conservative bid used elsewhere.
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
         strike_lines = [f"Sell ${row['Strike']:g} {'Call' if is_call else 'Put'}"]
-        prem_txt = _avg_max_range(row.get("Premium"), row.get("Ask"))
+        prem_txt = _avg_max_range(row.get("Premium"), row.get("Ask"), n_int)
     else:
-        # Multi-leg: one leg per line (vertical), spelled-out Put/Call.
+        # Multi-leg: one leg per line (vertical), spelled-out Put/Call. Iron
+        # condor keeps its one-combined-row shape here too (both legs listed,
+        # one combined premium via the row's own Max Profit/Max Profit
+        # (Best), which are already put+call summed) -- same as every other
+        # multi-leg strategy, not split into two independent orders.
         strike_lines = []
         for c in ("Put Legs", "Call Legs"):
             v = row.get(c)
@@ -187,14 +192,18 @@ def _contract_summary(row):
         if not strike_lines:
             strike_lines = ["-"]
         if pd.notna(row.get("Max Profit (Best)")):
-            # Put/call credit spread: worst-to-best target credit.
-            prem_txt = _avg_max_range(row.get("Max Profit"), row["Max Profit (Best)"])
+            # Credit spread/iron condor: worst-to-best target credit.
+            prem_txt = _avg_max_range(row.get("Max Profit"), row["Max Profit (Best)"], n_int)
         else:
             # Long straddle/strangle: MaxLoss IS the debit paid, a single
             # number, not a worst/best range -- nothing to average.
             per_share = row.get("MaxLoss")
             prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
-    return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"])
+    tail = []
+    current_price = row.get("CurrentPrice")
+    if pd.notna(current_price):
+        tail = ["", f"Current Price: ${current_price:.2f}"]
+    return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
 
 
 @st.fragment
