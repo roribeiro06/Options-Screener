@@ -52,8 +52,6 @@ OPEN_POSITIONS = [
      "contracts": 30, "entry_credit": 2.50, "entry_date": "2026-07-29"},
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
-    {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
-     "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.13, "entry_date": "2026-08-10"},
     {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
      "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14"},
     {"ticker": "V", "type": "put", "strike": 350, "expiration": "2026-09-18",
@@ -150,6 +148,9 @@ CLOSED_POSITIONS = [
     {"ticker": "GOOG", "type": "call_spread", "short_strike": 385, "long_strike": 405,
      "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.839971, "entry_date": "2026-08-24",
      "exit_cost": 0.054286, "exit_date": "2026-09-04"},
+    {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
+     "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.129902, "entry_date": "2026-08-10",
+     "exit_cost": 0.042333, "exit_date": "2026-09-04"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
