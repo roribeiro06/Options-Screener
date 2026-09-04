@@ -65,8 +65,6 @@ OPEN_POSITIONS = [
     # 08/19/2026; call side (below) completed it on 08/24/2026.
     {"ticker": "GOOG", "type": "put_spread", "short_strike": 305, "long_strike": 290,
      "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19"},
-    {"ticker": "GOOG", "type": "call_spread", "short_strike": 385, "long_strike": 405,
-     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.839971, "entry_date": "2026-08-24"},
     {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
      "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 150, "long_strike": 155,
@@ -96,6 +94,10 @@ OPEN_POSITIONS = [
      "contracts": 2, "entry_credit": 2.40, "entry_date": "2026-09-01"},
     {"ticker": "GOOG", "type": "put", "strike": 300, "expiration": "2026-11-20",
      "contracts": 2, "entry_credit": 6.75, "entry_date": "2026-09-01"},
+    {"ticker": "AAPL", "type": "call_spread", "short_strike": 360, "long_strike": 380,
+     "expiration": "2026-10-16", "contracts": 14, "entry_credit": 1.74, "entry_date": "2026-09-03"},
+    {"ticker": "AVGO", "type": "put", "strike": 320, "expiration": "2026-10-16",
+     "contracts": 15, "entry_credit": 4.2706, "entry_date": "2026-09-04"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -145,6 +147,9 @@ CLOSED_POSITIONS = [
     {"ticker": "NVDA", "type": "call_spread", "short_strike": 250, "long_strike": 260,
      "expiration": "2026-09-18", "contracts": 27, "entry_credit": 0.714041, "entry_date": "2026-08-27",
      "exit_cost": 0.11, "exit_date": "2026-09-01"},
+    {"ticker": "GOOG", "type": "call_spread", "short_strike": 385, "long_strike": 405,
+     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.839971, "entry_date": "2026-08-24",
+     "exit_cost": 0.054286, "exit_date": "2026-09-04"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
