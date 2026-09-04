@@ -278,7 +278,13 @@ def _fmt(df):
                             for v, n in zip(d["EntryCredit"], d["Contracts"])]
     elif "EntryCredit" in d.columns:
         d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
-    for c in ("CostToClose", "ExitCost", "CurrentPrice"):
+    # CostToClose: "$/share (total across Contracts)", same convention as EntryCredit/MaxLoss.
+    if "CostToClose" in d.columns and "Contracts" in d.columns:
+        d["CostToClose"] = [f"${v:.2f} (${v * 100 * int(n):,.2f})" if v == v else "-"
+                            for v, n in zip(d["CostToClose"], d["Contracts"])]
+    elif "CostToClose" in d.columns:
+        d["CostToClose"] = d["CostToClose"].apply(lambda v: f"${v:.2f}" if v == v else "-")
+    for c in ("ExitCost", "CurrentPrice"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if v == v else "-")
     # MaxLoss: "$/share (total across Contracts)", same convention as wheel_screener.py/spreads.py.

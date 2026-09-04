@@ -206,13 +206,52 @@ def _contract_summary(row):
     return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
 
 
+# positions.py's TYPE_LABELS ("Covered Call", "Put Credit Spread", "Call Credit
+# Spread") are the table's own column labels -- shorter names here match the
+# existing click-to-copy convention (see _contract_summary's "Put Spread"/
+# "Call Spread" headers) for a closing instruction that reads like an order.
+_CLOSE_TYPE_LABELS = {"Covered Call": "Call", "Put Credit Spread": "Put Spread",
+                      "Call Credit Spread": "Call Spread"}
+
+
+def _close_position_summary(row):
+    """Copy-paste summary for a financial advisor to CLOSE an existing open
+    position (from the Open Positions table): what to buy back, how many,
+    by when, and at what cost -- built from build_positions_table()'s own
+    already-formatted Strike string (e.g. "385/405" for a spread, "230" for
+    a single strike) so it doesn't need to know put_spread/call_spread's
+    short_strike/long_strike shape itself."""
+    ticker = row["Ticker"]
+    strike_str = str(row.get("Strike", "-"))
+    strike_disp = (f"(${'/$'.join(strike_str.split('/'))})" if "/" in strike_str
+                  else f"(${strike_str})")
+    type_label = _CLOSE_TYPE_LABELS.get(row.get("Type"), row.get("Type", ""))
+    n = row.get("Contracts")
+    n_int = int(n) if pd.notna(n) else None
+    expiration = row.get("Expiration")
+    exp_txt = str(expiration) if pd.notna(expiration) else "-"
+    cost = row.get("CostToClose")
+    cost_txt = f"${cost:.2f}" if pd.notna(cost) else "-"
+    lines = [f"Close {ticker} {type_label}",
+             f"{ticker} {strike_disp}",
+             f"{n_int if n_int is not None else '-'} Contracts",
+             f"Expiration: {exp_txt}",
+             f"Cost to Close: {cost_txt}"]
+    current_price = row.get("CurrentPrice")
+    if pd.notna(current_price):
+        lines += ["", f"Current Price: ${current_price:.2f}"]
+    return "\n".join(lines)
+
+
 @st.fragment
-def _selectable_table(raw_df, disp_df, key):
+def _selectable_table(raw_df, disp_df, key, summary_fn=_contract_summary):
     """Same interactive/sortable table as before, plus click-a-row to get an
     advisor-ready summary box underneath. raw_df must be in the same row
     order as disp_df (disp_df is normally just _fmt(raw_df), maybe with a
     few columns dropped) so the click maps back to the real, unformatted
-    numbers rather than the display strings.
+    numbers rather than the display strings. summary_fn defaults to
+    _contract_summary (opening a new contract); Open Positions passes
+    _close_position_summary instead (closing an existing one).
 
     @st.fragment is load-bearing here, not decorative: without it, clicking
     a row triggers a FULL script rerun -- every scan_*() call on the page
@@ -227,7 +266,7 @@ def _selectable_table(raw_df, disp_df, key):
                          on_select="rerun", selection_mode="single-row", key=key)
     sel = event.selection.rows if event is not None else []
     if sel:
-        st.code(_contract_summary(raw_df.iloc[sel[0]]), language=None)
+        st.code(summary_fn(raw_df.iloc[sel[0]]), language=None)
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -576,17 +615,20 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
            "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
            "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live ASK to buy the "
-           "position back right now (conservative -- what you'd actually pay). **EntryCredit** shows "
+           "position back right now (conservative -- what you'd actually pay), shown \\$/share with the "
+           "total across Contracts in parentheses, same convention as EntryCredit. **EntryCredit** shows "
            "\\$/share with the total across Contracts in parentheses. **UnrealizedGL** = EntryCredit "
            "minus CostToClose, i.e. what you'd realize if you closed now. **MaxLoss** (last column) is "
            "the net worst-case loss (premium already collected always reduces it): strike - premium for "
            "puts (assigned, stock to zero), cost basis - premium for covered calls (needs the ticker in "
            "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
-           "stock-to-zero assumption needed). Same refresh cadence as the rest of the app.")
+           "stock-to-zero assumption needed). Same refresh cadence as the rest of the app. Click any row "
+           "for a copy-paste closing instruction to send your advisor.")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
-        st.dataframe(positions._fmt(_dpos), hide_index=True, use_container_width=True)
+        _selectable_table(_dpos, positions._fmt(_dpos), "open_pos_tbl",
+                          summary_fn=_close_position_summary)
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Financials** (unrealized)")
