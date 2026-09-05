@@ -278,12 +278,19 @@ def _fmt(df):
                             for v, n in zip(d["EntryCredit"], d["Contracts"])]
     elif "EntryCredit" in d.columns:
         d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
-    # CostToClose: "$/share (total across Contracts)", same convention as EntryCredit/MaxLoss.
+    # CostToClose: shown NEGATIVE -- what you'd pay/lose to close, not a plain
+    # price -- "-$/share (-$total across Contracts)", same total convention
+    # as EntryCredit/MaxLoss otherwise. Sign-aware (not a blind "-$" prefix):
+    # a spread priced so closing it nets a credit instead of a cost is a rare
+    # but real possibility (illiquid/wide legs), and negating an already-
+    # negative value should show as a gain ("+$"), not a broken "-$-X.XX".
+    def _signed_cost(v):
+        return f"-${v:,.2f}" if v >= 0 else f"+${abs(v):,.2f}"
     if "CostToClose" in d.columns and "Contracts" in d.columns:
-        d["CostToClose"] = [f"${v:.2f} (${v * 100 * int(n):,.2f})" if v == v else "-"
+        d["CostToClose"] = [f"{_signed_cost(v)} ({_signed_cost(v * 100 * int(n))})" if v == v else "-"
                             for v, n in zip(d["CostToClose"], d["Contracts"])]
     elif "CostToClose" in d.columns:
-        d["CostToClose"] = d["CostToClose"].apply(lambda v: f"${v:.2f}" if v == v else "-")
+        d["CostToClose"] = d["CostToClose"].apply(lambda v: _signed_cost(v) if v == v else "-")
     for c in ("ExitCost", "CurrentPrice"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if v == v else "-")

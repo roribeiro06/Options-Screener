@@ -231,7 +231,13 @@ def _close_position_summary(row):
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
     cost = row.get("CostToClose")
-    cost_txt = f"${cost:.2f}" if pd.notna(cost) else "-"
+    # Negative -- what you'd pay/lose to close, matching the Open Positions
+    # table's own CostToClose convention. Sign-aware: a spread priced so
+    # closing nets a credit instead (rare, illiquid/wide legs) shows "+$".
+    if pd.isna(cost):
+        cost_txt = "-"
+    else:
+        cost_txt = f"-${cost:.2f}" if cost >= 0 else f"+${abs(cost):.2f}"
     lines = [f"Close {ticker} {type_label}",
              f"{ticker} {strike_disp}",
              f"{n_int if n_int is not None else '-'} Contracts",
@@ -615,8 +621,9 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
            "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
            "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live ASK to buy the "
-           "position back right now (conservative -- what you'd actually pay), shown \\$/share with the "
-           "total across Contracts in parentheses, same convention as EntryCredit. **EntryCredit** shows "
+           "position back right now (conservative -- what you'd actually pay), shown NEGATIVE (what "
+           "you'd lose to close) as \\$/share with the total across Contracts in parentheses, same total "
+           "convention as EntryCredit. **EntryCredit** shows "
            "\\$/share with the total across Contracts in parentheses. **UnrealizedGL** = EntryCredit "
            "minus CostToClose, i.e. what you'd realize if you closed now. **MaxLoss** (last column) is "
            "the net worst-case loss (premium already collected always reduces it): strike - premium for "
