@@ -152,6 +152,27 @@ def _avg_max_range(lo, hi, contracts=None):
     return f"{base} {total}"
 
 
+def _bid_avg_range(lo, hi):
+    """'$lo-$avg' -- the target cost to quote when CLOSING (buying back) a
+    position: the midpoint between best- and worst-case, capped at the best
+    case (bid) rather than assuming you'll always have to pay the full worst
+    case (ask). Mirrors _avg_max_range's avg-to-ask logic for OPENING, just
+    anchored at the other end -- when you're buying back instead of selling,
+    lower is better, so the optimistic side is the bid, not the ask. E.g.
+    bid/ask $0.90/$1.10 -> "$0.90-$1.00". Degrades to a single number if
+    only one side is available (or they're equal)."""
+    if pd.isna(hi) and pd.isna(lo):
+        return "-"
+    if pd.isna(hi):
+        lo_disp = hi_disp = lo
+    elif pd.isna(lo):
+        lo_disp = hi_disp = hi
+    else:
+        avg = (lo + hi) / 2
+        lo_disp, hi_disp = (lo, lo) if avg == lo else (lo, avg)
+    return f"${hi_disp:.2f}" if lo_disp == hi_disp else f"${lo_disp:.2f}-${hi_disp:.2f}"
+
+
 def _contract_summary(row):
     """Copy-paste summary for a financial advisor: Ticker / # of contracts /
     expiration date / Sell/Buy $strike Put or Call line(s) / premium (with
@@ -165,6 +186,8 @@ def _contract_summary(row):
     header = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
              f"Expiration: {exp_txt}"]
+    current_price = row.get("CurrentPrice")
+    tail = ["", f"Current Price: ${current_price:.2f}"] if pd.notna(current_price) else []
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
         # Single-leg (cash-secured put / covered call): always a sell-to-open,
@@ -178,31 +201,38 @@ def _contract_summary(row):
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
         strike_lines = [f"Sell ${row['Strike']:g} {'Call' if is_call else 'Put'}"]
         prem_txt = _avg_max_range(row.get("Premium"), row.get("Ask"), n_int)
+        return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
+
+    # Iron condor: the table keeps it as one combined row, but the broker
+    # has no native iron condor order type -- it has to be placed as two
+    # separate spread orders, so the summary is formatted that way too, each
+    # side with its own independent worst-to-best target premium (not one
+    # combined premium via Put+Call Max Profit summed).
+    if pd.notna(row.get("Put Max Profit (Best)")) and pd.notna(row.get("Call Max Profit (Best)")):
+        body = header + [
+            "", "Put Spread", *_leg_lines(str(row["Put Legs"])),
+            f"Premium: {_avg_max_range(row.get('Put Max Profit'), row['Put Max Profit (Best)'], n_int)}",
+            "", "Call Spread", *_leg_lines(str(row["Call Legs"])),
+            f"Premium: {_avg_max_range(row.get('Call Max Profit'), row['Call Max Profit (Best)'], n_int)}",
+        ] + tail
+        return "\n".join(body)
+
+    # Other multi-leg: one leg per line (vertical), spelled-out Put/Call.
+    strike_lines = []
+    for c in ("Put Legs", "Call Legs"):
+        v = row.get(c)
+        if v:
+            strike_lines.extend(_leg_lines(str(v)))
+    if not strike_lines:
+        strike_lines = ["-"]
+    if pd.notna(row.get("Max Profit (Best)")):
+        # Credit spread: worst-to-best target credit.
+        prem_txt = _avg_max_range(row.get("Max Profit"), row["Max Profit (Best)"], n_int)
     else:
-        # Multi-leg: one leg per line (vertical), spelled-out Put/Call. Iron
-        # condor keeps its one-combined-row shape here too (both legs listed,
-        # one combined premium via the row's own Max Profit/Max Profit
-        # (Best), which are already put+call summed) -- same as every other
-        # multi-leg strategy, not split into two independent orders.
-        strike_lines = []
-        for c in ("Put Legs", "Call Legs"):
-            v = row.get(c)
-            if v:
-                strike_lines.extend(_leg_lines(str(v)))
-        if not strike_lines:
-            strike_lines = ["-"]
-        if pd.notna(row.get("Max Profit (Best)")):
-            # Credit spread/iron condor: worst-to-best target credit.
-            prem_txt = _avg_max_range(row.get("Max Profit"), row["Max Profit (Best)"], n_int)
-        else:
-            # Long straddle/strangle: MaxLoss IS the debit paid, a single
-            # number, not a worst/best range -- nothing to average.
-            per_share = row.get("MaxLoss")
-            prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
-    tail = []
-    current_price = row.get("CurrentPrice")
-    if pd.notna(current_price):
-        tail = ["", f"Current Price: ${current_price:.2f}"]
+        # Long straddle/strangle: MaxLoss IS the debit paid, a single
+        # number, not a worst/best range -- nothing to average.
+        per_share = row.get("MaxLoss")
+        prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
     return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
 
 
@@ -230,14 +260,14 @@ def _close_position_summary(row):
     n_int = int(n) if pd.notna(n) else None
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
-    cost = row.get("CostToClose")
-    # Negative -- what you'd pay/lose to close, matching the Open Positions
-    # table's own CostToClose convention. Sign-aware: a spread priced so
-    # closing nets a credit instead (rare, illiquid/wide legs) shows "+$".
-    if pd.isna(cost):
-        cost_txt = "-"
-    else:
-        cost_txt = f"-${cost:.2f}" if cost >= 0 else f"+${abs(cost):.2f}"
+    # Positive, and a bid-to-halfway range -- the target cost to quote when
+    # buying this back, by the same logic _avg_max_range uses for OPENING
+    # (halfway-to-ask there), just anchored at the other end here: for
+    # closing, lower is better, so the optimistic side is the bid, not the
+    # ask (see _bid_avg_range). Unlike the table's own CostToClose column,
+    # this popup isn't meant to represent a loss -- it's an order-ready
+    # target price, so it stays a plain positive dollar figure.
+    cost_txt = _bid_avg_range(row.get("CostToCloseBid"), row.get("CostToClose"))
     lines = [f"Close {ticker} {type_label}",
              f"{ticker} {strike_disp}",
              f"{n_int if n_int is not None else '-'} Contracts",
@@ -620,17 +650,20 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
            "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
-           "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live ASK to buy the "
-           "position back right now (conservative -- what you'd actually pay), shown NEGATIVE (what "
-           "you'd lose to close) as \\$/share with the total across Contracts in parentheses, same total "
-           "convention as EntryCredit. **EntryCredit** shows "
+           "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live bid-to-ask range "
+           "to buy the position back right now, shown NEGATIVE (what you'd lose to close) as "
+           "\\$bid-\\$ask/share with the total across Contracts in parentheses, same range convention as "
+           "Premium/Max Profit elsewhere. The worst-case (ASK) end is what feeds UnrealizedGL below. "
+           "**EntryCredit** shows "
            "\\$/share with the total across Contracts in parentheses. **UnrealizedGL** = EntryCredit "
-           "minus CostToClose, i.e. what you'd realize if you closed now. **MaxLoss** (last column) is "
+           "minus CostToClose's ASK end, i.e. what you'd realize if you closed now at the conservative "
+           "price. **MaxLoss** (last column) is "
            "the net worst-case loss (premium already collected always reduces it): strike - premium for "
            "puts (assigned, stock to zero), cost basis - premium for covered calls (needs the ticker in "
            "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
            "stock-to-zero assumption needed). Same refresh cadence as the rest of the app. Click any row "
-           "for a copy-paste closing instruction to send your advisor.")
+           "for a copy-paste closing instruction to send your advisor (shown as a positive target price, "
+           "bid-to-halfway).")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):

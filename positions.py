@@ -5,8 +5,10 @@ positions.py -- tracks your OPEN and recently-CLOSED positions
 screens for).
 
 OPEN positions: live-quotes the exact contract(s) and computes
-  - current cost to close (buy back the short leg(s), at the ASK -- the real,
-    conservative price you'd actually pay right now)
+  - current cost to close (buy back the short leg(s)), as a bid-to-ask range
+    -- CostToCloseBid is the optimistic/best case (bid basis), CostToClose
+    is the conservative/worst case (ASK basis, the real price you'd actually
+    pay if forced to close right now)
   - CurrentPrice -- the underlying STOCK's live price (not the option's),
     via wheel_screener.td_quote, shown next to Strike
   - Unrealized G/L -- entry credit minus the ASK cost to close, the number
@@ -51,7 +53,8 @@ TYPE_LABELS = {"put": "Put", "call": "Covered Call",
               "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
 
 POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "DaysHeld", "Opened",
-                  "Contracts", "EntryCredit", "CostToClose", "UnrealizedGL_$", "UnrealizedGL_%", "MaxLoss"]
+                  "Contracts", "EntryCredit", "CostToCloseBid", "CostToClose", "UnrealizedGL_$",
+                  "UnrealizedGL_%", "MaxLoss"]
 CLOSED_COLS = ["Ticker", "Type", "Strike", "Expiration", "Opened", "Closed", "DaysHeld",
               "Contracts", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%", "MaxLoss"]
 PCT_COLS = {"UnrealizedGL_%", "RealizedGL_%"}
@@ -161,8 +164,9 @@ def evaluate_position(pos, today):
         leg = _leg_prices(chain, kind, strike)
         if not leg:
             raise RuntimeError(f"contract not found: {ticker} {strike:g}{kind[0].upper()} {exp}")
-        _bid, ask, _prevclose = leg
-        cost_to_close = ask
+        bid, ask, _prevclose = leg
+        cost_to_close = ask                                  # worst case (guaranteed fill)
+        cost_to_close_bid = bid                              # best case (optimistic fill)
     else:  # put_spread / call_spread
         opt_type = "put" if kind == "put_spread" else "call"
         short_strike, long_strike = pos["short_strike"], pos["long_strike"]
@@ -170,9 +174,10 @@ def evaluate_position(pos, today):
         long_leg = _leg_prices(chain, opt_type, long_strike)
         if not (short_leg and long_leg):
             raise RuntimeError(f"leg(s) not found: {ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}")
-        _s_bid, s_ask, _s_prev = short_leg
-        l_bid, _l_ask, _l_prev = long_leg
-        cost_to_close = s_ask - l_bid                       # buy back short, sell long
+        s_bid, s_ask, _s_prev = short_leg
+        l_bid, l_ask, _l_prev = long_leg
+        cost_to_close = s_ask - l_bid                        # worst case: buy back short at ask, sell long at bid
+        cost_to_close_bid = s_bid - l_ask                    # best case: buy back short at bid, sell long at ask
 
     current_price = ws.td_quote(ticker)   # the underlying stock's live price, not the option's
 
@@ -182,7 +187,8 @@ def evaluate_position(pos, today):
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "CurrentPrice": (round(current_price, 2) if current_price else float("nan")),
             "Expiration": exp, "DTE": dte, "DaysHeld": days_held, "Opened": entry_date_str or "-",
-            "Contracts": contracts, "EntryCredit": entry_credit, "CostToClose": round(cost_to_close, 2),
+            "Contracts": contracts, "EntryCredit": entry_credit,
+            "CostToCloseBid": round(cost_to_close_bid, 2), "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
             "UnrealizedGL_%": unrealized_pl_pct, "MaxLoss": round(_max_loss_per_share(pos), 2)}
 
@@ -278,17 +284,29 @@ def _fmt(df):
                             for v, n in zip(d["EntryCredit"], d["Contracts"])]
     elif "EntryCredit" in d.columns:
         d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
-    # CostToClose: shown NEGATIVE -- what you'd pay/lose to close, not a plain
-    # price -- "-$/share (-$total across Contracts)", same total convention
-    # as EntryCredit/MaxLoss otherwise. Sign-aware (not a blind "-$" prefix):
-    # a spread priced so closing it nets a credit instead of a cost is a rare
-    # but real possibility (illiquid/wide legs), and negating an already-
-    # negative value should show as a gain ("+$"), not a broken "-$-X.XX".
+    # CostToClose: shown as a bid-to-ask range, NEGATIVE -- what you'd pay/
+    # lose to close, not a plain price -- "-$bid to -$ask (-$totBid to
+    # -$totAsk)", same bid/ask-range shape every other table uses for its own
+    # Premium/Max Profit column, just negated since this is money going out
+    # instead of coming in. "to" (not a bare hyphen) separates the two ends
+    # so a negative-negative pair doesn't read as a double-dash. Sign-aware
+    # (not a blind "-$" prefix): a spread priced so closing it nets a credit
+    # instead of a cost is a rare but real possibility (illiquid/wide legs),
+    # and negating an already-negative value should show as a gain ("+$"),
+    # not a broken "-$-X.XX".
     def _signed_cost(v):
         return f"-${v:,.2f}" if v >= 0 else f"+${abs(v):,.2f}"
-    if "CostToClose" in d.columns and "Contracts" in d.columns:
-        d["CostToClose"] = [f"{_signed_cost(v)} ({_signed_cost(v * 100 * int(n))})" if v == v else "-"
-                            for v, n in zip(d["CostToClose"], d["Contracts"])]
+    if "CostToClose" in d.columns and "CostToCloseBid" in d.columns and "Contracts" in d.columns:
+        def _ctc_range(bid, ask, n):
+            if bid != bid or ask != ask:
+                return "-"
+            if bid == ask:
+                return f"{_signed_cost(ask)} ({_signed_cost(ask * 100 * n)})"
+            return (f"{_signed_cost(bid)} to {_signed_cost(ask)} "
+                   f"({_signed_cost(bid * 100 * n)} to {_signed_cost(ask * 100 * n)})")
+        d["CostToClose"] = [_ctc_range(b, a, int(n)) for b, a, n
+                            in zip(d["CostToCloseBid"], d["CostToClose"], d["Contracts"])]
+        d = d.drop(columns=["CostToCloseBid"])
     elif "CostToClose" in d.columns:
         d["CostToClose"] = d["CostToClose"].apply(lambda v: _signed_cost(v) if v == v else "-")
     for c in ("ExitCost", "CurrentPrice"):
