@@ -178,7 +178,7 @@ CALL_BEST_PER_EXPIRATION = True
 # Composite ranking score (puts AND covered calls): Score = (AnnYield / IV^c) * POP^a * (365/DTE)^b.
 # Dividing by IV strips out the fact that yield is naturally richer on higher-IV (riskier) names,
 # so the score no longer rewards volatility. POP and shorter DTE break ties.
-SCORE_POP_EXP = 1.0   # a: how much higher POP is rewarded (0 = ignore POP)
+SCORE_POP_EXP = 2.0   # a: how much higher POP is rewarded (0 = ignore POP)
 SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length)
 SCORE_IV_EXP  = 1.0   # c: IV penalty. 0 = ignore IV (old behavior), 1 = neutralize IV, >1 = actively favor calmer names
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
