@@ -37,6 +37,10 @@ HOLDINGS = {
     "GOOG": 359.91,
     "NVDA": 203.925,
     "SMH": 573.6451,
+    "GPZ": 23.35,
+    "FLUT": 95.28,
+    "FDL": 37.07,
+    "EDV": 59.47,
 }
 
 # Actual shares owned, from the brokerage -- used only to cap covered calls'
@@ -56,6 +60,10 @@ HOLDINGS_SHARES = {
     "GOOG": 139,
     "NVDA": 245,
     "SMH": 87,
+    "GPZ": 2000,
+    "FLUT": 300,
+    "FDL": 5400,
+    "EDV": 3400,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
