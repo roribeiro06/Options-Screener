@@ -39,6 +39,25 @@ HOLDINGS = {
     "SMH": 573.6451,
 }
 
+# Actual shares owned, from the brokerage -- used only to cap covered calls'
+# "# of contracts" at what you can actually cover (shares // 100), instead of
+# the cash-target-based count screen_calls falls back to for a ticker not
+# listed here. A ticker with fewer than 100 shares (an odd lot) still shows
+# 1 contract rather than 0 -- see screen_calls.
+HOLDINGS_SHARES = {
+    "DKNG": 1100,
+    "KHC": 3000,
+    "CMCSA": 3000,
+    "PS": 400,
+    "NFLX": 360,
+    "MRVL": 200,
+    "AVGO": 131,
+    "EIX": 800,
+    "GOOG": 139,
+    "NVDA": 245,
+    "SMH": 87,
+}
+
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
 # spreads) -- tracked at the bottom of the app: entry price, current cost to
 # close, day $/%, and unrealized G/L. All assumed short (you collected a
@@ -943,6 +962,12 @@ def screen_calls(symbol, cost_basis):
     price = float(price)
     earnings = get_earnings_date(symbol)
     today = dt.date.today()
+    # Actual shares owned caps how many covered calls you can write -- use
+    # that instead of the cash-target count when it's known (see
+    # HOLDINGS_SHARES), never less than 1 (an odd lot under 100 shares still
+    # covers one contract, not zero).
+    shares = HOLDINGS_SHARES.get(symbol)
+    n_contracts = max(1, shares // 100) if shares else contracts_for_target(price * 100)
     passers, near = [], []
     for exp, exp_date, dte in _expirations_in_window(symbol, today):
         earn_win = earnings_blocks(symbol, earnings, today, exp_date)
@@ -964,7 +989,7 @@ def screen_calls(symbol, cost_basis):
                    "EarningsDate": earnings,
                    "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
                    "MaxLoss": (round(cost_basis - premium, 2) if cost_basis is not None else float("nan")),
-                   "# of contracts": contracts_for_target(price * 100),
+                   "# of contracts": n_contracts,
                    **_liq(o), **res}
             if res["PASS"]:
                 passers.append(rec)
