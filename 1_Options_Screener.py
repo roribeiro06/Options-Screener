@@ -724,7 +724,7 @@ st.markdown("---")
 st.header("Closed Positions (last 30 days)")
 st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of wheel_screener.py -- add "
            "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
-           "`exit_date` to a copy of the position's entry. Sorted by Date Opened (oldest first). Pure "
+           "`exit_date` to a copy of the position's entry. Sorted by Date Closed (most recent first). Pure "
            "arithmetic against the recorded exit price -- no live quotes needed since the trade is already "
            "settled. **EntryCredit** shows \\$/share with the total across Contracts in parentheses, same "
            "convention as Open Positions. **MaxLoss** (last column) uses the same convention as Open "

@@ -252,9 +252,10 @@ def _all_closed():
 
 def build_closed_positions_table(window_days=30):
     """Closed positions (recorded + auto-closed, see _all_closed) with an
-    exit_date within the last `window_days` (default 30) of today. Returns
-    (dataframe, errors), same error-reporting pattern as build_positions_table
-    -- a malformed entry is reported, not silently dropped."""
+    exit_date within the last `window_days` (default 30) of today, sorted by
+    Closed date descending (most recently closed first). Returns (dataframe,
+    errors), same error-reporting pattern as build_positions_table -- a
+    malformed entry is reported, not silently dropped."""
     import pandas as pd
     today = dt.date.today()
     rows, errs = [], []
@@ -269,7 +270,7 @@ def build_closed_positions_table(window_days=30):
             print(f"CLOSED POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=CLOSED_COLS), errs
-    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Opened", ascending=True)
+    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Closed", ascending=False)
     return df, errs
 
 
