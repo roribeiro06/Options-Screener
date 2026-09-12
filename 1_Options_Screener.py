@@ -152,15 +152,17 @@ def _avg_max_range(lo, hi, contracts=None):
     return f"{base} {total}"
 
 
-def _bid_avg_range(lo, hi):
-    """'$lo-$avg' -- the target cost to quote when CLOSING (buying back) a
-    position: the midpoint between best- and worst-case, capped at the best
-    case (bid) rather than assuming you'll always have to pay the full worst
-    case (ask). Mirrors _avg_max_range's avg-to-ask logic for OPENING, just
-    anchored at the other end -- when you're buying back instead of selling,
-    lower is better, so the optimistic side is the bid, not the ask. E.g.
-    bid/ask $0.90/$1.10 -> "$0.90-$1.00". Degrades to a single number if
-    only one side is available (or they're equal)."""
+def _bid_avg_range(lo, hi, contracts=None):
+    """'$lo-$avg (total)' -- the target cost to quote when CLOSING (buying
+    back) a position: the midpoint between best- and worst-case, capped at
+    the best case (bid) rather than assuming you'll always have to pay the
+    full worst case (ask). Mirrors _avg_max_range's avg-to-ask logic for
+    OPENING, just anchored at the other end -- when you're buying back
+    instead of selling, lower is better, so the optimistic side is the bid,
+    not the ask. E.g. bid/ask $0.90/$1.10 -> "$0.90-$1.00". The parenthetical
+    is that same per-share range x 100 x contracts, same convention as
+    _avg_max_range -- omitted if contracts isn't known. Degrades to a single
+    number if only one side is available (or they're equal)."""
     if pd.isna(hi) and pd.isna(lo):
         return "-"
     if pd.isna(hi):
@@ -170,7 +172,12 @@ def _bid_avg_range(lo, hi):
     else:
         avg = (lo + hi) / 2
         lo_disp, hi_disp = (lo, lo) if avg == lo else (lo, avg)
-    return f"${hi_disp:.2f}" if lo_disp == hi_disp else f"${lo_disp:.2f}-${hi_disp:.2f}"
+    base = f"${hi_disp:.2f}" if lo_disp == hi_disp else f"${lo_disp:.2f}-${hi_disp:.2f}"
+    if pd.isna(contracts):
+        return base
+    lo_tot, hi_tot = lo_disp * 100 * contracts, hi_disp * 100 * contracts
+    total = f"(${hi_tot:,.0f})" if lo_disp == hi_disp else f"(${lo_tot:,.0f}-${hi_tot:,.0f})"
+    return f"{base} {total}"
 
 
 def _contract_summary(row):
@@ -260,14 +267,15 @@ def _close_position_summary(row):
     n_int = int(n) if pd.notna(n) else None
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
-    # Positive, and a bid-to-halfway range -- the target cost to quote when
-    # buying this back, by the same logic _avg_max_range uses for OPENING
-    # (halfway-to-ask there), just anchored at the other end here: for
-    # closing, lower is better, so the optimistic side is the bid, not the
-    # ask (see _bid_avg_range). Unlike the table's own CostToClose column,
-    # this popup isn't meant to represent a loss -- it's an order-ready
-    # target price, so it stays a plain positive dollar figure.
-    cost_txt = _bid_avg_range(row.get("CostToCloseBid"), row.get("CostToClose"))
+    # Positive, and a bid-to-halfway range with the total across Contracts in
+    # parentheses -- the target cost to quote when buying this back, by the
+    # same logic _avg_max_range uses for OPENING (halfway-to-ask there), just
+    # anchored at the other end here: for closing, lower is better, so the
+    # optimistic side is the bid, not the ask (see _bid_avg_range). Unlike
+    # the table's own CostToClose column, this popup isn't meant to
+    # represent a loss -- it's an order-ready target price, so it stays a
+    # plain positive dollar figure.
+    cost_txt = _bid_avg_range(row.get("CostToCloseBid"), row.get("CostToClose"), n_int)
     lines = [f"Close {ticker} {type_label}",
              f"{ticker} {strike_disp}",
              f"{n_int if n_int is not None else '-'} Contracts",
