@@ -75,8 +75,6 @@ HOLDINGS_SHARES = {
 OPEN_POSITIONS = [
     {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
      "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
-    {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
-     "contracts": 30, "entry_credit": 2.50, "entry_date": "2026-07-29"},
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
     {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
@@ -109,8 +107,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-04", "contracts": 35, "entry_credit": 0.34998, "entry_date": "2026-08-27"},
     {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-09-18",
      "contracts": 2, "entry_credit": 4.35, "entry_date": "2026-08-28"},
-    {"ticker": "NOW", "type": "call_spread", "short_strike": 170, "long_strike": 185,
-     "expiration": "2026-10-16", "contracts": 20, "entry_credit": 2.30, "entry_date": "2026-08-31"},
     {"ticker": "INTC", "type": "call_spread", "short_strike": 105, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 56, "entry_credit": 0.55, "entry_date": "2026-09-01"},
     {"ticker": "META", "type": "call_spread", "short_strike": 625, "long_strike": 655,
@@ -119,10 +115,26 @@ OPEN_POSITIONS = [
      "contracts": 2, "entry_credit": 2.40, "entry_date": "2026-09-01"},
     {"ticker": "GOOG", "type": "put", "strike": 300, "expiration": "2026-11-20",
      "contracts": 2, "entry_credit": 6.75, "entry_date": "2026-09-01"},
-    {"ticker": "AAPL", "type": "call_spread", "short_strike": 360, "long_strike": 380,
-     "expiration": "2026-10-16", "contracts": 14, "entry_credit": 1.74, "entry_date": "2026-09-03"},
-    {"ticker": "AVGO", "type": "put", "strike": 320, "expiration": "2026-10-16",
-     "contracts": 15, "entry_credit": 4.2706, "entry_date": "2026-09-04"},
+    # AVGO 320P -- converted from a naked put to a put spread by buying the
+    # 300P protective leg. Net entry credit recomputed from the brokerage's
+    # actual cost basis on both legs (short 320P $2.57/share, long 300P
+    # $0.935/share) rather than kept at the original naked-put entry_credit
+    # (4.2706) -- that recorded price no longer matches the account's cost
+    # basis for the 320P leg, so the live number is trusted instead.
+    # entry_date kept as the original 320P open date, same convention as an
+    # averaged/adjusted position elsewhere in this file (see LLY).
+    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
+     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.635, "entry_date": "2026-09-04"},
+    {"ticker": "SKHY", "type": "call_spread", "short_strike": 210, "long_strike": 220,
+     "expiration": "2026-09-18", "contracts": 28, "entry_credit": 0.605, "entry_date": "2026-09-12"},
+    # Iron condor -- tracked as separate put_spread/call_spread entries since
+    # OPEN_POSITIONS has no combined iron_condor type (see GOOG/SMH above).
+    {"ticker": "SPY", "type": "put_spread", "short_strike": 690, "long_strike": 655,
+     "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.69, "entry_date": "2026-09-12"},
+    {"ticker": "SPY", "type": "call_spread", "short_strike": 805, "long_strike": 845,
+     "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.56, "entry_date": "2026-09-12"},
+    {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
+     "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.79, "entry_date": "2026-09-12"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -178,6 +190,15 @@ CLOSED_POSITIONS = [
     {"ticker": "EWY", "type": "put_spread", "short_strike": 145, "long_strike": 140,
      "expiration": "2026-09-18", "contracts": 45, "entry_credit": 1.129902, "entry_date": "2026-08-10",
      "exit_cost": 0.042333, "exit_date": "2026-09-04"},
+    {"ticker": "AAPL", "type": "call_spread", "short_strike": 360, "long_strike": 380,
+     "expiration": "2026-10-16", "contracts": 14, "entry_credit": 1.74, "entry_date": "2026-09-03",
+     "exit_cost": 0.4501, "exit_date": "2026-09-09"},
+    {"ticker": "KHC", "type": "call", "strike": 27.5, "expiration": "2027-03-19",
+     "contracts": 30, "entry_credit": 2.50, "entry_date": "2026-07-29",
+     "exit_cost": 0.9864, "exit_date": "2026-09-11"},
+    {"ticker": "NOW", "type": "call_spread", "short_strike": 170, "long_strike": 185,
+     "expiration": "2026-10-16", "contracts": 20, "entry_credit": 2.30, "entry_date": "2026-08-31",
+     "exit_cost": 0.4701, "exit_date": "2026-09-11"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
