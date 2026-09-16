@@ -60,6 +60,16 @@ with st.expander("Legend - how to read this table", expanded=False):
         "cutoff, the FIRST version scored proximity-to-high as a positive -- a full backtest run "
         "showed that was backwards too. Re-check this with backtest_early_trend.py before "
         "trusting Score too heavily.)\n"
+        "- **Chance of Boom %** -- NOT a probability for this specific ticker, despite looking "
+        "like one. It's a historical base rate: a full-universe backtest split every past flag "
+        "into buckets by Score, and this is the % of flags in THIS ticker's Score bucket that "
+        "went on to become a real boom (>=50% run-up within ~6 months, same definition "
+        "backtest_early_trend.py's own boom-precision report uses). Ranges from ~42% for the "
+        "bottom half of Score down to 67% for the very highest scores -- directionally real "
+        "(Score does correlate with outcome) but don't read false precision into the exact "
+        "number: the bottom 3 of 8 raw buckets were statistically indistinguishable and had to "
+        "be merged into one. Tied to the CURRENT Score formula -- see BOOM_PCT_SCORE_EDGES/"
+        "BOOM_PCT_RATES in early_trend.py, and recalibrate whenever Score changes.\n"
         "- **Above Pivot %** -- how far price has already run past the pivot (the prior base's "
         "high, the level it had to close above to count as a breakout at all). This is the main "
         "\"don't chase it\" gauge: capped by \"Max % above pivot\" in the sidebar (plus a small "
@@ -166,6 +176,7 @@ try:
                 "Notes": st.column_config.TextColumn(width="large"),
                 "Price": st.column_config.NumberColumn(format="$%.2f"),
                 "Score": st.column_config.NumberColumn(format="%.2f"),
+                "Chance of Boom %": st.column_config.NumberColumn(format="%.0f%%"),
                 "Above Pivot %": st.column_config.NumberColumn(format="%.1f%%"),
                 "Base Range %": st.column_config.NumberColumn(format="%.0f%%"),
                 "Volatility %": st.column_config.NumberColumn(format="%.0f%%"),
@@ -174,7 +185,9 @@ try:
         )
         st.caption(
             "Notes describe the specific signals behind that row's Score (built only from "
-            "the same numbers in the table) -- not a probability or a forecast of anything."
+            "the same numbers in the table) -- not a probability or a forecast of anything. "
+            "Chance of Boom % is a historical base rate, not a probability for this specific "
+            "ticker -- see the legend above."
         )
         st.download_button("Download (CSV)", df.to_csv(index=False), "early_trend.csv", "text/csv")
     else:

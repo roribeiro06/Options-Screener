@@ -54,7 +54,7 @@ def _fmt(df):
     d = df.copy()
     d["Price"] = "$" + d["Price"].round(2).astype(str)
     d["Score"] = d["Score"].round(2)
-    for c in ("Above Pivot %", "Base Range %", "Volatility %", "% of 52wk High"):
+    for c in ("Chance of Boom %", "Above Pivot %", "Base Range %", "Volatility %", "% of 52wk High"):
         d[c] = d[c].round(1).astype(str) + "%"
     return d
 
@@ -65,7 +65,7 @@ def html_email(df, total_qualifying, now_et):
              "table{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px}"
              "th,td{border:1px solid #ccc;padding:5px 8px;text-align:left;vertical-align:top}"
              "th{background:#1F3864;color:#fff}"
-             "td:nth-child(9){max-width:420px}"
+             f"td:nth-child({len(et.DISPLAY_COLS) + 1}){{max-width:420px}}"
              "p.empty{color:#888}</style>")
     if df is None or not len(df):
         body = "<p class='empty'>No tickers currently qualify.</p>"
@@ -76,8 +76,9 @@ def html_email(df, total_qualifying, now_et):
             f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. {total_qualifying} tickers qualify, "
             f"showing top {len(df) if df is not None else 0} by Score. Educational only, not "
             f"financial advice -- no rules-based screen can guarantee catching a trend before "
-            f"it runs. See backtest_early_trend.py for how these exact rules performed "
-            f"historically.</p>"
+            f"it runs. Chance of Boom % is a historical base rate for tickers whose Score "
+            f"landed in the same range, not a probability for this specific ticker. See "
+            f"backtest_early_trend.py for how these exact rules performed historically.</p>"
             f"{body}"
             "</body></html>")
 

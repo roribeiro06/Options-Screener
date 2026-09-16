@@ -746,9 +746,38 @@ def run_scan():
         r["iv_skew"] = tilt["iv_skew"] if tilt else None
         if tilt and tilt["oi_skew"] is not None:
             r["score"] = round(r["score"] * (1 + 0.25 * (tilt["oi_skew"] - 0.5)), 4)
+        r["boom_pct"] = score_to_boom_pct(r["score"])   # computed from the FINAL, tilt-adjusted score
 
     results.sort(key=lambda r: r["score"], reverse=True)
     return results
+
+
+# ---- Boom-probability calibration (2026-09-16) ------------------------------------------
+# User asked for a "chance of boom" percentage alongside Score. Score already correlates
+# with outcome (+0.256/+0.244 with peak/current return, backtest 2026-08-27) but had never
+# been calibrated into an actual rate. Computed via a full-universe backtest (2026-09-16,
+# n=4,479 de-duplicated cap-eligible flags): split into 8 equal-frequency Score buckets and
+# measured the empirical rate of actually being part of a real boom (same BOOM_THRESHOLD/
+# BOOM_WINDOW definition backtest_early_trend.py's own precision report uses -- >=50% within
+# ~6 months). The bottom 3 of 8 raw buckets (score < ~1.18) came back statistically
+# indistinguishable (42.2% / 41.0% / 41.5%) -- merged into one rather than reporting three
+# separate numbers the data doesn't actually support distinguishing. From there it's cleanly
+# monotonic. NOT a probability in the statistical sense -- it means "of historical flags
+# whose Score landed in this same range, this % went on to boom" (the same base-rate logic
+# backtest_early_trend.py's boom-precision report already uses, just segmented by Score
+# instead of reported as one aggregate number). These numbers are tied to the CURRENT Score
+# formula, not a property of the tickers themselves -- recalibrate (re-run the same
+# bucketing) whenever Score's formula changes, the same way every threshold here gets
+# re-validated after a formula change rather than assumed to still hold.
+BOOM_PCT_SCORE_EDGES = [1.179, 1.401, 1.721, 2.275, 3.429]   # upper edge of each bucket but the last
+BOOM_PCT_RATES = [41.6, 43.5, 47.9, 56.4, 59.9, 67.0]        # % of historical same-bucket flags that boomed
+
+
+def score_to_boom_pct(score):
+    for edge, rate in zip(BOOM_PCT_SCORE_EDGES, BOOM_PCT_RATES):
+        if score < edge:
+            return rate
+    return BOOM_PCT_RATES[-1]
 
 
 # ---- Display helpers, shared by pages/2_Early_Trend.py and notify_early_trend_email.py --
@@ -756,9 +785,10 @@ def run_scan():
 # exact same story behind a row's Score -- moved from the Streamlit page (2026-08-27) once a
 # second, non-Streamlit caller (the email digest) needed them too.
 DISPLAY_COLS = {
-    "ticker": "Ticker", "price": "Price", "score": "Score", "extension_pct": "Above Pivot %",
-    "days_since_breakout": "Days Since Breakout", "base_range_pct": "Base Range %",
-    "volatility_pct": "Volatility %", "window_high_pct": "% of 52wk High",
+    "ticker": "Ticker", "price": "Price", "score": "Score", "boom_pct": "Chance of Boom %",
+    "extension_pct": "Above Pivot %", "days_since_breakout": "Days Since Breakout",
+    "base_range_pct": "Base Range %", "volatility_pct": "Volatility %",
+    "window_high_pct": "% of 52wk High",
 }
 # Everything else the raw scan computes (pivot, SMA trend, volume ratio, 4wk/prior-4wk/SPY
 # returns, 3mo/6mo returns, options tilt) is either narrated in build_note() when it's actually
