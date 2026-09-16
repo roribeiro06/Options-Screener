@@ -105,8 +105,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
     {"ticker": "ORCL", "type": "call_spread", "short_strike": 167.5, "long_strike": 175,
      "expiration": "2026-09-04", "contracts": 35, "entry_credit": 0.34998, "entry_date": "2026-08-27"},
-    {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-09-18",
-     "contracts": 2, "entry_credit": 4.35, "entry_date": "2026-08-28"},
     {"ticker": "INTC", "type": "call_spread", "short_strike": 105, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 56, "entry_credit": 0.55, "entry_date": "2026-09-01"},
     {"ticker": "META", "type": "call_spread", "short_strike": 625, "long_strike": 655,
@@ -143,6 +141,9 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-09-18",
+     "contracts": 2, "entry_credit": 4.3499, "entry_date": "2026-08-28",
+     "exit_cost": 0.28, "exit_date": "2026-09-15"},
     {"ticker": "MU", "type": "call_spread", "short_strike": 1060, "long_strike": 1110,
      "expiration": "2026-08-21", "contracts": 6, "entry_credit": 3.639867, "entry_date": "2026-08-14",
      "exit_cost": 0.24, "exit_date": "2026-08-19"},
