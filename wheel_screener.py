@@ -244,7 +244,7 @@ OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 # Added after the META loss -- felt like too much risk was being taken in
 # mega-cap tech names at the same OTM cushion as everything else. ADDITIONAL
 # gate on top of OTM_MIN_OTHER above (single-leg puts/calls only, via
-# _tech_otm_ok): a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to
+# tech_otm_ok): a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to
 # pass outright; between 10-15% OTM it can still pass, but only if it's
 # collecting real money for the extra proximity (>= $5,000 total premium,
 # worst-case/bid basis, at the same contract sizing the "# of contracts"
@@ -491,7 +491,7 @@ def otm_min_for(symbol):
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
 
 
-def _tech_otm_ok(symbol, otm, total_premium):
+def tech_otm_ok(symbol, otm, total_premium):
     """Tech-specific risk gate -- see TECH_OTM_MIN/TECH_OTM_FLOOR/
     TECH_MIN_PREMIUM above for the full rationale. `symbol=None` (e.g. a
     direct evaluate_put/evaluate_call call from a test/script with no ticker
@@ -742,7 +742,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     # Same contract sizing the real "# of contracts" column uses for a put
-    # (contracts_for_target(strike * 100)) -- see _tech_otm_ok.
+    # (contracts_for_target(strike * 100)) -- see tech_otm_ok.
     _tech_total_premium = premium * 100 * contracts_for_target(strike * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
@@ -751,7 +751,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     _tech_otm_ok(symbol, otm, _tech_total_premium),
+        "tech_otm":     tech_otm_ok(symbol, otm, _tech_total_premium),
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
@@ -828,7 +828,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     # this gate doesn't have that context, so it uses the same spot-based
     # fallback contracts_for_target(price*100) uses when shares aren't
     # known. A reasonable stand-in for this risk check, not the displayed
-    # count. See _tech_otm_ok.
+    # count. See tech_otm_ok.
     _tech_total_premium = premium * 100 * contracts_for_target(spot * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
@@ -837,7 +837,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     _tech_otm_ok(symbol, otm, _tech_total_premium),
+        "tech_otm":     tech_otm_ok(symbol, otm, _tech_total_premium),
     }
     if CALL_MIN_OTM_OVER_IV > 0:
         tests["otm_vs_iv"] = bool(iv) and otm >= CALL_MIN_OTM_OVER_IV * iv

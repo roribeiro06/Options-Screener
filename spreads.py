@@ -237,6 +237,12 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             siv = s["short"].get("iv") or 0
             if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
                 continue
+            # Same tech-sector risk gate as single-leg puts/calls (see
+            # wheel_screener.tech_otm_ok) -- worst-case credit, sized the
+            # same way the real "# of contracts" column is.
+            _tech_n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
+            if not ws.tech_otm_ok(sym, otm, s["credit"] * 100 * _tech_n):
+                continue
             pop = 1 - abs(s["short"]["delta"])
             if pop < pmin:
                 continue
@@ -279,6 +285,14 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         width = max(ps["width"], cs["width"])
         max_loss = width - credit
         if max_loss <= 0:
+            continue
+        # Same tech-sector risk gate as credit spreads above -- both legs are
+        # the same ticker, so one check suffices; uses the tighter of the two
+        # legs' OTM (same value the row's own OTM_% column reports) and the
+        # combined worst-case credit, sized the same way the real
+        # "# of contracts" column is.
+        _tech_n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
+        if not ws.tech_otm_ok(sym, min(p_otm, c_otm), credit * 100 * _tech_n):
             continue
         pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
         if pop < pmin:
