@@ -131,14 +131,6 @@ def build_closed_positions():
     return df
 
 
-def build_concentration():
-    """Same Max Loss cross-tab as the app's Concentration of Positions
-    section -- pure arithmetic against entry_credit, no live chain fetch
-    (the 1-day premium % change this table used to carry has moved to
-    build_concentration_gl, next to Unrealized G/L) -- see positions.py."""
-    return positions.build_concentration_table()
-
-
 def build_concentration_history():
     """Same Max Loss 1D All-Time High & Average cross-tab as the app's
     Concentration of Positions -- 1D All-Time High & Average section -- see
@@ -209,7 +201,7 @@ def _discover_html(dp, dspreads):
 
 
 def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, closed_pos,
-               concentration, concentration_history, concentration_gl, monthly, now_et):
+               concentration_history, concentration_gl, monthly, now_et):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
              "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
              "h3{margin:16px 0 4px}"
@@ -251,7 +243,6 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"<h2>Discover: High-Open-Interest Contracts (outside your watchlist)</h2>{discover_body}"
             f"{empty_section('Open Positions', open_pos, positions._fmt, 'No open positions tracked.')}"
             f"{financials_html('Financials (unrealized)', open_fin)}"
-            f"{empty_section('Concentration of Positions', concentration, lambda d: d, 'No open positions tracked.')}"
             f"{financials_html('Concentration of Positions -- 1D All-Time High &amp; Average (Max Loss)', concentration_history)}"
             f"{financials_html('Concentration of Positions -- Unrealized G/L', concentration_gl)}"
             f"{empty_section('Closed Positions (last 30 days)', closed_pos, positions._fmt, 'No closed positions in the last 30 days.')}"
@@ -298,7 +289,6 @@ def main():
     d_puts, d_spreads = build_discover()
     open_pos = build_positions()
     closed_pos = build_closed_positions()
-    concentration = build_concentration()
     concentration_history = build_concentration_history()
     concentration_gl = build_concentration_gl(open_pos)
     monthly = build_monthly()
@@ -314,7 +304,7 @@ def main():
                f"{len(d_puts) + len(d_spreads)} discovered, {len(open_pos)} open positions "
                f"- {now_et:%b %d %I:%M %p ET}")
     send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos,
-                             concentration, concentration_history, concentration_gl, monthly, now_et),
+                             concentration_history, concentration_gl, monthly, now_et),
         user, pw, to)
     print(f"Sent: {subject} -> {to}")
 

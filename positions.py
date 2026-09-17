@@ -563,67 +563,13 @@ _TYPE_TO_CONCENTRATION_BUCKET = {"put": "Put", "put_spread": "Put",
                                  "call": "Call", "call_spread": "Call"}
 
 
-def build_concentration_table():
-    """Concentration of Positions: one row per sector (Tech/Non-Tech/Total)
-    x directional side (Put/Call/Total, via _TYPE_TO_CONCENTRATION_BUCKET --
-    put spreads join plain puts, call spreads join plain calls, not a
-    separate Multi-Leg bucket). Each cell shows Max Loss, "$total (X%)" of
-    your total Max Loss across every position.
-
-    Uses _pivot_max_loss_per_share, the SAME risk-scaled convention every
-    Financials table on this page already uses: covered calls are NaN (a
-    stock-to-zero worst case is unrealistic enough that they're excluded
-    outright, not just discounted); puts are scaled to a more realistic 20%
-    tail estimate net of premium; spreads are unchanged (width - credit).
-    The percentage is this cell's share of the grand total Max Loss across
-    every position.
-
-    Pure arithmetic against entry_credit -- no live chain fetch needed (Max
-    Loss doesn't move intraday, unlike Unrealized G/L). The 1-day contract
-    premium % change this table used to carry alongside Max Loss has moved
-    to build_concentration_gl_table() instead -- that's the number it
-    actually explains the movement of, not a static risk figure.
-
-    Total row and column included. A position with an undefined Max Loss
-    (the covered calls, plus a put/call with no HOLDINGS cost basis where
-    relevant) is excluded from every Max Loss sum, same as the Financials
-    tables above."""
-    import pandas as pd
-    today = dt.date.today()
-    cols = CONCENTRATION_COLS + ["Total"]
-    sectors = CONCENTRATION_ROWS + ["Total"]
-    grid = {s: {c: 0.0 for c in cols} for s in sectors}
-
-    for pos in _open_unclosed(today):
-        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
-        if not bucket:
-            continue
-        sector = ws.get_sector_bucket(pos["ticker"])
-        loss = _pivot_max_loss_per_share(pos)
-        if loss != loss:
-            continue
-        loss_total = loss * 100 * pos["contracts"]
-        for r in (sector, "Total"):
-            grid[r][bucket] += loss_total
-            grid[r]["Total"] += loss_total
-
-    grand_maxloss = grid["Total"]["Total"]
-
-    def _cell(v):
-        loss_pct = (v / grand_maxloss) if grand_maxloss else float("nan")
-        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)})"
-
-    rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
-    return pd.DataFrame(rows, columns=["Sector"] + cols)
-
-
 def build_concentration_history_table():
     """Concentration of Positions -- 1D All-Time High & Average (Max Loss):
-    same Sector (Tech/Non-Tech/Total) x Put/Call/Total grid as
-    build_concentration_table(), but instead of just today's live Max Loss,
-    each cell shows three numbers side by side: "Now" (today's current Max
-    Loss -- identical figure to build_concentration_table's own Max Loss
-    side, so the two are directly comparable), "ATH" (the highest single-day
+    one row per sector (Tech/Non-Tech/Total) x directional side (Put/Call/
+    Total, via _TYPE_TO_CONCENTRATION_BUCKET -- put spreads join plain
+    puts, call spreads join plain calls, not a separate Multi-Leg bucket).
+    Each cell shows three numbers side by side: "Now" (today's current Max
+    Loss), "ATH" (the highest single-day
     Max Loss ever seen in that bucket), and "Avg" (the average single-day
     Max Loss across every day that bucket had at least one position open) --
     e.g. "Now $12,000 | ATH $18,500 | Avg $9,200" tells you today's risk in
@@ -720,10 +666,9 @@ def build_concentration_gl_table(dpos_df):
     $ and what % of "Potential Profit Acc." (total premium collected -- the
     theoretical max you could ever make if every position in that bucket
     captured its full premium, same basis the Financials tables already
-    call "Potential Profit Acc.") that G/L represents, plus (moved here
-    from build_concentration_table, which no longer needs a live chain
-    fetch since Max Loss is static) the 1-day contract premium % change --
-    e.g. "+$10,000 (20.0% of potential)     |  +13.8% chg" means only 20%
+    call "Potential Profit Acc.") that G/L represents, plus the 1-day
+    contract premium % change -- e.g. "+$10,000 (20.0% of potential)     |
+    +13.8% chg" means only 20%
     of the theoretical max has been captured so far (still 80% of the room
     left to run) AND that today's move was in your favor. The % change
     belongs here, not next to Max Loss, because it's this G/L number that

@@ -373,11 +373,6 @@ def scan_positions():
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_concentration():
-    return positions.build_concentration_table()
-
-
-@st.cache_data(ttl=600, show_spinner=True)
 def scan_closed_positions():
     return positions.build_closed_positions_table()
 
@@ -698,42 +693,31 @@ except Exception as _e:
     st.caption(f"(positions unavailable: {_e})")
 
 st.markdown("---")
-st.header("Concentration of Positions")
-st.caption("Every OPEN_POSITIONS entry's Max Loss, cross-tabbed by sector -- **Tech** vs **Non-Tech**, "
-           "via each ticker's yfinance GICS sector (Technology **and** Communication Services both count "
-           "as Tech, since GOOG/META land in the latter under GICS but this app's own peer-correlation "
-           "list already treats them as part of the same tech cluster as MSFT/AMZN/AAPL; ETFs like SMH "
-           "have no sector and fall back to their category instead; SPCX/EWY/QQQ/AMZN are manually "
-           "overridden to Tech -- see SECTOR_OVERRIDES in wheel_screener.py) -- by directional side, "
-           "**Put** vs **Call** (put spreads join plain puts, call spreads join plain calls, not a "
-           "separate Multi-Leg bucket -- a put spread is still bullish-put-side risk; an iron condor's "
-           "two legs, tracked as separate put_spread/call_spread entries in OPEN_POSITIONS, split across "
-           "both columns accordingly). Each cell shows Max Loss, \"\\$total (X%)\" of your total Max Loss "
-           "across every position -- the SAME risk-scaled convention every Financials table above already "
-           "uses (covered calls excluded entirely, a stock-to-zero worst case being unrealistic enough "
-           "that a covered call genuinely has no meaningful \"max loss\" in that sense; puts scaled to a "
-           "more realistic 20% tail-risk estimate net of premium; spreads unchanged, width - credit). "
-           "Total row and column included. Pure arithmetic against entry_credit -- no live chain fetch "
-           "needed, Max Loss doesn't move intraday. (The 1-day contract premium % change this table used "
-           "to carry now lives in the Unrealized G/L concentration table below, next to the number it "
-           "actually explains the movement of.)")
-try:
-    st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
-except Exception as _e:
-    st.caption(f"(concentration unavailable: {_e})")
-
-st.markdown("**Concentration of Positions -- 1D All-Time High & Average (Max Loss)**")
-st.caption("Same Sector x Put/Call/Total grid as the table above, but each cell shows three numbers: "
-           "**Now** (today's Max Loss -- identical to the table above, for a direct comparison), **ATH** "
-           "(the highest single-day Max Loss ever seen in that bucket), and **Avg** (the average "
-           "single-day Max Loss across every day that bucket had at least one position open) -- e.g. "
-           "\"Now \\$12,000 | ATH \\$18,500 | Avg \\$9,200\" means today's risk there is above its "
-           "historical average but below its peak. Covers every position EVER held, open or closed -- "
-           "in all your time doing options -- using the exact same Max Loss convention as the table above "
-           "(so the three numbers are directly comparable). \"1D\" means the same thing \"Max Loss 1D\" "
+st.header("Concentration of Positions -- 1D All-Time High & Average (Max Loss)")
+st.caption("Every OPEN_POSITIONS/CLOSED_POSITIONS entry's Max Loss, cross-tabbed by sector -- **Tech** vs "
+           "**Non-Tech**, via each ticker's yfinance GICS sector (Technology **and** Communication "
+           "Services both count as Tech, since GOOG/META land in the latter under GICS but this app's own "
+           "peer-correlation list already treats them as part of the same tech cluster as "
+           "MSFT/AMZN/AAPL; ETFs like SMH have no sector and fall back to their category instead; "
+           "SPCX/EWY/QQQ/AMZN are manually overridden to Tech -- see SECTOR_OVERRIDES in "
+           "wheel_screener.py) -- by directional side, **Put** vs **Call** (put spreads join plain puts, "
+           "call spreads join plain calls, not a separate Multi-Leg bucket -- a put spread is still "
+           "bullish-put-side risk; an iron condor's two legs, tracked as separate put_spread/call_spread "
+           "entries in OPEN_POSITIONS, split across both columns accordingly). Each cell shows three "
+           "numbers: **Now** (today's Max Loss, using the SAME risk-scaled convention every Financials "
+           "table above already uses -- covered calls excluded entirely, a stock-to-zero worst case being "
+           "unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in that sense; "
+           "puts scaled to a more realistic 20% tail-risk estimate net of premium; spreads unchanged, "
+           "width - credit), **ATH** (the highest single-day Max Loss ever seen in that bucket), and "
+           "**Avg** (the average single-day Max Loss across every day that bucket had at least one "
+           "position open) -- e.g. \"Now \\$12,000 | ATH \\$18,500 | Avg \\$9,200\" means today's risk "
+           "there is above its historical average but below its peak. Covers every position EVER held, "
+           "open or closed -- in all your time doing options. \"1D\" means the same thing \"Max Loss 1D\" "
            "means in the Financials tables: the SUM of Max Loss across every position open on the same "
            "calendar day, not any one position's own number. No live quotes needed -- pure arithmetic "
-           "over OPEN_POSITIONS/CLOSED_POSITIONS.")
+           "over OPEN_POSITIONS/CLOSED_POSITIONS, Max Loss doesn't move intraday. (The 1-day contract "
+           "premium % change this table used to carry alongside Max Loss now lives in the Unrealized G/L "
+           "concentration table below, next to the number it actually explains the movement of.)")
 try:
     st.dataframe(positions.build_concentration_history_table(), hide_index=True, use_container_width=True)
 except Exception as _e:
@@ -744,9 +728,10 @@ st.caption("Same Sector x Put/Call/Total grid, but for your CURRENT Unrealized G
            "cell packs three figures together -- the $ and what % of \"Potential Profit Acc.\" (total "
            "premium collected -- the theoretical max if every position in that bucket captured its full "
            "premium, same basis the Financials tables above call \"Potential Profit Acc.\") that $ "
-           "represents, plus (moved here from the Max Loss concentration table above, which no longer "
-           "needs a live chain fetch) your **P&L direction** on that contract today vs yesterday, shown "
-           "as a signed \"+X.X%\"/\"-X.X% chg\" as far right as one plain-text cell can go. E.g. "
+           "represents, plus your **P&L direction** on that contract today vs yesterday, shown "
+           "as a signed \"+X.X%\"/\"-X.X% chg\" as far right as one plain-text cell can go. (This lives "
+           "here rather than next to the Max Loss table above since a static risk figure doesn't move "
+           "intraday -- Unrealized G/L is the number the day change actually explains.) E.g. "
            "\"+\\$10,000.00 (20.0% of potential)     |  +13.8% chg\" means only 20% of the theoretical max "
            "has been captured so far (still 80% of the room left to run) AND today's move was in your "
            "favor. Since every position here is SHORT (sold to open), a FALLING contract price is good "
