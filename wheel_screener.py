@@ -213,6 +213,14 @@ MIN_ANN_YIELD_INDEX = 0.10   # broad indexes (SPY/QQQ/DIA) are lower risk -> low
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
 CASH_TARGET = 40000          # capital target; screener shows # of contracts to reach at least this
+# TOTAL dollar premium floor across EVERY strategy (puts, calls, credit
+# spreads, iron condor, long straddle/strangle) -- distinct from
+# PUT_MIN_PREMIUM below, which is a PER-SHARE floor and puts-only. Sized the
+# same way the real "# of contracts" column is for that strategy, at the
+# worst-case side of the bid/ask (bid for a credit/selling strategy, ask for
+# a debit/buying one -- same worst-case convention used everywhere else in
+# this app). 0 to disable.
+MIN_TOTAL_PREMIUM = 1000
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
@@ -742,8 +750,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     # Same contract sizing the real "# of contracts" column uses for a put
-    # (contracts_for_target(strike * 100)) -- see tech_otm_ok.
-    _tech_total_premium = premium * 100 * contracts_for_target(strike * 100)
+    # (contracts_for_target(strike * 100)) -- see tech_otm_ok/MIN_TOTAL_PREMIUM.
+    _total_premium = premium * 100 * contracts_for_target(strike * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
@@ -751,7 +759,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     tech_otm_ok(symbol, otm, _tech_total_premium),
+        "tech_otm":     tech_otm_ok(symbol, otm, _total_premium),
+        "min_total_premium": MIN_TOTAL_PREMIUM <= 0 or _total_premium >= MIN_TOTAL_PREMIUM,
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
@@ -795,6 +804,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     if not tests["tech_otm"]:
         reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
                        f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
+    if not tests["min_total_premium"]:
+        reasons.append(f"total premium ${_total_premium:,.0f} < ${MIN_TOTAL_PREMIUM:,.0f}")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
     score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
@@ -828,8 +839,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     # this gate doesn't have that context, so it uses the same spot-based
     # fallback contracts_for_target(price*100) uses when shares aren't
     # known. A reasonable stand-in for this risk check, not the displayed
-    # count. See tech_otm_ok.
-    _tech_total_premium = premium * 100 * contracts_for_target(spot * 100)
+    # count. See tech_otm_ok/MIN_TOTAL_PREMIUM.
+    _total_premium = premium * 100 * contracts_for_target(spot * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
@@ -837,7 +848,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     tech_otm_ok(symbol, otm, _tech_total_premium),
+        "tech_otm":     tech_otm_ok(symbol, otm, _total_premium),
+        "min_total_premium": MIN_TOTAL_PREMIUM <= 0 or _total_premium >= MIN_TOTAL_PREMIUM,
     }
     if CALL_MIN_OTM_OVER_IV > 0:
         tests["otm_vs_iv"] = bool(iv) and otm >= CALL_MIN_OTM_OVER_IV * iv
@@ -871,6 +883,8 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     if not tests["tech_otm"]:
         reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
                        f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
+    if not tests["min_total_premium"]:
+        reasons.append(f"total premium ${_total_premium:,.0f} < ${MIN_TOTAL_PREMIUM:,.0f}")
     if REQUIRE_STRIKE_ABOVE_COST and not tests.get("above_cost"):
         reasons.append(f"strike below cost {cost_basis}")
     if USE_IVR and not tests.get("iv_rank"):

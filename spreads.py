@@ -238,10 +238,14 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
                 continue
             # Same tech-sector risk gate as single-leg puts/calls (see
-            # wheel_screener.tech_otm_ok) -- worst-case credit, sized the
-            # same way the real "# of contracts" column is.
-            _tech_n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
-            if not ws.tech_otm_ok(sym, otm, s["credit"] * 100 * _tech_n):
+            # wheel_screener.tech_otm_ok) plus the universal total-premium
+            # floor (MIN_TOTAL_PREMIUM) -- worst-case credit, sized the same
+            # way the real "# of contracts" column is.
+            _n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
+            _total_prem = s["credit"] * 100 * _n
+            if not ws.tech_otm_ok(sym, otm, _total_prem):
+                continue
+            if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
                 continue
             pop = 1 - abs(s["short"]["delta"])
             if pop < pmin:
@@ -286,13 +290,17 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         max_loss = width - credit
         if max_loss <= 0:
             continue
-        # Same tech-sector risk gate as credit spreads above -- both legs are
-        # the same ticker, so one check suffices; uses the tighter of the two
-        # legs' OTM (same value the row's own OTM_% column reports) and the
-        # combined worst-case credit, sized the same way the real
-        # "# of contracts" column is.
-        _tech_n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
-        if not ws.tech_otm_ok(sym, min(p_otm, c_otm), credit * 100 * _tech_n):
+        # Same tech-sector risk gate as credit spreads above, plus the
+        # universal total-premium floor -- both legs are the same ticker, so
+        # one check suffices; uses the tighter of the two legs' OTM (same
+        # value the row's own OTM_% column reports) and the combined
+        # worst-case credit, sized the same way the real "# of contracts"
+        # column is.
+        _n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
+        _total_prem = credit * 100 * _n
+        if not ws.tech_otm_ok(sym, min(p_otm, c_otm), _total_prem):
+            continue
+        if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
             continue
         pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
         if pop < pmin:
@@ -499,12 +507,19 @@ def _for_expiration_long(sym, spot, exp, dte, earn, chain):
         if key in seen:
             return
         r = _long_row(sym, spot, exp, dte, earn, s, pop)
-        if r["AnnROR_%"] == r["AnnROR_%"] and r["AnnROR_%"] >= ROR_ANN_MIN:
-            seen.add(key)
-            debit = s["debit"]
-            be_low, be_high = p["strike"] - debit, c["strike"] + debit
-            closer_be_pct = min((spot - be_low) / spot, (be_high - spot) / spot) if spot else float("inf")
-            candidates.append((closer_be_pct, r))
+        if r["AnnROR_%"] != r["AnnROR_%"] or r["AnnROR_%"] < ROR_ANN_MIN:
+            return
+        # Universal total-premium floor (MIN_TOTAL_PREMIUM) -- here it's the
+        # worst-case DEBIT paid (you're buying, not selling), sized the same
+        # way the real "# of contracts" column already is (r["# of contracts"],
+        # from _long_row's own ws.contracts_for_target(debit * 100, ...)).
+        if ws.MIN_TOTAL_PREMIUM > 0 and s["debit"] * 100 * r["# of contracts"] < ws.MIN_TOTAL_PREMIUM:
+            return
+        seen.add(key)
+        debit = s["debit"]
+        be_low, be_high = p["strike"] - debit, c["strike"] + debit
+        closer_be_pct = min((spot - be_low) / spot, (be_high - spot) / spot) if spot else float("inf")
+        candidates.append((closer_be_pct, r))
 
     _try(_atm_straddle(chain, spot))
     for otm_pct in LONG_STRANGLE_OTM_PCTS:
