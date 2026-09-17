@@ -267,13 +267,17 @@ OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL 
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
 # Added after the META loss -- felt like too much risk was being taken in
 # mega-cap tech names at the same OTM cushion as everything else. ADDITIONAL
-# gate on top of OTM_MIN_OTHER above (single-leg puts/calls only, via
-# tech_otm_ok): a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to
-# pass outright; between 10-15% OTM it can still pass, but only if it's
-# collecting real money for the extra proximity (>= $5,000 total premium,
-# worst-case/bid basis, at the same contract sizing the "# of contracts"
-# column uses); below 10% OTM it's excluded no matter the premium. Non-tech
-# tickers are completely unaffected.
+# gate on top of OTM_MIN_OTHER above, MULTI-LEG STRATEGIES ONLY (credit
+# spreads/iron condor, via spreads.py -> tech_otm_ok) -- single-leg puts/
+# calls (Cash-Secured Puts/Covered Calls, incl. Contract Lookup) intentionally
+# do NOT get this extra gate; the plain OTM_MIN_OTHER (10%) + MIN_TOTAL_PREMIUM
+# ($1,000) floors above are the whole rule there, tech or not. For multi-leg:
+# a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to pass outright;
+# between 10-15% OTM it can still pass, but only if it's collecting real
+# money for the extra proximity (>= $5,000 total premium, worst-case/bid
+# basis, at the same contract sizing the "# of contracts" column uses);
+# below 10% OTM it's excluded no matter the premium. Non-tech tickers are
+# completely unaffected.
 TECH_OTM_MIN        = 0.15
 TECH_OTM_FLOOR      = 0.10
 TECH_MIN_PREMIUM    = 5000
@@ -516,11 +520,14 @@ def otm_min_for(symbol):
 
 
 def tech_otm_ok(symbol, otm, total_premium):
-    """Tech-specific risk gate -- see TECH_OTM_MIN/TECH_OTM_FLOOR/
-    TECH_MIN_PREMIUM above for the full rationale. `symbol=None` (e.g. a
-    direct evaluate_put/evaluate_call call from a test/script with no ticker
-    context) always passes -- this is an ADDITIONAL screen, not something
-    that should ever silently reject a call site that predates it."""
+    """Tech-specific risk gate for MULTI-LEG strategies only (credit spreads/
+    iron condor, called from spreads.py) -- see TECH_OTM_MIN/TECH_OTM_FLOOR/
+    TECH_MIN_PREMIUM above for the full rationale. Deliberately NOT applied
+    to single-leg puts/calls (evaluate_put/evaluate_call) -- those just use
+    the plain OTM_MIN_OTHER + MIN_TOTAL_PREMIUM floors, tech or not.
+    `symbol=None` always passes -- this is an ADDITIONAL screen, not
+    something that should ever silently reject a call site that predates
+    it."""
     if symbol is None or get_sector_bucket(symbol) != "Tech":
         return True
     if otm >= TECH_OTM_MIN:
@@ -811,7 +818,7 @@ def tiered_yield_needed(otm):
 
 
 def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None,
-                 is_index=False, symbol=None):
+                 is_index=False):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
     per_yld = premium / strike if strike else float("nan")
@@ -828,7 +835,9 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     # Same contract sizing the real "# of contracts" column uses for a put
-    # (contracts_for_target(strike * 100)) -- see tech_otm_ok/MIN_TOTAL_PREMIUM.
+    # (contracts_for_target(strike * 100)) -- see MIN_TOTAL_PREMIUM. No
+    # tech-specific gate here (see TECH_OTM_MIN above) -- single-leg puts
+    # just need the plain OTM_MIN_OTHER (via _om) + this $ floor, tech or not.
     _total_premium = premium * 100 * contracts_for_target(strike * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
@@ -837,7 +846,6 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     tech_otm_ok(symbol, otm, _total_premium),
         "min_total_premium": MIN_TOTAL_PREMIUM <= 0 or _total_premium >= MIN_TOTAL_PREMIUM,
     }
     if PUT_MIN_PREMIUM > 0:
@@ -879,9 +887,6 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
-    if not tests["tech_otm"]:
-        reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
-                       f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
     if not tests["min_total_premium"]:
         reasons.append(f"total premium ${_total_premium:,.0f} < ${MIN_TOTAL_PREMIUM:,.0f}")
     if USE_IVR and not tests.get("iv_rank"):
@@ -898,8 +903,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
 
-def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None, otm_min=None,
-                  symbol=None):
+def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None, otm_min=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (strike - spot) / spot
     per_yld = premium / spot if spot else float("nan")
@@ -917,7 +921,9 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     # this gate doesn't have that context, so it uses the same spot-based
     # fallback contracts_for_target(price*100) uses when shares aren't
     # known. A reasonable stand-in for this risk check, not the displayed
-    # count. See tech_otm_ok/MIN_TOTAL_PREMIUM.
+    # count. See MIN_TOTAL_PREMIUM. No tech-specific gate here (see
+    # TECH_OTM_MIN above) -- single-leg calls just need the plain
+    # OTM_MIN_OTHER (via _om) + this $ floor, tech or not.
     _total_premium = premium * 100 * contracts_for_target(spot * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
@@ -926,7 +932,6 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
-        "tech_otm":     tech_otm_ok(symbol, otm, _total_premium),
         "min_total_premium": MIN_TOTAL_PREMIUM <= 0 or _total_premium >= MIN_TOTAL_PREMIUM,
     }
     if CALL_MIN_OTM_OVER_IV > 0:
@@ -958,9 +963,6 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
-    if not tests["tech_otm"]:
-        reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
-                       f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
     if not tests["min_total_premium"]:
         reasons.append(f"total premium ${_total_premium:,.0f} < ${MIN_TOTAL_PREMIUM:,.0f}")
     if REQUIRE_STRIKE_ABOVE_COST and not tests.get("above_cost"):
@@ -1105,7 +1107,7 @@ def screen_puts(symbol):
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol),
-                               is_index=(symbol in INDEX_TICKERS), symbol=symbol)
+                               is_index=(symbol in INDEX_TICKERS))
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte, iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
@@ -1151,7 +1153,7 @@ def screen_calls(symbol, cost_basis):
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
                                  "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol), symbol=symbol)
+                                cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
             _apr = avg_premium_range(symbol, (o["strike"] - price) / price, dte, "call", iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
@@ -1215,8 +1217,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             if kind == "put":
                 res = evaluate_put({"strike": k, "premium": float(premium),
                                     "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx,
-                                   symbol=symbol)
+                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx)
                 _apr = avg_premium_range(symbol, (price - k) / price, dte, "put", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
@@ -1227,7 +1228,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             else:
                 res = evaluate_call({"strike": k, "premium": float(premium),
                                      "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                    None, delta=o["delta"], otm_min=otm_min_for(symbol), symbol=symbol)
+                                    None, delta=o["delta"], otm_min=otm_min_for(symbol))
                 _apr = avg_premium_range(symbol, (k - price) / price, dte, "call", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
