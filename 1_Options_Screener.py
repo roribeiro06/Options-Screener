@@ -714,12 +714,16 @@ st.caption("Every OPEN_POSITIONS entry's Max Loss, cross-tabbed by sector -- **T
            "case being unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in "
            "that sense; puts scaled to a more realistic 20% tail-risk estimate net of premium; spreads "
            "unchanged, width - credit) -- and, on the right (extra spacing pushes it as far right as one "
-           "plain-text cell can go), that cell's contract premium change (today vs yesterday's live ask/"
-           "prevclose, netted across both legs for a spread the same way Open Positions' own CostToClose "
-           "prices one) shown as a signed \"+X.X%\"/\"-X.X% chg\" -- e.g. \"\\$17,415.00 (10.2%)     |  "
-           "-13.8% chg\". A position opened TODAY has no real \"yesterday\" for that percentage, so it's "
-           "excluded from the comparison rather than treated as a same-basket hypothetical. Total row and "
-           "column included. Same refresh cadence as the rest of the app.")
+           "plain-text cell can go), your **P&L direction** on that contract today vs yesterday (today's "
+           "live ask/prevclose, netted across both legs for a spread the same way Open Positions' own "
+           "CostToClose prices one) shown as a signed \"+X.X%\"/\"-X.X% chg\" -- since every position here "
+           "is SHORT (sold to open), a FALLING contract price is good for you and shows POSITIVE, a "
+           "RISING price is bad and shows NEGATIVE -- the reverse of the contract's own raw price move, "
+           "not just \"the price went up/down.\" E.g. \"\\$17,415.00 (10.2%)     |  +13.8% chg\" means "
+           "that contract got cheaper (good for you) since yesterday. A position opened TODAY has no real "
+           "\"yesterday\" for that percentage, so it's excluded from the comparison rather than treated as "
+           "a same-basket hypothetical. Total row and column included. Same refresh cadence as the rest "
+           "of the app.")
 try:
     _dconc, _econc = scan_concentration()
     st.dataframe(_dconc, hide_index=True, use_container_width=True)

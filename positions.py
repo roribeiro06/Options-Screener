@@ -582,9 +582,14 @@ def build_concentration_table():
     the grand total Max Loss across every position.
 
     Premium change (right, "+X.X%"/"-X.X% chg" -- always signed, unlike Max
-    Loss's own percentage which is never negative) is the contract's own
-    price move, NOT Max Loss/risk -- e.g. an NVDA 230 put priced at $3.50
-    yesterday and $3.00 today is -14.3%. Only the percentage is shown here
+    Loss's own percentage which is never negative) is your P&L DIRECTION on
+    that contract, NOT Max Loss/risk and NOT the raw price move -- every
+    position here is SHORT (sold to open), so a FALLING contract price is
+    good for you (cheaper to buy back) and shows POSITIVE, while a RISING
+    price is bad (costlier to close) and shows NEGATIVE -- the reverse of
+    the contract's own price direction. E.g. an NVDA 230 put priced at
+    $3.50 yesterday and $3.00 today (the contract got cheaper -- good for a
+    short put) shows +14.3%, not -14.3%. Only the percentage is shown here
     (the dollar change lives implicitly in the Max Loss side's own dollar
     figure).
     Single-leg: today's value = live ask (same basis as Open Positions' own
@@ -678,7 +683,14 @@ def build_concentration_table():
         v = cell["maxloss"]
         loss_pct = (v / grand_maxloss) if grand_maxloss else float("nan")
         y, t = cell["prem_y"], cell["prem_t"]
-        chg_pct = ((t - y) / y) if y else float("nan")
+        # Every position here is SHORT (sold to open), so a falling contract
+        # price is what's actually good for you (cheaper to buy back) and a
+        # rising one is bad (costlier to close) -- the reverse of the raw
+        # price direction. Flipped (yesterday - today, not today - yesterday)
+        # so positive always means "good for your P&L" and negative always
+        # means "bad," for puts, calls, and spreads alike, not just "the
+        # contract's price went up."
+        chg_pct = ((y - t) / y) if y else float("nan")
         # Plain ASCII, not a unicode delta -- keeps CSV export / any non-UTF8
         # console (e.g. a Windows GitHub Actions runner) safe. Extra spacing
         # before the "|" pushes the change % as far right within the cell as
