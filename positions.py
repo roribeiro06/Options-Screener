@@ -689,3 +689,146 @@ def build_concentration_table():
 
     rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
     return pd.DataFrame(rows, columns=["Sector"] + cols), errs
+
+
+def build_concentration_history_table():
+    """Concentration of Positions -- 1D All-Time High & Average (Max Loss):
+    same Sector (Tech/Non-Tech/Total) x Put/Call/Total grid as
+    build_concentration_table(), but instead of just today's live Max Loss,
+    each cell shows three numbers side by side: "Now" (today's current Max
+    Loss -- identical figure to build_concentration_table's own Max Loss
+    side, so the two are directly comparable), "ATH" (the highest single-day
+    Max Loss ever seen in that bucket), and "Avg" (the average single-day
+    Max Loss across every day that bucket had at least one position open) --
+    e.g. "Now $12,000 | ATH $18,500 | Avg $9,200" tells you today's risk in
+    that corner of the book is above its historical average but below its
+    peak. Covers every position EVER held, open or closed -- "in all our
+    time doing options" -- using _pivot_max_loss_per_share throughout, the
+    exact same risk-scaled convention (puts scaled to a 20% tail estimate,
+    covered calls excluded/NaN, spreads unchanged) so ATH/Avg are on the
+    same footing as "Now."
+
+    "1D" means what "Max Loss 1D" already means in the Financials tables:
+    the SUM of Max Loss across every position open on the same calendar day
+    (an interval-overlap sweep), not any single position's own number. The
+    sweep here is a plain brute-force day-by-day loop from the earliest
+    entry_date on record to today -- this account's history is small enough
+    (a handful of months x well under a hundred positions) that the
+    days-times-positions cost is trivial; a day where a bucket's sum is $0
+    is excluded from the Average so it reflects typical risk carried WHILE
+    holding that kind of position, not diluted by days before that category
+    ever existed. No live quotes needed -- pure arithmetic over
+    OPEN_POSITIONS/CLOSED_POSITIONS, same as the Financials tables."""
+    import pandas as pd
+    today = dt.date.today()
+    cols = CONCENTRATION_COLS + ["Total"]
+    sectors = CONCENTRATION_ROWS + ["Total"]
+
+    spans = []   # (start, end_inclusive, loss_total, sector, bucket) for every position ever
+    now_val = {s: {c: 0.0 for c in cols} for s in sectors}
+
+    for pos in _open_unclosed(today):
+        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
+        if not bucket:
+            continue
+        loss = _pivot_max_loss_per_share(pos)
+        if loss != loss:
+            continue
+        sector = ws.get_sector_bucket(pos["ticker"])
+        loss_total = loss * 100 * pos["contracts"]
+        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
+        spans.append((entry, today, loss_total, sector, bucket))
+        for r in (sector, "Total"):
+            now_val[r][bucket] += loss_total
+            now_val[r]["Total"] += loss_total
+
+    for pos in _all_closed():
+        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
+        if not bucket:
+            continue
+        loss = _pivot_max_loss_per_share(pos)
+        if loss != loss:
+            continue
+        sector = ws.get_sector_bucket(pos["ticker"])
+        loss_total = loss * 100 * pos["contracts"]
+        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
+        exit_ = dt.date.fromisoformat(pos["exit_date"])
+        spans.append((entry, exit_, loss_total, sector, bucket))
+
+    earliest = min((s[0] for s in spans), default=today)
+
+    daily = {s: {c: [] for c in cols} for s in sectors}
+    d = earliest
+    while d <= today:
+        day_total = {s: {c: 0.0 for c in cols} for s in sectors}
+        for start, end, loss_total, sector, bucket in spans:
+            if start <= d <= end:
+                for r in (sector, "Total"):
+                    day_total[r][bucket] += loss_total
+                    day_total[r]["Total"] += loss_total
+        for s in sectors:
+            for c in cols:
+                v = day_total[s][c]
+                if v:
+                    daily[s][c].append(v)
+        d += dt.timedelta(days=1)
+
+    def _cell(sector, col):
+        vals = daily[sector][col]
+        ath = max(vals) if vals else 0.0
+        avg = (sum(vals) / len(vals)) if vals else 0.0
+        return (f"Now {_fmt_dollar(now_val[sector][col])} | "
+               f"ATH {_fmt_dollar(ath)} | Avg {_fmt_dollar(avg)}")
+
+    rows = [(sector, *[_cell(sector, c) for c in cols]) for sector in sectors]
+    return pd.DataFrame(rows, columns=["Sector"] + cols)
+
+
+_TYPE_LABEL_TO_CONCENTRATION_BUCKET = {"Put": "Put", "Covered Call": "Call",
+                                       "Put Credit Spread": "Put", "Call Credit Spread": "Call"}
+
+
+def build_concentration_gl_table(dpos_df):
+    """Concentration of Positions on Unrealized G/L: same Sector x Put/Call/
+    Total grid, each cell showing current Unrealized G/L $ and what % of
+    "Potential Profit Acc." (total premium collected -- the theoretical max
+    you could ever make if every position in that bucket captured its full
+    premium, same basis the Financials tables already call "Potential
+    Profit Acc.") that G/L represents. E.g. +$10,000 unrealized at 20% means
+    only 20% of the theoretical max has been captured so far -- still 80%
+    of the room (time decay / price movement still to come) left to run,
+    not "some unknown fraction of an unknown total."
+
+    Reuses the already-live-quoted Open Positions dataframe (dpos_df, from
+    build_positions_table()) instead of a fresh chain fetch -- Unrealized
+    G/L and EntryCredit are already sitting right there. Put spreads join
+    Put, call spreads join Call, same grouping as the other Concentration
+    tables (via _TYPE_LABEL_TO_CONCENTRATION_BUCKET, the label-keyed twin of
+    _TYPE_TO_CONCENTRATION_BUCKET since dpos_df's "Type" column already
+    holds the display label, not the raw OPEN_POSITIONS type string)."""
+    import pandas as pd
+    cols = CONCENTRATION_COLS + ["Total"]
+    sectors = CONCENTRATION_ROWS + ["Total"]
+    grid = {s: {c: {"gl": 0.0, "potential": 0.0} for c in cols} for s in sectors}
+
+    if len(dpos_df):
+        for _, row in dpos_df.iterrows():
+            bucket = _TYPE_LABEL_TO_CONCENTRATION_BUCKET.get(row["Type"])
+            if not bucket:
+                continue
+            sector = ws.get_sector_bucket(row["Ticker"])
+            potential = row["EntryCredit"] * 100 * row["Contracts"]
+            gl = row["UnrealizedGL_$"]
+            for r in (sector, "Total"):
+                grid[r][bucket]["gl"] += gl
+                grid[r]["Total"]["gl"] += gl
+                grid[r][bucket]["potential"] += potential
+                grid[r]["Total"]["potential"] += potential
+
+    def _cell(cell):
+        gl, potential = cell["gl"], cell["potential"]
+        pct = (gl / potential) if potential else float("nan")
+        return f"{_fmt_dollar_signed(gl)} ({_fmt_pct(pct)} of potential)"
+
+    rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
+    return pd.DataFrame(rows, columns=["Sector"] + cols)

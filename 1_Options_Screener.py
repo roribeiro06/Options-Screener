@@ -728,6 +728,37 @@ try:
 except Exception as _e:
     st.caption(f"(concentration unavailable: {_e})")
 
+st.markdown("**Concentration of Positions -- 1D All-Time High & Average (Max Loss)**")
+st.caption("Same Sector x Put/Call/Total grid as the table above, but each cell shows three numbers: "
+           "**Now** (today's Max Loss -- identical to the table above, for a direct comparison), **ATH** "
+           "(the highest single-day Max Loss ever seen in that bucket), and **Avg** (the average "
+           "single-day Max Loss across every day that bucket had at least one position open) -- e.g. "
+           "\"Now \\$12,000 | ATH \\$18,500 | Avg \\$9,200\" means today's risk there is above its "
+           "historical average but below its peak. Covers every position EVER held, open or closed -- "
+           "in all your time doing options -- using the exact same Max Loss convention as the table above "
+           "(so the three numbers are directly comparable). \"1D\" means the same thing \"Max Loss 1D\" "
+           "means in the Financials tables: the SUM of Max Loss across every position open on the same "
+           "calendar day, not any one position's own number. No live quotes needed -- pure arithmetic "
+           "over OPEN_POSITIONS/CLOSED_POSITIONS.")
+try:
+    st.dataframe(positions.build_concentration_history_table(), hide_index=True, use_container_width=True)
+except Exception as _e:
+    st.caption(f"(concentration history unavailable: {_e})")
+
+st.markdown("**Concentration of Positions -- Unrealized G/L**")
+st.caption("Same Sector x Put/Call/Total grid, but for your CURRENT Unrealized G/L instead of risk: each "
+           "cell shows the $ and what % of \"Potential Profit Acc.\" (total premium collected -- the "
+           "theoretical max if every position in that bucket captured its full premium, same basis the "
+           "Financials tables above call \"Potential Profit Acc.\") that $ represents. E.g. +\\$10,000 "
+           "at 20% means only 20% of the theoretical max has been captured so far -- still 80% of the "
+           "room (time decay / price movement still to come) left to run, not \"\\$10,000 out of some "
+           "unknown total.\" Reuses the already-live-quoted Open Positions table above, no extra chain "
+           "fetch.")
+try:
+    st.dataframe(positions.build_concentration_gl_table(_dpos), hide_index=True, use_container_width=True)
+except Exception as _e:
+    st.caption(f"(concentration G/L unavailable: {_e})")
+
 st.markdown("---")
 st.header("Closed Positions (last 30 days)")
 st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of wheel_screener.py -- add "

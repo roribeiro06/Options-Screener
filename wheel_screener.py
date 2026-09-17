@@ -241,6 +241,18 @@ INDEX_TICKERS       = {"SPY", "QQQ", "DIA"}   # these get the 5% OTM floor; all 
 OTM_MIN_INDEX       = 0.05   # min % OTM for index ETFs (applies to ALL strategies)
 OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL strategies)
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
+# Added after the META loss -- felt like too much risk was being taken in
+# mega-cap tech names at the same OTM cushion as everything else. ADDITIONAL
+# gate on top of OTM_MIN_OTHER above (single-leg puts/calls only, via
+# _tech_otm_ok): a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to
+# pass outright; between 10-15% OTM it can still pass, but only if it's
+# collecting real money for the extra proximity (>= $5,000 total premium,
+# worst-case/bid basis, at the same contract sizing the "# of contracts"
+# column uses); below 10% OTM it's excluded no matter the premium. Non-tech
+# tickers are completely unaffected.
+TECH_OTM_MIN        = 0.15
+TECH_OTM_FLOOR      = 0.10
+TECH_MIN_PREMIUM    = 5000
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV", "EWY"}   # ETFs: no earnings to span
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
 ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans an earnings date. False: exclude them.
@@ -479,6 +491,21 @@ def otm_min_for(symbol):
     return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
 
 
+def _tech_otm_ok(symbol, otm, total_premium):
+    """Tech-specific risk gate -- see TECH_OTM_MIN/TECH_OTM_FLOOR/
+    TECH_MIN_PREMIUM above for the full rationale. `symbol=None` (e.g. a
+    direct evaluate_put/evaluate_call call from a test/script with no ticker
+    context) always passes -- this is an ADDITIONAL screen, not something
+    that should ever silently reject a call site that predates it."""
+    if symbol is None or get_sector_bucket(symbol) != "Tech":
+        return True
+    if otm >= TECH_OTM_MIN:
+        return True
+    if otm < TECH_OTM_FLOOR:
+        return False
+    return total_premium >= TECH_MIN_PREMIUM
+
+
 def _load_history():
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history_premiums.json")
@@ -697,7 +724,8 @@ def tiered_yield_needed(otm):
     return TIERED_YIELD[-1][1]              # closer than smallest tier -> strictest
 
 
-def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None, is_index=False):
+def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None,
+                 is_index=False, symbol=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
     per_yld = premium / strike if strike else float("nan")
@@ -713,6 +741,9 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     flat_floor = MIN_ANN_YIELD_INDEX if is_index else MIN_ANN_YIELD
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
+    # Same contract sizing the real "# of contracts" column uses for a put
+    # (contracts_for_target(strike * 100)) -- see _tech_otm_ok.
+    _tech_total_premium = premium * 100 * contracts_for_target(strike * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
@@ -720,6 +751,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
+        "tech_otm":     _tech_otm_ok(symbol, otm, _tech_total_premium),
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
@@ -760,6 +792,9 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
+    if not tests["tech_otm"]:
+        reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
+                       f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
     score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
@@ -774,7 +809,8 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
             "PASS": all(tests.values()), "Reasons": "; ".join(reasons)}
 
 
-def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None, otm_min=None):
+def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, delta=None, otm_min=None,
+                  symbol=None):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (strike - spot) / spot
     per_yld = premium / spot if spot else float("nan")
@@ -787,6 +823,13 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else MIN_ANN_YIELD
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
+    # Approximates the real "# of contracts" column, which for a covered
+    # call actually caps at shares owned (HOLDINGS_SHARES) when known --
+    # this gate doesn't have that context, so it uses the same spot-based
+    # fallback contracts_for_target(price*100) uses when shares aren't
+    # known. A reasonable stand-in for this risk check, not the displayed
+    # count. See _tech_otm_ok.
+    _tech_total_premium = premium * 100 * contracts_for_target(spot * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
@@ -794,6 +837,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
+        "tech_otm":     _tech_otm_ok(symbol, otm, _tech_total_premium),
     }
     if CALL_MIN_OTM_OVER_IV > 0:
         tests["otm_vs_iv"] = bool(iv) and otm >= CALL_MIN_OTM_OVER_IV * iv
@@ -824,6 +868,9 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"OTM {otm:.1%} outside {_om:.0%}-{OTM_MAX:.0%}")
     if not tests["no_earnings"]:
         reasons.append("spans earnings")
+    if not tests["tech_otm"]:
+        reasons.append(f"tech: OTM {otm:.1%} < {TECH_OTM_MIN:.0%} "
+                       f"(and < ${TECH_MIN_PREMIUM:,.0f} premium at {TECH_OTM_FLOOR:.0%}-{TECH_OTM_MIN:.0%})")
     if REQUIRE_STRIKE_ABOVE_COST and not tests.get("above_cost"):
         reasons.append(f"strike below cost {cost_basis}")
     if USE_IVR and not tests.get("iv_rank"):
@@ -966,7 +1013,7 @@ def screen_puts(symbol):
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol),
-                               is_index=(symbol in INDEX_TICKERS))
+                               is_index=(symbol in INDEX_TICKERS), symbol=symbol)
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte, iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
@@ -1012,7 +1059,7 @@ def screen_calls(symbol, cost_basis):
             premium = bid if PREMIUM_BASIS == "bid" else (bid + (o["ask"] or 0)) / 2
             res = evaluate_call({"strike": o["strike"], "premium": float(premium),
                                  "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol))
+                                cost_basis, delta=o["delta"], otm_min=otm_min_for(symbol), symbol=symbol)
             _apr = avg_premium_range(symbol, (o["strike"] - price) / price, dte, "call", iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
@@ -1076,7 +1123,8 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             if kind == "put":
                 res = evaluate_put({"strike": k, "premium": float(premium),
                                     "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx)
+                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx,
+                                   symbol=symbol)
                 _apr = avg_premium_range(symbol, (price - k) / price, dte, "put", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
@@ -1087,7 +1135,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             else:
                 res = evaluate_call({"strike": k, "premium": float(premium),
                                      "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                    None, delta=o["delta"], otm_min=otm_min_for(symbol))
+                                    None, delta=o["delta"], otm_min=otm_min_for(symbol), symbol=symbol)
                 _apr = avg_premium_range(symbol, (k - price) / price, dte, "call", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
