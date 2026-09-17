@@ -132,12 +132,11 @@ def build_closed_positions():
 
 
 def build_concentration():
-    """Same Max Loss + premium-change-today-vs-yesterday cross-tab as the
-    app's Concentration of Positions section -- see positions.py."""
-    df, errs = positions.build_concentration_table()
-    for e in errs:
-        print(f"CONCENTRATION: {e}", file=sys.stderr)
-    return df
+    """Same Max Loss cross-tab as the app's Concentration of Positions
+    section -- pure arithmetic against entry_credit, no live chain fetch
+    (the 1-day premium % change this table used to carry has moved to
+    build_concentration_gl, next to Unrealized G/L) -- see positions.py."""
+    return positions.build_concentration_table()
 
 
 def build_concentration_history():
@@ -148,11 +147,16 @@ def build_concentration_history():
 
 
 def build_concentration_gl(open_pos_df):
-    """Same Unrealized G/L (% of Potential Profit Acc.) cross-tab as the
-    app's Concentration of Positions -- Unrealized G/L section -- see
-    positions.build_concentration_gl_table. Reuses the already-live-quoted
-    Open Positions dataframe, no extra chain fetch."""
-    return positions.build_concentration_gl_table(open_pos_df)
+    """Same Unrealized G/L (% of Potential Profit Acc.) + 1-day premium %
+    change cross-tab as the app's Concentration of Positions -- Unrealized
+    G/L section -- see positions.build_concentration_gl_table. The G/L half
+    reuses the already-live-quoted Open Positions dataframe (no extra chain
+    fetch); the % change half needs its own fresh chain fetch per position,
+    so (unlike before) this can report per-position errors."""
+    df, errs = positions.build_concentration_gl_table(open_pos_df)
+    for e in errs:
+        print(f"CONCENTRATION GL: {e}", file=sys.stderr)
+    return df
 
 
 def build_monthly():

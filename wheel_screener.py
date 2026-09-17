@@ -77,8 +77,6 @@ OPEN_POSITIONS = [
      "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
-    {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
-     "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14"},
     {"ticker": "V", "type": "put", "strike": 350, "expiration": "2026-09-18",
      "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17"},
     {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
@@ -141,6 +139,13 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # Short leg (67.5P) bought back at $0.06/share ($642.00 total on 107
+    # contracts), long leg (65P) sold at $0.01/share ($106.99 total) --
+    # exit_cost = 0.06 - 0.01 = 0.05, same short-ask-minus-long-bid
+    # convention this app uses everywhere else for a spread's cost to close.
+    {"ticker": "UBER", "type": "put_spread", "short_strike": 67.5, "long_strike": 65,
+     "expiration": "2026-09-18", "contracts": 107, "entry_credit": 0.22, "entry_date": "2026-08-14",
+     "exit_cost": 0.05, "exit_date": "2026-09-16"},
     {"ticker": "MRVL", "type": "call", "strike": 250, "expiration": "2026-09-18",
      "contracts": 2, "entry_credit": 4.3499, "entry_date": "2026-08-28",
      "exit_cost": 0.28, "exit_date": "2026-09-15"},

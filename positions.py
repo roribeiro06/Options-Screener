@@ -567,140 +567,54 @@ def build_concentration_table():
     """Concentration of Positions: one row per sector (Tech/Non-Tech/Total)
     x directional side (Put/Call/Total, via _TYPE_TO_CONCENTRATION_BUCKET --
     put spreads join plain puts, call spreads join plain calls, not a
-    separate Multi-Leg bucket). Each cell packs two figures together --
-    Max Loss on the left, contract premium change (today vs yesterday) on
-    the right (extra spacing pushes it as far right as one plain-text cell
-    can go) -- e.g. "$17,415.00 (10.2%)     |  -13.8% chg". One live
-    chain fetch per position feeds both halves.
+    separate Multi-Leg bucket). Each cell shows Max Loss, "$total (X%)" of
+    your total Max Loss across every position.
 
-    Max Loss (left, "$total (X%)") uses _pivot_max_loss_per_share, the SAME
-    risk-scaled convention every Financials table on this page already
-    uses: covered calls are NaN (a stock-to-zero worst case is unrealistic
-    enough that they're excluded outright, not just discounted); puts are
-    scaled to a more realistic 20% tail estimate net of premium; spreads
-    are unchanged (width - credit). The percentage is this cell's share of
-    the grand total Max Loss across every position.
+    Uses _pivot_max_loss_per_share, the SAME risk-scaled convention every
+    Financials table on this page already uses: covered calls are NaN (a
+    stock-to-zero worst case is unrealistic enough that they're excluded
+    outright, not just discounted); puts are scaled to a more realistic 20%
+    tail estimate net of premium; spreads are unchanged (width - credit).
+    The percentage is this cell's share of the grand total Max Loss across
+    every position.
 
-    Premium change (right, "+X.X%"/"-X.X% chg" -- always signed, unlike Max
-    Loss's own percentage which is never negative) is your P&L DIRECTION on
-    that contract, NOT Max Loss/risk and NOT the raw price move -- every
-    position here is SHORT (sold to open), so a FALLING contract price is
-    good for you (cheaper to buy back) and shows POSITIVE, while a RISING
-    price is bad (costlier to close) and shows NEGATIVE -- the reverse of
-    the contract's own price direction. E.g. an NVDA 230 put priced at
-    $3.50 yesterday and $3.00 today (the contract got cheaper -- good for a
-    short put) shows +14.3%, not -14.3%. Only the percentage is shown here
-    (the dollar change lives implicitly in the Max Loss side's own dollar
-    figure).
-    Single-leg: today's value = live ask (same basis as Open Positions' own
-    CostToClose); yesterday's = that contract's own prevclose. Spread: both
-    legs netted the SAME way the rest of the app already prices one to
-    close -- today = short leg's ask minus long leg's bid; yesterday =
-    short leg's prevclose minus long leg's prevclose. A position opened
-    TODAY has no real "yesterday" -- excluded from yesterday's total (still
-    counted in today's), so the two reflect what was actually held each
-    day, not a hypothetical same-basket comparison. A leg with no prevclose
-    available skips that position's yesterday contribution rather than
-    counting it as $0.
+    Pure arithmetic against entry_credit -- no live chain fetch needed (Max
+    Loss doesn't move intraday, unlike Unrealized G/L). The 1-day contract
+    premium % change this table used to carry alongside Max Loss has moved
+    to build_concentration_gl_table() instead -- that's the number it
+    actually explains the movement of, not a static risk figure.
 
     Total row and column included. A position with an undefined Max Loss
     (the covered calls, plus a put/call with no HOLDINGS cost basis where
     relevant) is excluded from every Max Loss sum, same as the Financials
-    tables above. Returns (dataframe, errors)."""
+    tables above."""
     import pandas as pd
     today = dt.date.today()
     cols = CONCENTRATION_COLS + ["Total"]
     sectors = CONCENTRATION_ROWS + ["Total"]
-    grid = {s: {c: {"maxloss": 0.0, "prem_y": 0.0, "prem_t": 0.0} for c in cols} for s in sectors}
-    errs = []
+    grid = {s: {c: 0.0 for c in cols} for s in sectors}
 
     for pos in _open_unclosed(today):
-        kind = pos["type"]
-        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(kind)
+        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(pos["type"])
         if not bucket:
             continue
         sector = ws.get_sector_bucket(pos["ticker"])
-        contracts = pos["contracts"]
-
         loss = _pivot_max_loss_per_share(pos)
-        if loss == loss:
-            loss_total = loss * 100 * contracts
-            for r in (sector, "Total"):
-                grid[r][bucket]["maxloss"] += loss_total
-                grid[r]["Total"]["maxloss"] += loss_total
-
-        ticker, exp = pos["ticker"], pos["expiration"]
-        label = f"{ticker} {exp}"
-        try:
-            chain = ws.td_chain(ticker, exp)
-            if not chain:
-                raise RuntimeError("no option chain (expired or invalid expiration?)")
-            if kind in ("put", "call"):
-                strike = pos["strike"]
-                leg = _leg_prices(chain, kind, strike)
-                if not leg:
-                    raise RuntimeError("contract not found")
-                _bid, today_val, prevclose_val = leg
-                label = f"{ticker} {strike:g}{kind[0].upper()} {exp}"
-            else:
-                opt_type = "put" if kind == "put_spread" else "call"
-                short_strike, long_strike = pos["short_strike"], pos["long_strike"]
-                short_leg = _leg_prices(chain, opt_type, short_strike)
-                long_leg = _leg_prices(chain, opt_type, long_strike)
-                if not (short_leg and long_leg):
-                    raise RuntimeError("leg(s) not found")
-                _s_bid, s_ask, s_prev = short_leg
-                l_bid, _l_ask, l_prev = long_leg
-                today_val = s_ask - l_bid
-                prevclose_val = (s_prev - l_prev) if (s_prev and l_prev) else 0
-                label = f"{ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}"
-        except Exception as e:
-            errs.append(f"{label}: {e}")
+        if loss != loss:
             continue
-
-        today_total = today_val * 100 * contracts
+        loss_total = loss * 100 * pos["contracts"]
         for r in (sector, "Total"):
-            grid[r][bucket]["prem_t"] += today_total
-            grid[r]["Total"]["prem_t"] += today_total
+            grid[r][bucket] += loss_total
+            grid[r]["Total"] += loss_total
 
-        entry_date_str = pos.get("entry_date")
-        opened_today = bool(entry_date_str) and dt.date.fromisoformat(entry_date_str) == today
-        if not opened_today and prevclose_val:
-            y_total = prevclose_val * 100 * contracts
-            for r in (sector, "Total"):
-                grid[r][bucket]["prem_y"] += y_total
-                grid[r]["Total"]["prem_y"] += y_total
+    grand_maxloss = grid["Total"]["Total"]
 
-    grand_maxloss = grid["Total"]["Total"]["maxloss"]
-
-    def _fmt_pct_signed(v):
-        # +X.X% / -X.X% -- Max Loss's own percentage never needs a leading
-        # "+" (it's always a positive share of the total), but this one can
-        # go either direction, so it gets the explicit sign.
-        return f"{v*100:+.1f}%" if v == v else "-"
-
-    def _cell(cell):
-        v = cell["maxloss"]
+    def _cell(v):
         loss_pct = (v / grand_maxloss) if grand_maxloss else float("nan")
-        y, t = cell["prem_y"], cell["prem_t"]
-        # Every position here is SHORT (sold to open), so a falling contract
-        # price is what's actually good for you (cheaper to buy back) and a
-        # rising one is bad (costlier to close) -- the reverse of the raw
-        # price direction. Flipped (yesterday - today, not today - yesterday)
-        # so positive always means "good for your P&L" and negative always
-        # means "bad," for puts, calls, and spreads alike, not just "the
-        # contract's price went up."
-        chg_pct = ((y - t) / y) if y else float("nan")
-        # Plain ASCII, not a unicode delta -- keeps CSV export / any non-UTF8
-        # console (e.g. a Windows GitHub Actions runner) safe. Extra spacing
-        # before the "|" pushes the change % as far right within the cell as
-        # a single plain-text string can go (no per-substring alignment
-        # inside one cell without HTML, which Streamlit's dataframe doesn't
-        # render).
-        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)})     |  {_fmt_pct_signed(chg_pct)} chg"
+        return f"{_fmt_dollar(v)} ({_fmt_pct(loss_pct)})"
 
     rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
-    return pd.DataFrame(rows, columns=["Sector"] + cols), errs
+    return pd.DataFrame(rows, columns=["Sector"] + cols)
 
 
 def build_concentration_history_table():
@@ -802,26 +716,52 @@ _TYPE_LABEL_TO_CONCENTRATION_BUCKET = {"Put": "Put", "Covered Call": "Call",
 
 def build_concentration_gl_table(dpos_df):
     """Concentration of Positions on Unrealized G/L: same Sector x Put/Call/
-    Total grid, each cell showing current Unrealized G/L $ and what % of
-    "Potential Profit Acc." (total premium collected -- the theoretical max
-    you could ever make if every position in that bucket captured its full
-    premium, same basis the Financials tables already call "Potential
-    Profit Acc.") that G/L represents. E.g. +$10,000 unrealized at 20% means
-    only 20% of the theoretical max has been captured so far -- still 80%
-    of the room (time decay / price movement still to come) left to run,
-    not "some unknown fraction of an unknown total."
+    Total grid, each cell packing three figures together -- Unrealized G/L
+    $ and what % of "Potential Profit Acc." (total premium collected -- the
+    theoretical max you could ever make if every position in that bucket
+    captured its full premium, same basis the Financials tables already
+    call "Potential Profit Acc.") that G/L represents, plus (moved here
+    from build_concentration_table, which no longer needs a live chain
+    fetch since Max Loss is static) the 1-day contract premium % change --
+    e.g. "+$10,000 (20.0% of potential)     |  +13.8% chg" means only 20%
+    of the theoretical max has been captured so far (still 80% of the room
+    left to run) AND that today's move was in your favor. The % change
+    belongs here, not next to Max Loss, because it's this G/L number that
+    it actually explains the movement of.
 
-    Reuses the already-live-quoted Open Positions dataframe (dpos_df, from
-    build_positions_table()) instead of a fresh chain fetch -- Unrealized
-    G/L and EntryCredit are already sitting right there. Put spreads join
-    Put, call spreads join Call, same grouping as the other Concentration
-    tables (via _TYPE_LABEL_TO_CONCENTRATION_BUCKET, the label-keyed twin of
-    _TYPE_TO_CONCENTRATION_BUCKET since dpos_df's "Type" column already
-    holds the display label, not the raw OPEN_POSITIONS type string)."""
+    G/L (left) reuses the already-live-quoted Open Positions dataframe
+    (dpos_df, from build_positions_table()) instead of a fresh chain fetch
+    -- Unrealized G/L and EntryCredit are already sitting right there. Put
+    spreads join Put, call spreads join Call, same grouping as the other
+    Concentration tables (via _TYPE_LABEL_TO_CONCENTRATION_BUCKET, the
+    label-keyed twin of _TYPE_TO_CONCENTRATION_BUCKET since dpos_df's
+    "Type" column already holds the display label, not the raw
+    OPEN_POSITIONS type string).
+
+    Premium change (right, "+X.X%"/"-X.X% chg", always signed) is your P&L
+    DIRECTION on that contract, NOT the raw price move -- every position
+    here is SHORT (sold to open), so a FALLING contract price is good for
+    you (cheaper to buy back) and shows POSITIVE, while a RISING price is
+    bad (costlier to close) and shows NEGATIVE. Needs its OWN live chain
+    fetch per open position (today's ask vs prevclose, netted across both
+    legs for a spread the same way Open Positions' own CostToClose prices
+    one) -- unlike the G/L half, this can't be read off dpos_df, which
+    doesn't carry yesterday's prices. A position opened TODAY has no real
+    "yesterday" -- excluded from yesterday's total (still counted in
+    today's). A leg with no prevclose available skips that position's
+    yesterday contribution rather than counting it as $0.
+
+    Total row and column included. Returns (dataframe, errors) -- a
+    position whose contract/chain can't be found for the % change is
+    skipped with an error string rather than silently dropped, same
+    pattern as build_positions_table (the G/L half is unaffected since it
+    doesn't need a fresh quote)."""
     import pandas as pd
+    today = dt.date.today()
     cols = CONCENTRATION_COLS + ["Total"]
     sectors = CONCENTRATION_ROWS + ["Total"]
-    grid = {s: {c: {"gl": 0.0, "potential": 0.0} for c in cols} for s in sectors}
+    grid = {s: {c: {"gl": 0.0, "potential": 0.0, "prem_y": 0.0, "prem_t": 0.0} for c in cols} for s in sectors}
+    errs = []
 
     if len(dpos_df):
         for _, row in dpos_df.iterrows():
@@ -837,10 +777,68 @@ def build_concentration_gl_table(dpos_df):
                 grid[r][bucket]["potential"] += potential
                 grid[r]["Total"]["potential"] += potential
 
+    for pos in _open_unclosed(today):
+        kind = pos["type"]
+        bucket = _TYPE_TO_CONCENTRATION_BUCKET.get(kind)
+        if not bucket:
+            continue
+        sector = ws.get_sector_bucket(pos["ticker"])
+        contracts = pos["contracts"]
+        ticker, exp = pos["ticker"], pos["expiration"]
+        label = f"{ticker} {exp}"
+        try:
+            chain = ws.td_chain(ticker, exp)
+            if not chain:
+                raise RuntimeError("no option chain (expired or invalid expiration?)")
+            if kind in ("put", "call"):
+                strike = pos["strike"]
+                leg = _leg_prices(chain, kind, strike)
+                if not leg:
+                    raise RuntimeError("contract not found")
+                _bid, today_val, prevclose_val = leg
+                label = f"{ticker} {strike:g}{kind[0].upper()} {exp}"
+            else:
+                opt_type = "put" if kind == "put_spread" else "call"
+                short_strike, long_strike = pos["short_strike"], pos["long_strike"]
+                short_leg = _leg_prices(chain, opt_type, short_strike)
+                long_leg = _leg_prices(chain, opt_type, long_strike)
+                if not (short_leg and long_leg):
+                    raise RuntimeError("leg(s) not found")
+                _s_bid, s_ask, s_prev = short_leg
+                l_bid, _l_ask, l_prev = long_leg
+                today_val = s_ask - l_bid
+                prevclose_val = (s_prev - l_prev) if (s_prev and l_prev) else 0
+                label = f"{ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}"
+        except Exception as e:
+            errs.append(f"{label}: {e}")
+            continue
+
+        today_total = today_val * 100 * contracts
+        for r in (sector, "Total"):
+            grid[r][bucket]["prem_t"] += today_total
+            grid[r]["Total"]["prem_t"] += today_total
+
+        entry_date_str = pos.get("entry_date")
+        opened_today = bool(entry_date_str) and dt.date.fromisoformat(entry_date_str) == today
+        if not opened_today and prevclose_val:
+            y_total = prevclose_val * 100 * contracts
+            for r in (sector, "Total"):
+                grid[r][bucket]["prem_y"] += y_total
+                grid[r]["Total"]["prem_y"] += y_total
+
+    def _fmt_pct_signed(v):
+        return f"{v*100:+.1f}%" if v == v else "-"
+
     def _cell(cell):
         gl, potential = cell["gl"], cell["potential"]
         pct = (gl / potential) if potential else float("nan")
-        return f"{_fmt_dollar_signed(gl)} ({_fmt_pct(pct)} of potential)"
+        y, t = cell["prem_y"], cell["prem_t"]
+        # Same flip as before: every position here is SHORT, so a falling
+        # contract price is good for your P&L (positive) and a rising one
+        # is bad (negative) -- the reverse of the raw price direction.
+        chg_pct = ((y - t) / y) if y else float("nan")
+        return (f"{_fmt_dollar_signed(gl)} ({_fmt_pct(pct)} of potential)"
+               f"     |  {_fmt_pct_signed(chg_pct)} chg")
 
     rows = [(sector, *[_cell(grid[sector][c]) for c in cols]) for sector in sectors]
-    return pd.DataFrame(rows, columns=["Sector"] + cols)
+    return pd.DataFrame(rows, columns=["Sector"] + cols), errs

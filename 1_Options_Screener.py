@@ -708,27 +708,17 @@ st.caption("Every OPEN_POSITIONS entry's Max Loss, cross-tabbed by sector -- **T
            "**Put** vs **Call** (put spreads join plain puts, call spreads join plain calls, not a "
            "separate Multi-Leg bucket -- a put spread is still bullish-put-side risk; an iron condor's "
            "two legs, tracked as separate put_spread/call_spread entries in OPEN_POSITIONS, split across "
-           "both columns accordingly). Each cell packs two figures: Max Loss on the left, \"\\$total (X%)\" "
-           "of your total Max Loss across every position -- the SAME risk-scaled convention every "
-           "Financials table above already uses (covered calls excluded entirely, a stock-to-zero worst "
-           "case being unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in "
-           "that sense; puts scaled to a more realistic 20% tail-risk estimate net of premium; spreads "
-           "unchanged, width - credit) -- and, on the right (extra spacing pushes it as far right as one "
-           "plain-text cell can go), your **P&L direction** on that contract today vs yesterday (today's "
-           "live ask/prevclose, netted across both legs for a spread the same way Open Positions' own "
-           "CostToClose prices one) shown as a signed \"+X.X%\"/\"-X.X% chg\" -- since every position here "
-           "is SHORT (sold to open), a FALLING contract price is good for you and shows POSITIVE, a "
-           "RISING price is bad and shows NEGATIVE -- the reverse of the contract's own raw price move, "
-           "not just \"the price went up/down.\" E.g. \"\\$17,415.00 (10.2%)     |  +13.8% chg\" means "
-           "that contract got cheaper (good for you) since yesterday. A position opened TODAY has no real "
-           "\"yesterday\" for that percentage, so it's excluded from the comparison rather than treated as "
-           "a same-basket hypothetical. Total row and column included. Same refresh cadence as the rest "
-           "of the app.")
+           "both columns accordingly). Each cell shows Max Loss, \"\\$total (X%)\" of your total Max Loss "
+           "across every position -- the SAME risk-scaled convention every Financials table above already "
+           "uses (covered calls excluded entirely, a stock-to-zero worst case being unrealistic enough "
+           "that a covered call genuinely has no meaningful \"max loss\" in that sense; puts scaled to a "
+           "more realistic 20% tail-risk estimate net of premium; spreads unchanged, width - credit). "
+           "Total row and column included. Pure arithmetic against entry_credit -- no live chain fetch "
+           "needed, Max Loss doesn't move intraday. (The 1-day contract premium % change this table used "
+           "to carry now lives in the Unrealized G/L concentration table below, next to the number it "
+           "actually explains the movement of.)")
 try:
-    _dconc, _econc = scan_concentration()
-    st.dataframe(_dconc, hide_index=True, use_container_width=True)
-    if _econc:
-        st.caption("Skipped: " + " | ".join(_econc))
+    st.dataframe(scan_concentration(), hide_index=True, use_container_width=True)
 except Exception as _e:
     st.caption(f"(concentration unavailable: {_e})")
 
@@ -751,15 +741,25 @@ except Exception as _e:
 
 st.markdown("**Concentration of Positions -- Unrealized G/L**")
 st.caption("Same Sector x Put/Call/Total grid, but for your CURRENT Unrealized G/L instead of risk: each "
-           "cell shows the $ and what % of \"Potential Profit Acc.\" (total premium collected -- the "
-           "theoretical max if every position in that bucket captured its full premium, same basis the "
-           "Financials tables above call \"Potential Profit Acc.\") that $ represents. E.g. +\\$10,000 "
-           "at 20% means only 20% of the theoretical max has been captured so far -- still 80% of the "
-           "room (time decay / price movement still to come) left to run, not \"\\$10,000 out of some "
-           "unknown total.\" Reuses the already-live-quoted Open Positions table above, no extra chain "
-           "fetch.")
+           "cell packs three figures together -- the $ and what % of \"Potential Profit Acc.\" (total "
+           "premium collected -- the theoretical max if every position in that bucket captured its full "
+           "premium, same basis the Financials tables above call \"Potential Profit Acc.\") that $ "
+           "represents, plus (moved here from the Max Loss concentration table above, which no longer "
+           "needs a live chain fetch) your **P&L direction** on that contract today vs yesterday, shown "
+           "as a signed \"+X.X%\"/\"-X.X% chg\" as far right as one plain-text cell can go. E.g. "
+           "\"+\\$10,000.00 (20.0% of potential)     |  +13.8% chg\" means only 20% of the theoretical max "
+           "has been captured so far (still 80% of the room left to run) AND today's move was in your "
+           "favor. Since every position here is SHORT (sold to open), a FALLING contract price is good "
+           "for you and shows POSITIVE, a RISING price is bad and shows NEGATIVE -- the reverse of the "
+           "contract's own raw price move. A position opened TODAY has no real \"yesterday\" for that "
+           "percentage, so it's excluded from the comparison. The G/L half reuses the already-live-quoted "
+           "Open Positions table above (no extra chain fetch); the % change needs its own fresh chain "
+           "fetch per position (today's ask vs prevclose).")
 try:
-    st.dataframe(positions.build_concentration_gl_table(_dpos), hide_index=True, use_container_width=True)
+    _dconcgl, _econcgl = positions.build_concentration_gl_table(_dpos)
+    st.dataframe(_dconcgl, hide_index=True, use_container_width=True)
+    if _econcgl:
+        st.caption("Skipped: " + " | ".join(_econcgl))
 except Exception as _e:
     st.caption(f"(concentration G/L unavailable: {_e})")
 
