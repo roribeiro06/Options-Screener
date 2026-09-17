@@ -737,9 +737,10 @@ _SECTOR_CACHE = {}
 # Positions table follows the same judgment rather than the raw GICS split.
 TECH_SECTORS = {"Technology", "Communication Services"}
 
-# Manual overrides -- win over both the sector/category lookup below,
-# same "manual entry wins" precedent as EARNINGS_DATES. For names where the
-# raw GICS/category classification misses the real tech exposure:
+# Manual overrides -- win over both the sector/category lookup below, same
+# "manual entry wins" precedent as EARNINGS_DATES, for two DISTINCT reasons:
+#
+# 1) The raw GICS/category classification misses the real tech exposure:
 #   SPCX: GICS "Industrials" (aerospace) -- but the business is a tech
 #     company (reusable rockets, Starlink satellite internet), not a
 #     traditional industrial/manufacturing name.
@@ -754,7 +755,31 @@ TECH_SECTORS = {"Technology", "Communication Services"}
 #     Communication Services, except AMZN doesn't even get that override.
 #     This app's own PEER_TICKERS already treats it as part of the same
 #     mega-cap tech cluster as MSFT/GOOG/META/AAPL.
-SECTOR_OVERRIDES = {"SPCX": "Tech", "EWY": "Tech", "QQQ": "Tech", "AMZN": "Tech"}
+#
+# 2) Every other entry below is a ticker whose GICS sector/category is
+#   ALREADY "Technology" or "Communication Services" -- these are hardcoded
+#   anyway, purely for reliability. get_sector_bucket's live yfinance .info
+#   lookup has been observed silently returning nothing on Streamlit
+#   Community Cloud (Yahoo Finance is known to rate-limit/block traffic
+#   from cloud-provider IP ranges) -- get_sector_bucket's except-and-default
+#   swallows that failure and quietly reports "Non-Tech" for every one of
+#   these names, which was silently making the entire tech-specific
+#   screening gate (see TECH_OTM_MIN and spreads.py's use of tech_otm_ok) a
+#   no-op in production despite working correctly in every local test. Every
+#   ticker below was verified against a live, working yfinance lookup before
+#   being added -- this list covers PUT_TICKERS/HOLDINGS/HOLDINGS_SHARES/
+#   OPEN_POSITIONS/CLOSED_POSITIONS as of when it was written; a newly
+#   watchlisted or held Tech ticker not yet listed here still falls through
+#   to the live lookup (correct when that lookup works, silently wrong when
+#   it doesn't -- add it here too when you notice it slipping through).
+SECTOR_OVERRIDES = {
+    "SPCX": "Tech", "EWY": "Tech", "QQQ": "Tech", "AMZN": "Tech",
+    "AAPL": "Tech", "AVGO": "Tech", "CRWD": "Tech", "GOOG": "Tech",
+    "IGV": "Tech", "INTC": "Tech", "META": "Tech", "MRVL": "Tech",
+    "MSFT": "Tech", "MU": "Tech", "NFLX": "Tech", "NOW": "Tech",
+    "NVDA": "Tech", "ORCL": "Tech", "SKHY": "Tech", "SMH": "Tech",
+    "TSM": "Tech", "UBER": "Tech", "CMCSA": "Tech",
+}
 
 
 def get_sector_bucket(symbol):
