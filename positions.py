@@ -184,13 +184,23 @@ def evaluate_position(pos, today):
     unrealized_pl = entry_credit - cost_to_close
     unrealized_pl_pct = (unrealized_pl / entry_credit) if entry_credit else float("nan")
 
+    # Open cash-secured puts only: MaxLoss here is how far the stock has already
+    # fallen through the strike (strike - current price, floored at 0 while OTM),
+    # not the stock-to-zero worst case _max_loss_per_share gives everything
+    # else. Gross of premium. Deliberately local to this table -- the pivot/
+    # Financials tables use their own _pivot_max_loss_per_share, unchanged.
+    if kind == "put" and current_price:
+        max_loss = max(0.0, pos["strike"] - float(current_price))
+    else:
+        max_loss = _max_loss_per_share(pos)
+
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "CurrentPrice": (round(current_price, 2) if current_price else float("nan")),
             "Expiration": exp, "DTE": dte, "DaysHeld": days_held, "Opened": entry_date_str or "-",
             "Contracts": contracts, "EntryCredit": entry_credit,
             "CostToCloseBid": round(cost_to_close_bid, 2), "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
-            "UnrealizedGL_%": unrealized_pl_pct, "MaxLoss": round(_max_loss_per_share(pos), 2)}
+            "UnrealizedGL_%": unrealized_pl_pct, "MaxLoss": round(max_loss, 2)}
 
 
 def build_positions_table():
