@@ -229,7 +229,7 @@ def build_positions_table():
 
 
 # --- Credit-spread management rules (Options Alpha style), see build_spread_actions_table ---
-SPREAD_TARGET_PCT = 0.50    # take profit once you can buy back at <= 50% of the credit
+SPREAD_PROFIT_TARGET = {1: 0.50, 2: 0.65, 3: 0.50}   # take profit once this share of the credit is captured, by group
 SPREAD_STOP_MULT = 2.0      # stop once buy-back reaches 2x the credit
 G1_MAX_DTE = 20             # Group 1: entered under 21 DTE
 G2_MAX_DTE = 45             # Group 2: entered 21-45 DTE (core); Group 3: over 45
@@ -284,8 +284,9 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
         return 1, f"TIME EXIT: close by {exit_dte} DTE" + (" (short strike ITM)" if itm else "")
     if group == 1 and itm:
         return 1, "CLOSE: don't hold an ITM short strike into the last days"
-    if profit_frac >= SPREAD_TARGET_PCT:
-        return 2, f"TAKE PROFIT: buy back (>= {SPREAD_TARGET_PCT:.0%} of credit captured)"
+    target = SPREAD_PROFIT_TARGET[group]
+    if profit_frac >= target:
+        return 2, f"TAKE PROFIT: buy back (>= {target:.0%} of credit captured)"
     if CHECK_21_DTE <= dte <= CHECK_21_DTE + CHECK_21_WINDOW and group == 2:
         if profit_frac > CLOSE_PROFIT_21:
             return 3, f"21 DTE CHECK: close (> {CLOSE_PROFIT_21:.0%} profit)"
@@ -321,7 +322,7 @@ def build_spread_actions_table(df):
             "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
                       3: "3 (entered >45)"}[_spread_group(r["DTE"], r["DaysHeld"])],
             "Contracts": n, "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
-            "TargetBTC": f"${credit * SPREAD_TARGET_PCT:.2f}", "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
+            "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[_spread_group(r['DTE'], r['DaysHeld'])]):.2f}", "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
             "Action": action}))
     if not rows:
