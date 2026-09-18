@@ -210,12 +210,14 @@ CLOSED_POSITIONS = [
     {"ticker": "SKHY", "type": "call_spread", "short_strike": 210, "long_strike": 220,
      "expiration": "2026-09-18", "contracts": 28, "entry_credit": 0.605, "entry_date": "2026-09-12",
      "exit_cost": 0, "exit_date": "2026-09-18"},
-    # META 625/655 expired ITM (stock ~$666, above both strikes): a call spread
-    # then settles at its full width, so exit_cost = 655 - 625 = 30.00 (max loss).
-    # Assumed from the closing quote -- correct it if the brokerage settled differently.
+    # META 625/655 expired ITM (stock ~$666, above both strikes). Exit recorded at
+    # the brokerage's last marks on 09/18 (3:59 PM ET): short 625C $40.85, long
+    # 655C $10.70 -> exit_cost = 40.85 - 10.70 = 30.15 (a hair over the 30.00
+    # width from deep-ITM bid/ask); realized -$25,281.06. Correct it if the final
+    # settlement posts differently.
     {"ticker": "META", "type": "call_spread", "short_strike": 625, "long_strike": 655,
      "expiration": "2026-09-18", "contracts": 9, "entry_credit": 2.06, "entry_date": "2026-09-01",
-     "exit_cost": 30.00, "exit_date": "2026-09-18"},
+     "exit_cost": 30.150067, "exit_date": "2026-09-18"},
     # SPCX 150/155 -- closed 09/18 from the brokerage's executed lots: short 150C
     # bought back for $9,183.00 total (avg $3.061), long 155C sold for $1,682.95
     # total (avg $0.561), so exit_cost = 3.061 - 0.561 = 2.500016; realized -$4,350.31.
