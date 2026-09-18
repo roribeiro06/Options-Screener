@@ -73,40 +73,16 @@ HOLDINGS_SHARES = {
 # "put", "call", "put_spread", "call_spread". Single-leg entries need "strike";
 # spreads need "short_strike" and "long_strike" instead. See positions.py.
 OPEN_POSITIONS = [
-    {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
-     "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07"},
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
-    {"ticker": "V", "type": "put", "strike": 350, "expiration": "2026-09-18",
-     "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17"},
-    {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
-     "contracts": 1, "entry_credit": 6.4999, "entry_date": "2026-08-17"},
-    # Iron condor -- tracked as separate put_spread/call_spread entries since
-    # OPEN_POSITIONS has no combined iron_condor type. Put side opened
-    # 08/19/2026; call side (below) completed it on 08/24/2026.
-    {"ticker": "GOOG", "type": "put_spread", "short_strike": 305, "long_strike": 290,
-     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19"},
-    {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
-     "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20"},
-    {"ticker": "SPCX", "type": "call_spread", "short_strike": 150, "long_strike": 155,
-     "expiration": "2026-09-18", "contracts": 30, "entry_credit": 1.049913, "entry_date": "2026-08-21"},
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
      "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21"},
-    {"ticker": "TSM", "type": "put", "strike": 380, "expiration": "2026-09-18",
-     "contracts": 2, "entry_credit": 4.8999, "entry_date": "2026-08-24"},
-    # LLY 1150P -- two tax lots tracked together as one averaged position:
-    # (18.9996 + 20.9996) / 2 contracts = 19.9996/share. entry_date kept as
-    # the earlier lot's (08/26), when the position was first opened.
-    {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-09-18",
-     "contracts": 2, "entry_credit": 19.9996, "entry_date": "2026-08-26"},
     {"ticker": "SKHY", "type": "put_spread", "short_strike": 145, "long_strike": 138,
      "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
     {"ticker": "ORCL", "type": "call_spread", "short_strike": 167.5, "long_strike": 175,
      "expiration": "2026-09-04", "contracts": 35, "entry_credit": 0.34998, "entry_date": "2026-08-27"},
     {"ticker": "INTC", "type": "call_spread", "short_strike": 105, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 56, "entry_credit": 0.55, "entry_date": "2026-09-01"},
-    {"ticker": "META", "type": "call_spread", "short_strike": 625, "long_strike": 655,
-     "expiration": "2026-09-18", "contracts": 9, "entry_credit": 2.06, "entry_date": "2026-09-01"},
     {"ticker": "AMZN", "type": "put", "strike": 230, "expiration": "2026-10-16",
      "contracts": 2, "entry_credit": 2.40, "entry_date": "2026-09-01"},
     {"ticker": "GOOG", "type": "put", "strike": 300, "expiration": "2026-11-20",
@@ -121,10 +97,8 @@ OPEN_POSITIONS = [
     # averaged/adjusted position elsewhere in this file (see LLY).
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
      "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.635, "entry_date": "2026-09-04"},
-    {"ticker": "SKHY", "type": "call_spread", "short_strike": 210, "long_strike": 220,
-     "expiration": "2026-09-18", "contracts": 28, "entry_credit": 0.605, "entry_date": "2026-09-12"},
     # Iron condor -- tracked as separate put_spread/call_spread entries since
-    # OPEN_POSITIONS has no combined iron_condor type (see GOOG/SMH above).
+    # OPEN_POSITIONS has no combined iron_condor type.
     {"ticker": "SPY", "type": "put_spread", "short_strike": 690, "long_strike": 655,
      "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.69, "entry_date": "2026-09-12"},
     {"ticker": "SPY", "type": "call_spread", "short_strike": 805, "long_strike": 845,
@@ -205,6 +179,49 @@ CLOSED_POSITIONS = [
     {"ticker": "NOW", "type": "call_spread", "short_strike": 170, "long_strike": 185,
      "expiration": "2026-10-16", "contracts": 20, "entry_credit": 2.30, "entry_date": "2026-08-31",
      "exit_cost": 0.4701, "exit_date": "2026-09-11"},
+    # Expired 09/18/2026 (out of the money, worthless, full premium kept) unless noted.
+    {"ticker": "EIX", "type": "call", "strike": 75, "expiration": "2026-09-18",
+     "contracts": 8, "entry_credit": 1.55, "entry_date": "2026-08-07",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    {"ticker": "V", "type": "put", "strike": 350, "expiration": "2026-09-18",
+     "contracts": 1, "entry_credit": 3.80, "entry_date": "2026-08-17",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    {"ticker": "MA", "type": "put", "strike": 545, "expiration": "2026-09-18",
+     "contracts": 1, "entry_credit": 6.4999, "entry_date": "2026-08-17",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    # Iron condor -- tracked as separate put_spread/call_spread entries since
+    # there is no combined iron_condor type. Put side (below) opened 08/19/2026;
+    # the call side (GOOG 385/405, above) completed it on 08/24/2026.
+    {"ticker": "GOOG", "type": "put_spread", "short_strike": 305, "long_strike": 290,
+     "expiration": "2026-09-18", "contracts": 14, "entry_credit": 0.739971, "entry_date": "2026-08-19",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    {"ticker": "SMH", "type": "put_spread", "short_strike": 505, "long_strike": 480,
+     "expiration": "2026-09-18", "contracts": 12, "entry_credit": 2.879875, "entry_date": "2026-08-20",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    {"ticker": "TSM", "type": "put", "strike": 380, "expiration": "2026-09-18",
+     "contracts": 2, "entry_credit": 4.8999, "entry_date": "2026-08-24",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    # LLY 1150P -- two tax lots tracked together as one averaged position:
+    # (18.9996 + 20.9996) / 2 contracts = 19.9996/share. entry_date kept as
+    # the earlier lot's (08/26), when the position was first opened.
+    {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-09-18",
+     "contracts": 2, "entry_credit": 19.9996, "entry_date": "2026-08-26",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    {"ticker": "SKHY", "type": "call_spread", "short_strike": 210, "long_strike": 220,
+     "expiration": "2026-09-18", "contracts": 28, "entry_credit": 0.605, "entry_date": "2026-09-12",
+     "exit_cost": 0, "exit_date": "2026-09-18"},
+    # META 625/655 expired ITM (stock ~$666, above both strikes): a call spread
+    # then settles at its full width, so exit_cost = 655 - 625 = 30.00 (max loss).
+    # Assumed from the closing quote -- correct it if the brokerage settled differently.
+    {"ticker": "META", "type": "call_spread", "short_strike": 625, "long_strike": 655,
+     "expiration": "2026-09-18", "contracts": 9, "entry_credit": 2.06, "entry_date": "2026-09-01",
+     "exit_cost": 30.00, "exit_date": "2026-09-18"},
+    # SPCX 150/155 -- closed 09/18 from the brokerage's executed lots: short 150C
+    # bought back for $9,183.00 total (avg $3.061), long 155C sold for $1,682.95
+    # total (avg $0.561), so exit_cost = 3.061 - 0.561 = 2.500016; realized -$4,350.31.
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 150, "long_strike": 155,
+     "expiration": "2026-09-18", "contracts": 30, "entry_credit": 1.049913, "entry_date": "2026-08-21",
+     "exit_cost": 2.500016, "exit_date": "2026-09-18"},
 ]
 
 # 70% POP anchor (Options Alpha): POP = 1 - |delta|, so ~70% POP ~= 0.30 delta.
