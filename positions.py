@@ -185,12 +185,13 @@ def evaluate_position(pos, today):
     unrealized_pl_pct = (unrealized_pl / entry_credit) if entry_credit else float("nan")
 
     # Open cash-secured puts only: MaxLoss here is how far the stock has already
-    # fallen through the strike (strike - current price, floored at 0 while OTM),
-    # not the stock-to-zero worst case _max_loss_per_share gives everything
-    # else. Gross of premium. Deliberately local to this table -- the pivot/
+    # fallen through the strike, net of the premium collected (strike - current
+    # price - entry credit, floored at 0 -- $0 while OTM or still within the
+    # premium cushion), not the stock-to-zero worst case _max_loss_per_share
+    # gives everything else. Deliberately local to this table -- the pivot/
     # Financials tables use their own _pivot_max_loss_per_share, unchanged.
     if kind == "put" and current_price:
-        max_loss = max(0.0, pos["strike"] - float(current_price))
+        max_loss = max(0.0, pos["strike"] - float(current_price) - entry_credit)
     else:
         max_loss = _max_loss_per_share(pos)
 
