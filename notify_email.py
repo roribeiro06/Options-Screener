@@ -124,6 +124,15 @@ def build_positions():
     return df
 
 
+def build_spread_actions(open_pos_df):
+    """Credit Spread Actions -- same table as the app's (positions.build_spread_actions_table):
+    only credit spreads that trip a management rule, derived from the already-priced
+    open positions (plus one chain fetch per spread that needs a priced roll)."""
+    if open_pos_df is None or not len(open_pos_df):
+        return open_pos_df
+    return positions.build_spread_actions_table(open_pos_df)
+
+
 def build_closed_positions():
     df, errs = positions.build_closed_positions_table()
     for e in errs:
@@ -201,7 +210,7 @@ def _discover_html(dp, dspreads):
 
 
 def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, closed_pos,
-               concentration_history, concentration_gl, monthly, now_et):
+               concentration_history, concentration_gl, monthly, now_et, spread_actions=None):
     style = ("<style>body{font-family:Arial,Helvetica,sans-serif;color:#111}"
              "h2{border-bottom:2px solid #1F3864;padding-bottom:4px;margin-top:26px}"
              "h3{margin:16px 0 4px}"
@@ -242,6 +251,10 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"<h2>Multi-Leg Strategies</h2>{spreads_body}"
             f"<h2>Discover: High-Open-Interest Contracts (outside your watchlist)</h2>{discover_body}"
             f"{empty_section('Open Positions', open_pos, positions._fmt, 'No open positions tracked.')}"
+            f"<h3>Credit Spread Actions</h3>"
+            f"<p class='empty'>Only credit spreads that trip a management rule (stop 2x credit, profit target "
+            f"50% / 65% in Group 2, time exit, 21 DTE check with priced roll, dead trade). Group is set by DTE at entry.</p>"
+            f"{'<p class=empty>No credit spreads need action right now.</p>' if spread_actions is None or not len(spread_actions) else spread_actions.to_html(index=False, border=0)}"
             f"{financials_html('Financials (unrealized)', open_fin)}"
             f"{financials_html('Concentration of Positions -- 1D All-Time High &amp; Average (Max Loss)', concentration_history)}"
             f"{financials_html('Concentration of Positions -- Unrealized G/L', concentration_gl)}"
@@ -288,6 +301,7 @@ def main():
     spreads  = build_spreads()
     d_puts, d_spreads = build_discover()
     open_pos = build_positions()
+    spread_actions = build_spread_actions(open_pos)
     closed_pos = build_closed_positions()
     concentration_history = build_concentration_history()
     concentration_gl = build_concentration_gl(open_pos)
@@ -304,7 +318,8 @@ def main():
                f"{len(d_puts) + len(d_spreads)} discovered, {len(open_pos)} open positions "
                f"- {now_et:%b %d %I:%M %p ET}")
     send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos,
-                             concentration_history, concentration_gl, monthly, now_et),
+                             concentration_history, concentration_gl, monthly, now_et,
+                             spread_actions),
         user, pw, to)
     print(f"Sent: {subject} -> {to}")
 
