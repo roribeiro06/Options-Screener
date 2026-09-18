@@ -228,6 +228,112 @@ def build_positions_table():
     return df, errs
 
 
+# --- Credit-spread management rules (Options Alpha style), see build_spread_actions_table ---
+SPREAD_TARGET_PCT = 0.50    # take profit once you can buy back at <= 50% of the credit
+SPREAD_STOP_MULT = 2.0      # stop once buy-back reaches 2x the credit
+G1_MAX_DTE = 20             # Group 1: entered under 21 DTE
+G2_MAX_DTE = 45             # Group 2: entered 21-45 DTE (core); Group 3: over 45
+G1_EXIT_DTE = 5             # Group 1: close by 5 DTE
+G2_EXIT_DTE = 7             # Group 2: close by 7 DTE
+CHECK_21_DTE = 21           # Group 2's "21 DTE check"
+CHECK_21_WINDOW = 2         # ...also applied for 2 extra days (21-23 DTE) so a weekend can't skip it
+CLOSE_PROFIT_21 = 0.40      # at the 21 DTE check, close if already > 40% profitable
+TESTED_PCT = 0.02           # short strike is "tested" if the stock is through it or within 2% of it
+DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the original credit
+SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
+                       "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
+
+
+def _spread_group(dte, days_held):
+    """Rule group, set by the DTE the trade was ENTERED at (a management plan
+    is chosen at entry -- otherwise Group 2's 21-DTE check and 7-DTE exit
+    could never fire, since a 30-DTE trade is under 21 DTE by then). A Group 3
+    trade (entered > 45 DTE) switches to Group 2 once it reaches 21 DTE. With
+    no entry date, falls back to current DTE."""
+    orig = dte + days_held if days_held == days_held else dte
+    if orig <= G1_MAX_DTE:
+        return 1
+    if orig <= G2_MAX_DTE:
+        return 2
+    return 3 if dte > CHECK_21_DTE else 2
+
+
+def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
+    """(rank, action text) for one credit spread, or None if no rule fires.
+    kind is "put" or "call" (which side the spread is on). credit is the
+    entry credit per share (C); cost is the live ASK to close per share, the
+    same conservative basis UnrealizedGL uses. Rules in priority order:
+    stop, time exit, Group 1 ITM short strike, profit target, 21-DTE check,
+    Group 3 dead-trade check. Roll suggestions are advisory only -- no live
+    next-month quote is fetched."""
+    if not credit or credit <= 0 or dte is None or price != price:
+        return None
+    group = _spread_group(dte, days_held)
+    profit_frac = (credit - cost) / credit
+    if kind == "put":
+        itm = price < short_strike
+        tested = price <= short_strike * (1 + TESTED_PCT)
+    else:
+        itm = price > short_strike
+        tested = price >= short_strike * (1 - TESTED_PCT)
+
+    if cost >= SPREAD_STOP_MULT * credit:
+        return 0, f"STOP: close (cost to close >= {SPREAD_STOP_MULT:g}x credit)"
+    exit_dte = G1_EXIT_DTE if group == 1 else G2_EXIT_DTE if group == 2 else None
+    if exit_dte is not None and dte <= exit_dte:
+        return 1, f"TIME EXIT: close by {exit_dte} DTE" + (" (short strike ITM)" if itm else "")
+    if group == 1 and itm:
+        return 1, "CLOSE: don't hold an ITM short strike into the last days"
+    if profit_frac >= SPREAD_TARGET_PCT:
+        return 2, f"TAKE PROFIT: buy back (>= {SPREAD_TARGET_PCT:.0%} of credit captured)"
+    if CHECK_21_DTE <= dte <= CHECK_21_DTE + CHECK_21_WINDOW and group == 2:
+        if profit_frac > CLOSE_PROFIT_21:
+            return 3, f"21 DTE CHECK: close (> {CLOSE_PROFIT_21:.0%} profit)"
+        if profit_frac < 0 and tested:
+            return 3, "21 DTE CHECK: short strike tested -- close, or roll to next monthly (same strikes) for a net credit"
+    orig_dte = dte + days_held if days_held == days_held else None
+    if (orig_dte is not None and orig_dte > G2_MAX_DTE and days_held >= orig_dte / 2
+            and dte > CHECK_21_DTE and abs(cost - credit) <= DEAD_TRADE_BAND * credit):
+        return 4, "DEAD TRADE: halfway through and flat -- consider closing"
+    return None
+
+
+def build_spread_actions_table(df):
+    """Credit spreads from build_positions_table()'s raw output that currently
+    trip a management rule (see spread_action), with the action to take.
+    Only spreads that need action appear -- an empty result means nothing is
+    triggered. No extra quotes: derived entirely from the rows already priced."""
+    import pandas as pd
+    rows = []
+    for _, r in df.iterrows():
+        kind = "put" if r["Type"] == TYPE_LABELS["put_spread"] else                "call" if r["Type"] == TYPE_LABELS["call_spread"] else None
+        if kind is None:
+            continue
+        credit, cost, n = r["EntryCredit"], r["CostToClose"], int(r["Contracts"])
+        hit = spread_action(kind, float(str(r["Strike"]).split("/")[0]), r["CurrentPrice"],
+                            r["DTE"], r["DaysHeld"], credit, cost)
+        if not hit:
+            continue
+        rank, action = hit
+        rows.append((rank, r["DTE"], {
+            "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
+            "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),
+            "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
+                      3: "3 (entered >45)"}[_spread_group(r["DTE"], r["DaysHeld"])],
+            "Contracts": n, "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
+            "TargetBTC": f"${credit * SPREAD_TARGET_PCT:.2f}", "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
+            "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
+            "Action": action}))
+    if not rows:
+        return pd.DataFrame(columns=SPREAD_ACTIONS_COLS)
+    rows.sort(key=lambda t: (t[0], t[1]))
+    return pd.DataFrame([t[2] for t in rows])[SPREAD_ACTIONS_COLS]
+
+
+def _fmt_pct_signed(v):
+    return "-" if v != v else f"{v*100:+.1f}%"
+
+
 def evaluate_closed_position(pos):
     """Realized P&L for one CLOSED_POSITIONS entry -- pure arithmetic against
     the recorded exit price, no live quotes needed since the trade is done."""
