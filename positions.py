@@ -240,6 +240,7 @@ CHECK_21_WINDOW = 2         # ...also applied for 2 extra days (21-23 DTE) so a 
 CLOSE_PROFIT_21 = 0.40      # at the 21 DTE check, close if already > 40% profitable
 TESTED_PCT = 0.02           # short strike is "tested" if the stock is through it or within 2% of it
 DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the original credit
+ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested -- close, or roll to next monthly (same strikes) for a net credit"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 
@@ -291,12 +292,51 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
         if profit_frac > CLOSE_PROFIT_21:
             return 3, f"21 DTE CHECK: close (> {CLOSE_PROFIT_21:.0%} profit)"
         if profit_frac < 0 and tested:
-            return 3, "21 DTE CHECK: short strike tested -- close, or roll to next monthly (same strikes) for a net credit"
+            return 3, ROLL_CHECK_TEXT
     orig_dte = dte + days_held if days_held == days_held else None
     if (orig_dte is not None and orig_dte > G2_MAX_DTE and days_held >= orig_dte / 2
             and dte > CHECK_21_DTE and abs(cost - credit) <= DEAD_TRADE_BAND * credit):
         return 4, "DEAD TRADE: halfway through and flat -- consider closing"
     return None
+
+
+def _next_monthly(ticker, exp):
+    """Earliest 3rd-Friday expiration strictly after `exp`, or None."""
+    cur = dt.date.fromisoformat(exp)
+    for e in sorted(ws.td_expirations(ticker)):
+        d = dt.date.fromisoformat(e)
+        if d > cur and d.weekday() == 4 and 15 <= d.day <= 21:
+            return e
+    return None
+
+
+def _roll_action(ticker, exp, kind, short_strike, long_strike, credit, cost, contracts):
+    """Priced version of the 21-DTE "close or roll" advice: same strikes,
+    next monthly. Conservative basis, same as the rest of the table -- buy
+    the current spread back at the ASK (cost) and sell the new one at the
+    BID on the short leg / ASK on the long leg. Rolls only for a net credit
+    (your rule); otherwise says close. New target/stop follow the rules'
+    worked example: the target is the group's profit share of the NEW
+    credit, and the stop caps the whole trade's total loss at the original
+    credit (total P/L at buy-back b = credit - cost + new_credit - b, set to
+    -credit -> b = 2*credit - cost + new_credit)."""
+    exp2 = _next_monthly(ticker, exp)
+    if not exp2:
+        return "21 DTE CHECK: CLOSE -- no later monthly expiration to roll into"
+    chain = ws.td_chain(ticker, exp2)
+    s_leg = _leg_prices(chain, kind, short_strike) if chain else None
+    l_leg = _leg_prices(chain, kind, long_strike) if chain else None
+    if not (s_leg and l_leg):
+        return f"21 DTE CHECK: CLOSE -- {short_strike:g}/{long_strike:g} isn't listed on {exp2}, no same-strike roll"
+    new_credit = s_leg[0] - l_leg[1]
+    net = new_credit - cost
+    if net <= 0:
+        return (f"21 DTE CHECK: CLOSE -- rolling to {exp2} (same strikes) would be a "
+                f"${abs(net):.2f} net {'debit' if net < 0 else 'credit of zero'}, so no credit roll")
+    target = new_credit * (1 - SPREAD_PROFIT_TARGET[2])
+    stop = 2 * credit - cost + new_credit
+    return (f"21 DTE CHECK: ROLL to {exp2} (same strikes) for +${net:.2f} net credit "
+            f"(+${net * 100 * contracts:,.0f}) -- new target BTC ${target:.2f}, new stop BTC ${stop:.2f}")
 
 
 def build_spread_actions_table(df):
@@ -316,6 +356,12 @@ def build_spread_actions_table(df):
         if not hit:
             continue
         rank, action = hit
+        if action == ROLL_CHECK_TEXT:
+            try:
+                action = _roll_action(r["Ticker"], r["Expiration"], kind,
+                                      *(float(x) for x in str(r["Strike"]).split("/")), credit, cost, n)
+            except Exception as e:
+                print(f"ROLL QUOTE {r['Ticker']}: ERROR {e}", file=sys.stderr)
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
             "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),

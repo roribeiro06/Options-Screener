@@ -373,6 +373,11 @@ def scan_positions():
 
 
 @st.cache_data(ttl=600, show_spinner=True)
+def scan_spread_actions(dpos):
+    return positions.build_spread_actions_table(dpos)
+
+
+@st.cache_data(ttl=600, show_spinner=True)
 def scan_closed_positions():
     return positions.build_closed_positions_table()
 
@@ -686,10 +691,13 @@ try:
                    "**TAKE PROFIT** (>= 50% of the credit captured, 65% in Group 2), **21 DTE CHECK** (Group 2 at 21-23 DTE: close "
                    "above 40% profit, or close/roll if losing with the short strike tested), **DEAD TRADE** "
                    "(entered at 45+ DTE, halfway through, buy-back still within 10% of the credit). A short strike "
-                   "is \"tested\" when the stock is through it or within 2%. Roll suggestions are advisory -- no "
-                   "next-month quote is fetched. Entry rules (short delta, IV Rank) aren't tracked for open "
+                   "is \"tested\" when the stock is through it or within 2%. At the 21 DTE check, a losing spread with "
+                   "a tested short strike is priced for a roll to the next monthly (3rd Friday) at the same "
+                   "strikes: buy back at the ask, sell the new spread at the bid/ask. It says ROLL only for a net "
+                   "credit (with a new target, and a stop that caps the whole trade's loss at the original "
+                   "credit), otherwise CLOSE. Entry rules (short delta, IV Rank) aren't tracked for open "
                    "positions, so they aren't checked here.")
-        _acts = positions.build_spread_actions_table(_dpos)
+        _acts = scan_spread_actions(_dpos)
         if len(_acts):
             st.dataframe(_acts, hide_index=True, use_container_width=True)
         else:
