@@ -43,6 +43,7 @@ default possible without being told otherwise. If a position actually finished
 ITM/assigned instead, add the real CLOSED_POSITIONS entry with its true
 exit_cost -- an explicit entry always overrides this assumption.
 """
+import re
 import sys
 import datetime as dt
 
@@ -243,6 +244,9 @@ DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the o
 ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
+SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
+                           "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
+                           "RollNetLow", "RollNetHigh"]
 
 
 def _spread_group(dte, days_held):
@@ -300,8 +304,9 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
     return None
 
 
-def _find_roll(ticker, exp, kind, cost, contracts):
-    """Best roll for a losing credit spread, or (None, why) if there isn't one.
+def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
+    """Best roll for a losing credit spread -> (text, roll), where roll is a dict
+    for the chosen roll or None if there isn't one (text then says why).
     A roll = buy the current spread back at the ASK (`cost`, conservative, same
     basis as the rest of the table) and sell a NEW spread on the same side, in a
     LATER expiration, for a NET CREDIT (worst-case bid/ask credit, same basis
@@ -313,7 +318,9 @@ def _find_roll(ticker, exp, kind, cost, contracts):
     SPREAD_DTE_MIN..MAX). Deliberately NOT gated by open_position_sides -- the
     spread being rolled is itself what would block it. Same contract count as
     the position. Among qualifying rolls, the highest screener Score wins.
-    Returns (text, True) for a roll, (text, False) explaining why not."""
+    roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
+    the bid/ask minus buy-back at the ask), net_high (best case: new credit at
+    the ask/bid minus buy-back at the bid)}, all per share."""
     strat = "Put credit spread" if kind == "put" else "Call credit spread"
     today = dt.date.today()
     cur = dt.date.fromisoformat(exp)
@@ -333,18 +340,21 @@ def _find_roll(ticker, exp, kind, cost, contracts):
             cands += [r for r in sp._for_expiration(ticker, price, e, dte, earnings, chain)
                       if r["Strategy"] == strat]
     if not cands:
-        return "no spread in a later expiration passes the screener criteria", False
+        return "no spread in a later expiration passes the screener criteria", None
     scored = [(r["Max Profit"] - cost, r) for r in cands]
     viable = [(net, r) for net, r in scored if net > 0]
     if not viable:
         best = max(net for net, _ in scored)
         return (f"{len(cands)} later spread(s) pass the screener but the best would be a "
-                f"${abs(best):.2f}/sh net debit"), False
+                f"${abs(best):.2f}/sh net debit"), None
     net, r = max(viable, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
     legs = r["Put Legs"] or r["Call Legs"]
+    sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
+    roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
+            "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid}
     return (f"ROLL to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
             f"-> net +${net:.2f}/sh (+${net * 100 * contracts:,.0f}), OTM {r['OTM_%']:.1%}, "
-            f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), True
+            f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), roll
 
 
 def build_spread_actions_table(df):
@@ -353,7 +363,11 @@ def build_spread_actions_table(df):
     Only spreads that need action appear -- an empty result means nothing is
     triggered. Priced from the rows already quoted, plus (only for a LOSING
     spread whose rule says to get out) the roll search in _find_roll -- a
-    roll for a net credit that passes the screener beats a plain CLOSE."""
+    roll for a net credit that passes the screener beats a plain CLOSE.
+    Returns (display_df, raw_df), same row order: display_df is the formatted
+    table; raw_df carries the unformatted numbers the click-to-copy summaries
+    need (Kind is "roll" only when a roll was found, else "close" -- covers
+    STOP/TIME EXIT/TAKE PROFIT/CLOSE/DEAD TRADE alike, all a buy-back)."""
     import pandas as pd
     rows = []
     for _, r in df.iterrows():
@@ -371,10 +385,12 @@ def build_spread_actions_table(df):
         # on a tested short strike), look for a net-credit roll that passes the
         # screener first (_find_roll); only if there is none is it a CLOSE.
         # Winners (TAKE PROFIT, 21 DTE close above 40%) and DEAD TRADE never roll.
+        roll = None
         if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
             try:
-                text, rolled = _find_roll(r["Ticker"], r["Expiration"], kind, cost, n)
-                action = (f"{action} -> {text}" if rolled
+                text, roll = _find_roll(r["Ticker"], r["Expiration"], kind, cost,
+                                        r["CostToCloseBid"], n)
+                action = (f"{action} -> {text}" if roll
                           else f"{action} -> CLOSE (no roll: {text})")
             except Exception as e:
                 print(f"ROLL SEARCH {r['Ticker']}: ERROR {e}", file=sys.stderr)
@@ -387,11 +403,21 @@ def build_spread_actions_table(df):
             "Contracts": n, "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
             "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[_spread_group(r['DTE'], r['DaysHeld'])]):.2f}", "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
-            "Action": action}))
+            "Action": action}, {
+            "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
+            "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
+            "CostToClose": cost, "CurrentPrice": r["CurrentPrice"],
+            "Kind": "roll" if roll else "close",
+            "RollExp": roll["exp"] if roll else None,
+            "RollSell": roll["sell"] if roll else float("nan"),
+            "RollBuy": roll["buy"] if roll else float("nan"),
+            "RollNetLow": roll["net_low"] if roll else float("nan"),
+            "RollNetHigh": roll["net_high"] if roll else float("nan")}))
     if not rows:
-        return pd.DataFrame(columns=SPREAD_ACTIONS_COLS)
+        return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))
-    return pd.DataFrame([t[2] for t in rows])[SPREAD_ACTIONS_COLS]
+    return (pd.DataFrame([t[2] for t in rows])[SPREAD_ACTIONS_COLS],
+            pd.DataFrame([t[3] for t in rows])[SPREAD_ACTIONS_RAW_COLS])
 
 
 def _fmt_pct_signed(v):

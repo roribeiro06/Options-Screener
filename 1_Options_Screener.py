@@ -287,6 +287,42 @@ def _close_position_summary(row):
     return "\n".join(lines)
 
 
+def _roll_position_summary(row):
+    """Copy-paste summary for a financial advisor to ROLL a losing credit
+    spread (from the Credit Spread Actions table): the spread being rolled,
+    the NEW expiration, the new short/long strikes, and the NET credit target
+    for the whole roll order (buy back the old spread, sell the new one) --
+    quoted the same way every other opening premium is (_avg_max_range: the
+    midpoint of the worst/best net credit through the best case, with the
+    total across the contracts in parentheses)."""
+    strike_str = str(row.get("Strike", "-"))
+    strike_disp = f"(${'/$'.join(strike_str.split('/'))})"
+    type_label = _CLOSE_TYPE_LABELS.get(row.get("Type"), row.get("Type", ""))
+    opt = "Call" if "Call" in str(row.get("Type")) else "Put"
+    n = row.get("Contracts")
+    n_int = int(n) if pd.notna(n) else None
+    lines = [f"Roll {row['Ticker']} {type_label} {strike_disp}",
+             f"{n_int if n_int is not None else '-'} Contracts",
+             f"Expiration: {row['RollExp']}",
+             f"Sell ${row['RollSell']:g} {opt}",
+             f"Buy ${row['RollBuy']:g} {opt}",
+             f"Premium: {_avg_max_range(row.get('RollNetLow'), row.get('RollNetHigh'), n_int)}"]
+    current_price = row.get("CurrentPrice")
+    if pd.notna(current_price):
+        lines += ["", f"Current Price: ${current_price:.2f}"]
+    return "\n".join(lines)
+
+
+def _spread_action_summary(row):
+    """Credit Spread Actions row -> its click-to-copy text: the roll order when
+    the action is a roll, otherwise the same Close summary Open Positions uses
+    (every non-roll action -- STOP, TIME EXIT, TAKE PROFIT, CLOSE, DEAD TRADE --
+    is a buy-back)."""
+    if row.get("Kind") == "roll":
+        return _roll_position_summary(row)
+    return _close_position_summary(row)
+
+
 @st.fragment
 def _selectable_table(raw_df, disp_df, key, summary_fn=_contract_summary):
     """Same interactive/sortable table as before, plus click-a-row to get an
@@ -374,7 +410,7 @@ def scan_positions():
 
 @st.cache_data(ttl=600, show_spinner=True)
 def scan_spread_actions(dpos):
-    return positions.build_spread_actions_table(dpos)
+    return positions.build_spread_actions_table(dpos)   # (display_df, raw_df)
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -698,12 +734,14 @@ try:
                    "**net credit** (never a debit). The new spread must be one the Multi-Leg screener itself "
                    "would show (same POP, OTM incl. the tech rule, AnnROR, $1,000 premium floor, open interest and "
                    "earnings exclusion), same contract count; the best-Score one is proposed with its net credit. "
+                   "Click a row for an advisor-ready order to copy: the Close summary (same as Open Positions) or, for a "
+                   "roll, the new expiration, sell/buy strikes and net premium. "
                    "If nothing qualifies the action says CLOSE and why (e.g. a deep in-the-money spread costs "
                    "more to buy back than any out-of-the-money spread can pay). Winners never roll. Entry rules "
                    "(short delta, IV Rank) aren't tracked for open positions, so they aren't checked here.")
-        _acts = scan_spread_actions(_dpos)
+        _acts, _acts_raw = scan_spread_actions(_dpos)
         if len(_acts):
-            st.dataframe(_acts, hide_index=True, use_container_width=True)
+            _selectable_table(_acts_raw, _acts, "spread_actions_tbl", summary_fn=_spread_action_summary)
         else:
             st.write("No credit spreads need action right now.")
         st.markdown("**Financials** (unrealized)")

@@ -130,7 +130,7 @@ def build_spread_actions(open_pos_df):
     open positions (plus one chain fetch per spread that needs a priced roll)."""
     if open_pos_df is None or not len(open_pos_df):
         return open_pos_df
-    return positions.build_spread_actions_table(open_pos_df)
+    return positions.build_spread_actions_table(open_pos_df)[0]
 
 
 def build_closed_positions():
