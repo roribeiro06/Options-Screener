@@ -105,6 +105,11 @@ OPEN_POSITIONS = [
      "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.56, "entry_date": "2026-09-12"},
     {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.79, "entry_date": "2026-09-12"},
+    # Iron condor with the NOW put spread above -- tracked as separate entries
+    # (see GOOG/SMH). Entry credit from the brokerage's cost basis on both legs:
+    # short 160C $4,577.91 / 2,800 = 1.634968, long 170C $2,170.00 / 2,800 = 0.775.
+    {"ticker": "NOW", "type": "call_spread", "short_strike": 160, "long_strike": 170,
+     "expiration": "2026-10-16", "contracts": 28, "entry_credit": 0.859968, "entry_date": "2026-09-21"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
