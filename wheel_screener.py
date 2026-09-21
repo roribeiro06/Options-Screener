@@ -713,11 +713,33 @@ def _position_cost_and_short_delta(pos):
     return cost, abs(delta)
 
 
+def _spread_roll_advised(pos, cost_to_close):
+    """True when the Credit Spread Actions table (positions.spread_action) is
+    currently advising "close or roll" for this credit spread -- its 21-DTE
+    check: a Group 2 spread at 21-23 DTE that is losing AND has its short
+    strike tested. Uses that function directly so the screener and the
+    table can never disagree about when a spread is a roll candidate."""
+    import positions   # lazy: positions imports this module at load time
+    price = td_quote(pos["ticker"])
+    if not price:
+        return False
+    today = dt.date.today()
+    dte = (dt.date.fromisoformat(pos["expiration"]) - today).days
+    entry_date = pos.get("entry_date")
+    days_held = (today - dt.date.fromisoformat(entry_date)).days if entry_date else float("nan")
+    kind = "put" if pos["type"] == "put_spread" else "call"
+    hit = positions.spread_action(kind, pos["short_strike"], float(price), dte, days_held,
+                                  pos["entry_credit"], cost_to_close)
+    return bool(hit) and hit[1] == positions.ROLL_CHECK_TEXT
+
+
 def _position_roll_eligible(pos):
     """True when an OPEN_POSITIONS entry is a LOSER under enough pressure that
     it should stop blocking the screener, so the ticker/side reappears as a
-    roll candidate (see open_position_sides, ROLL_SHORT_DELTA above): unrealized
-    G/L strictly negative AND short-strike |delta| >= ROLL_SHORT_DELTA.
+    roll candidate (see open_position_sides). Unrealized G/L must be strictly
+    negative, AND either short-strike |delta| >= ROLL_SHORT_DELTA (any
+    position type) or, for a credit spread, the Credit Spread Actions
+    table's own 21-DTE close-or-roll advice is active (_spread_roll_advised).
     Winners never qualify -- they're left to ride. A position that can't be
     live-priced right now stays occupying ("can't tell" defaults to still
     blocking, not to freeing the screener)."""
@@ -728,7 +750,11 @@ def _position_roll_eligible(pos):
     if priced is None:
         return False
     cost_to_close, short_delta = priced
-    return cost_to_close > entry_credit and short_delta >= ROLL_SHORT_DELTA
+    if cost_to_close <= entry_credit:
+        return False
+    if short_delta >= ROLL_SHORT_DELTA:
+        return True
+    return pos["type"] in ("put_spread", "call_spread") and _spread_roll_advised(pos, cost_to_close)
 
 
 def open_position_sides(symbol):
