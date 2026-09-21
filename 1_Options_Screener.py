@@ -689,14 +689,18 @@ try:
                    "**CostToClose** is the live ask. Actions: **STOP** (cost to close >= 2x credit), **TIME EXIT** "
                    "(close by 5 DTE in Group 1, 7 DTE in Group 2), **CLOSE** (Group 1 short strike in the money), "
                    "**TAKE PROFIT** (>= 50% of the credit captured, 65% in Group 2), **21 DTE CHECK** (Group 2 at 21-23 DTE: close "
-                   "above 40% profit, or close/roll if losing with the short strike tested), **DEAD TRADE** "
+                   "above 40% profit, or roll/close if losing with the short strike tested), **DEAD TRADE** "
                    "(entered at 45+ DTE, halfway through, buy-back still within 10% of the credit). A short strike "
-                   "is \"tested\" when the stock is through it or within 2%. At the 21 DTE check, a losing spread with "
-                   "a tested short strike is priced for a roll to the next monthly (3rd Friday) at the same "
-                   "strikes: buy back at the ask, sell the new spread at the bid/ask. It says ROLL only for a net "
-                   "credit (with a new target, and a stop that caps the whole trade's loss at the original "
-                   "credit), otherwise CLOSE. Entry rules (short delta, IV Rank) aren't tracked for open "
-                   "positions, so they aren't checked here.")
+                   "is \"tested\" when the stock is through it or within 2%. **Rolling takes priority over "
+                   "closing for a LOSING spread:** when STOP, TIME EXIT, the Group 1 ITM close or the 21 DTE "
+                   "check fires, the app first searches for a roll -- buy the spread back at the ask and sell a "
+                   "new spread on the same side in a LATER expiration, at strikes further from the money, for a "
+                   "**net credit** (never a debit). The new spread must be one the Multi-Leg screener itself "
+                   "would show (same POP, OTM incl. the tech rule, AnnROR, $1,000 premium floor, open interest and "
+                   "earnings exclusion), same contract count; the best-Score one is proposed with its net credit. "
+                   "If nothing qualifies the action says CLOSE and why (e.g. a deep in-the-money spread costs "
+                   "more to buy back than any out-of-the-money spread can pay). Winners never roll. Entry rules "
+                   "(short delta, IV Rank) aren't tracked for open positions, so they aren't checked here.")
         _acts = scan_spread_actions(_dpos)
         if len(_acts):
             st.dataframe(_acts, hide_index=True, use_container_width=True)

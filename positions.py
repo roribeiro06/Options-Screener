@@ -240,7 +240,7 @@ CHECK_21_WINDOW = 2         # ...also applied for 2 extra days (21-23 DTE) so a 
 CLOSE_PROFIT_21 = 0.40      # at the 21 DTE check, close if already > 40% profitable
 TESTED_PCT = 0.02           # short strike is "tested" if the stock is through it or within 2% of it
 DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the original credit
-ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested -- close, or roll to next monthly (same strikes) for a net credit"
+ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 
@@ -300,50 +300,60 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
     return None
 
 
-def _next_monthly(ticker, exp):
-    """Earliest 3rd-Friday expiration strictly after `exp`, or None."""
+def _find_roll(ticker, exp, kind, cost, contracts):
+    """Best roll for a losing credit spread, or (None, why) if there isn't one.
+    A roll = buy the current spread back at the ASK (`cost`, conservative, same
+    basis as the rest of the table) and sell a NEW spread on the same side, in a
+    LATER expiration, for a NET CREDIT (worst-case bid/ask credit, same basis
+    the screener uses) -- never a net debit. The new spread must be one the
+    screener itself would show: candidates come from spreads._for_expiration,
+    the exact function behind the Multi-Leg tab, so every screener criterion
+    already applies (POP, OTM incl. the tech 15%/10%+$5k gate, AnnROR, OTM vs
+    IV, the $1,000 premium floor, open interest, earnings-window exclusion,
+    SPREAD_DTE_MIN..MAX). Deliberately NOT gated by open_position_sides -- the
+    spread being rolled is itself what would block it. Same contract count as
+    the position. Among qualifying rolls, the highest screener Score wins.
+    Returns (text, True) for a roll, (text, False) explaining why not."""
+    strat = "Put credit spread" if kind == "put" else "Call credit spread"
+    today = dt.date.today()
     cur = dt.date.fromisoformat(exp)
-    for e in sorted(ws.td_expirations(ticker)):
-        d = dt.date.fromisoformat(e)
-        if d > cur and d.weekday() == 4 and 15 <= d.day <= 21:
-            return e
-    return None
-
-
-def _roll_action(ticker, exp, kind, short_strike, long_strike, credit, cost, contracts):
-    """Priced version of the 21-DTE "close or roll" advice: same strikes,
-    next monthly. Conservative basis, same as the rest of the table -- buy
-    the current spread back at the ASK (cost) and sell the new one at the
-    BID on the short leg / ASK on the long leg. Rolls only for a net credit
-    (your rule); otherwise says close. New target/stop follow the rules'
-    worked example: the target is the group's profit share of the NEW
-    credit, and the stop caps the whole trade's total loss at the original
-    credit (total P/L at buy-back b = credit - cost + new_credit - b, set to
-    -credit -> b = 2*credit - cost + new_credit)."""
-    exp2 = _next_monthly(ticker, exp)
-    if not exp2:
-        return "21 DTE CHECK: CLOSE -- no later monthly expiration to roll into"
-    chain = ws.td_chain(ticker, exp2)
-    s_leg = _leg_prices(chain, kind, short_strike) if chain else None
-    l_leg = _leg_prices(chain, kind, long_strike) if chain else None
-    if not (s_leg and l_leg):
-        return f"21 DTE CHECK: CLOSE -- {short_strike:g}/{long_strike:g} isn't listed on {exp2}, no same-strike roll"
-    new_credit = s_leg[0] - l_leg[1]
-    net = new_credit - cost
-    if net <= 0:
-        return (f"21 DTE CHECK: CLOSE -- rolling to {exp2} (same strikes) would be a "
-                f"${abs(net):.2f} net {'debit' if net < 0 else 'credit of zero'}, so no credit roll")
-    target = new_credit * (1 - SPREAD_PROFIT_TARGET[2])
-    stop = 2 * credit - cost + new_credit
-    return (f"21 DTE CHECK: ROLL to {exp2} (same strikes) for +${net:.2f} net credit "
-            f"(+${net * 100 * contracts:,.0f}) -- new target BTC ${target:.2f}, new stop BTC ${stop:.2f}")
+    price = ws.td_quote(ticker)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = ws.get_earnings_date(ticker)
+    cands = []
+    for e, d, dte in sp._all_expirations(ticker, today):
+        if d <= cur or not (sp.SPREAD_DTE_MIN <= dte <= sp.SPREAD_DTE_MAX):
+            continue
+        if ws.earnings_blocks(ticker, earnings, today, d):
+            continue
+        chain = ws.td_chain(ticker, e)
+        if chain:
+            cands += [r for r in sp._for_expiration(ticker, price, e, dte, earnings, chain)
+                      if r["Strategy"] == strat]
+    if not cands:
+        return "no spread in a later expiration passes the screener criteria", False
+    scored = [(r["Max Profit"] - cost, r) for r in cands]
+    viable = [(net, r) for net, r in scored if net > 0]
+    if not viable:
+        best = max(net for net, _ in scored)
+        return (f"{len(cands)} later spread(s) pass the screener but the best would be a "
+                f"${abs(best):.2f}/sh net debit"), False
+    net, r = max(viable, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
+    legs = r["Put Legs"] or r["Call Legs"]
+    return (f"ROLL to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
+            f"-> net +${net:.2f}/sh (+${net * 100 * contracts:,.0f}), OTM {r['OTM_%']:.1%}, "
+            f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), True
 
 
 def build_spread_actions_table(df):
     """Credit spreads from build_positions_table()'s raw output that currently
     trip a management rule (see spread_action), with the action to take.
     Only spreads that need action appear -- an empty result means nothing is
-    triggered. No extra quotes: derived entirely from the rows already priced."""
+    triggered. Priced from the rows already quoted, plus (only for a LOSING
+    spread whose rule says to get out) the roll search in _find_roll -- a
+    roll for a net credit that passes the screener beats a plain CLOSE."""
     import pandas as pd
     rows = []
     for _, r in df.iterrows():
@@ -356,12 +366,19 @@ def build_spread_actions_table(df):
         if not hit:
             continue
         rank, action = hit
-        if action == ROLL_CHECK_TEXT:
+        # Rolling takes priority over closing for a LOSING spread: whenever a rule
+        # says to get out (STOP, TIME EXIT, Group 1 ITM close, or the 21 DTE check
+        # on a tested short strike), look for a net-credit roll that passes the
+        # screener first (_find_roll); only if there is none is it a CLOSE.
+        # Winners (TAKE PROFIT, 21 DTE close above 40%) and DEAD TRADE never roll.
+        if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
             try:
-                action = _roll_action(r["Ticker"], r["Expiration"], kind,
-                                      *(float(x) for x in str(r["Strike"]).split("/")), credit, cost, n)
+                text, rolled = _find_roll(r["Ticker"], r["Expiration"], kind, cost, n)
+                action = (f"{action} -> {text}" if rolled
+                          else f"{action} -> CLOSE (no roll: {text})")
             except Exception as e:
-                print(f"ROLL QUOTE {r['Ticker']}: ERROR {e}", file=sys.stderr)
+                print(f"ROLL SEARCH {r['Ticker']}: ERROR {e}", file=sys.stderr)
+                action = f"{action} -> CLOSE (roll search failed: {e})"
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
             "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),
