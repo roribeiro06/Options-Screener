@@ -247,15 +247,20 @@ CASH_TARGET = 40000          # capital target; screener shows # of contracts to 
 MIN_TOTAL_PREMIUM = 1000
 
 # An OPEN_POSITIONS entry normally blocks the screener from suggesting a NEW
-# position on the same ticker/side (see open_position_sides) -- but one
-# that's basically done shouldn't keep blocking a roll into the next one.
-# "Basically done" = within this many days of expiration, OR already at/above
-# this fraction of its own entry_credit as unrealized G/L (live-priced,
-# same ask-side worst-case CostToClose convention positions.py uses). Either
-# condition alone is enough -- a position can be nowhere near 80% captured
-# but still worth rolling with 2 DTE left, and vice versa.
-ROLL_DTE_THRESHOLD  = 3
-ROLL_GL_PCT_THRESHOLD = 0.80
+# position on the same ticker/side (see open_position_sides). Rolling is for
+# LOSERS only -- a winner is left to ride, so it keeps blocking. A position
+# stops blocking (so the ticker/side reappears as a roll candidate) only when
+# BOTH hold: unrealized G/L is negative (live-priced, same ask-side worst-case
+# CostToClose convention positions.py uses), AND the short strike's |delta|
+# has reached ROLL_SHORT_DELTA. Trigger comes from the Options Alpha course
+# (lesson 7, "Knowing When to Adjust"): short-strike delta 30 -- double the
+# ~15 delta a position is typically sold at -- is the instructor's preferred
+# trigger because it reflects real directional risk and tightens
+# automatically with time decay; 40 gives more room. (Its 2x-credit trigger
+# is deliberately NOT used: IV alone can trip it with no directional risk.)
+# The course's net-credit-only rule for the roll itself can't be checked
+# here, so it stays a manual check.
+ROLL_SHORT_DELTA = 0.30
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
@@ -672,55 +677,58 @@ def _leg_at(chain, opt_type, strike):
     """Exact-strike contract lookup in a td_chain() list -- a deliberate,
     tiny duplicate of spreads.py's own _leg_at rather than an import: spreads.py
     already imports this module, so importing spreads.py back here would be
-    circular. Used only by _position_cost_to_close below."""
+    circular. Used only by _position_cost_and_short_delta below."""
     for o in chain:
         if o["type"] == opt_type and abs(o["strike"] - strike) < 1e-6:
             return o
     return None
 
 
-def _position_cost_to_close(pos):
-    """Live worst-case (ask-side) cost to close one share of this
-    OPEN_POSITIONS entry -- same convention positions.py's evaluate_position
-    uses for CostToClose. Returns None if it can't be priced right now
-    (chain unavailable, contract not found) -- treated as "can't tell,"
-    never as a free 0%/100% G/L."""
+def _position_cost_and_short_delta(pos):
+    """(live worst-case ask-side cost to close one share, short leg's |delta|)
+    for this OPEN_POSITIONS entry -- cost uses the same convention
+    positions.py's evaluate_position uses for CostToClose; the short leg is
+    the single leg for a put/call, the sold leg for a spread. Returns None if
+    it can't be priced right now (chain unavailable, contract not found,
+    delta missing) -- "can't tell," never a free pass."""
     kind = pos["type"]
     chain = td_chain(pos["ticker"], pos["expiration"])
     if not chain:
         return None
     if kind in ("put", "call"):
-        leg = _leg_at(chain, kind, pos["strike"])
-        return (leg["ask"] or 0) if leg else None
-    opt_type = "put" if kind == "put_spread" else "call"
-    short_leg = _leg_at(chain, opt_type, pos["short_strike"])
-    long_leg = _leg_at(chain, opt_type, pos["long_strike"])
-    if not (short_leg and long_leg):
+        short_leg = _leg_at(chain, kind, pos["strike"])
+        if not short_leg:
+            return None
+        cost = short_leg["ask"] or 0
+    else:
+        opt_type = "put" if kind == "put_spread" else "call"
+        short_leg = _leg_at(chain, opt_type, pos["short_strike"])
+        long_leg = _leg_at(chain, opt_type, pos["long_strike"])
+        if not (short_leg and long_leg):
+            return None
+        cost = (short_leg["ask"] or 0) - (long_leg["bid"] or 0)
+    delta = short_leg.get("delta")
+    if delta is None:
         return None
-    return (short_leg["ask"] or 0) - (long_leg["bid"] or 0)
+    return cost, abs(delta)
 
 
-def _position_roll_eligible(pos, today):
-    """True once an OPEN_POSITIONS entry is close enough to done that it
-    should stop blocking the screener from suggesting a new position on the
-    same ticker/side (see open_position_sides, ROLL_DTE_THRESHOLD/
-    ROLL_GL_PCT_THRESHOLD above) -- within ROLL_DTE_THRESHOLD days of
-    expiration, checked first since it's free (no live quote needed), OR
-    already at/above ROLL_GL_PCT_THRESHOLD of its own entry_credit as
-    unrealized G/L. A position that can't be live-priced right now (bad
-    ticker, chain unavailable) stays occupying -- "can't tell" defaults to
-    still blocking, not to freeing the screener."""
-    exp_date = dt.date.fromisoformat(pos["expiration"])
-    if (exp_date - today).days <= ROLL_DTE_THRESHOLD:
-        return True
+def _position_roll_eligible(pos):
+    """True when an OPEN_POSITIONS entry is a LOSER under enough pressure that
+    it should stop blocking the screener, so the ticker/side reappears as a
+    roll candidate (see open_position_sides, ROLL_SHORT_DELTA above): unrealized
+    G/L strictly negative AND short-strike |delta| >= ROLL_SHORT_DELTA.
+    Winners never qualify -- they're left to ride. A position that can't be
+    live-priced right now stays occupying ("can't tell" defaults to still
+    blocking, not to freeing the screener)."""
     entry_credit = pos["entry_credit"]
     if not entry_credit:
         return False
-    cost_to_close = _position_cost_to_close(pos)
-    if cost_to_close is None:
+    priced = _position_cost_and_short_delta(pos)
+    if priced is None:
         return False
-    gl_pct = (entry_credit - cost_to_close) / entry_credit
-    return gl_pct >= ROLL_GL_PCT_THRESHOLD
+    cost_to_close, short_delta = priced
+    return cost_to_close > entry_credit and short_delta >= ROLL_SHORT_DELTA
 
 
 def open_position_sides(symbol):
@@ -729,18 +737,18 @@ def open_position_sides(symbol):
     Used to keep the screener (puts/calls/spreads, including Discover) from
     suggesting more of the same directional exposure on a ticker you're
     already committed to -- e.g. an open INTC put spread blocks new INTC
-    puts/put spreads, but INTC call spreads still show. A position that's
-    basically done (see _position_roll_eligible) no longer counts as
-    occupying its side, so it can appear on the screener again to be rolled
-    into a fresh one. Contract Lookup deliberately ignores this entirely --
+    puts/put spreads, but INTC call spreads still show. A LOSING position
+    under enough pressure (negative G/L and short delta >= ROLL_SHORT_DELTA,
+    see _position_roll_eligible) no longer counts as occupying its side, so
+    it can appear on the screener again as a roll candidate; winners always
+    keep blocking. Contract Lookup deliberately ignores this entirely --
     it's a manual override tool for looking up any strike/expiration
     regardless of screener criteria."""
-    today = dt.date.today()
     sides = set()
     for p in OPEN_POSITIONS:
         if p["ticker"] != symbol:
             continue
-        if _position_roll_eligible(p, today):
+        if _position_roll_eligible(p):
             continue
         if p["type"] in ("put", "put_spread"):
             sides.add("put")
