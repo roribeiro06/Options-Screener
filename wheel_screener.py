@@ -1203,6 +1203,13 @@ def screen_puts(symbol):
 
 
 def screen_calls(symbol, cost_basis):
+    # A covered call needs 100 shares per contract -- with a known share count
+    # under 100 you can't cover even one, so the ticker isn't screened at all.
+    # (A ticker with NO entry in HOLDINGS_SHARES, e.g. one typed into the app's
+    # sidebar, has an unknown count and is left alone -- can't tell != under 100.)
+    shares = HOLDINGS_SHARES.get(symbol)
+    if shares is not None and shares < 100:
+        return [], []
     if "call" in open_position_sides(symbol):   # already holding call-side exposure here
         return [], []
     price = td_quote(symbol)
@@ -1213,10 +1220,8 @@ def screen_calls(symbol, cost_basis):
     today = dt.date.today()
     # Actual shares owned caps how many covered calls you can write -- use
     # that instead of the cash-target count when it's known (see
-    # HOLDINGS_SHARES), never less than 1 (an odd lot under 100 shares still
-    # covers one contract, not zero).
-    shares = HOLDINGS_SHARES.get(symbol)
-    n_contracts = max(1, shares // 100) if shares else contracts_for_target(price * 100)
+    # HOLDINGS_SHARES; a known count is always >= 100 here, see the top).
+    n_contracts = shares // 100 if shares else contracts_for_target(price * 100)
     passers, near = [], []
     for exp, exp_date, dte in _expirations_in_window(symbol, today):
         earn_win = earnings_blocks(symbol, earnings, today, exp_date)

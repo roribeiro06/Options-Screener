@@ -909,8 +909,9 @@ Refreshed weekly; "-" means no history yet.
 **Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral
 for puts (strike x 100), or \${getattr(sp, "SPREAD_CASH_TARGET", 25000):,} of max loss for
 spreads (max loss x 100) -- spreads use a lower target since their risk per contract is capped/defined.
-For covered calls on a ticker in `HOLDINGS_SHARES`, it's capped at what you actually own instead (shares // 100, minimum
-1) -- you can't write more covered calls than you have shares to cover; falls back to the cash-target count otherwise.
+For covered calls on a ticker in `HOLDINGS_SHARES`, it's capped at what you actually own instead (shares // 100) --
+you can't write more covered calls than you have shares to cover, and a ticker with **fewer than 100 shares is left out of
+the covered-calls screener entirely**; falls back to the cash-target count for a ticker with no share count on file.
 **Premium** (puts/calls) and **Max Profit** (spreads) show a **\$worst-\$best range** - worst case is selling the short leg(s) at
 the bid and buying any long leg(s) at the ask, best case is the reverse (ask on shorts, bid on longs) - with the total across
 your # of contracts in parentheses for each end of the range. A wide range means a wide bid-ask spread (costly to trade);
