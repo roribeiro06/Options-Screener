@@ -53,6 +53,20 @@ import spreads as sp
 TYPE_LABELS = {"put": "Put", "call": "Covered Call",
               "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
 
+# Row order within a tie on the primary sort (DTE / Closed date): a ticker's
+# positions stay together, and put-side sorts before call-side. That keeps the
+# two halves of an iron condor -- tracked as a separate put spread and call
+# spread on the same ticker/expiration -- directly on top of each other, instead
+# of another ticker's contract landing between them. Display order only.
+_TYPE_ORDER = {"Put": 0, "Put Credit Spread": 1, "Call Credit Spread": 2, "Covered Call": 3}
+
+
+def _sort_grouped(df, primary):
+    return (df.assign(_o=df["Type"].map(_TYPE_ORDER).fillna(9))
+              .sort_values([primary, "Ticker", "Expiration", "_o"], kind="stable")
+              .drop(columns="_o"))
+
+
 POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "DaysHeld", "Opened",
                   "Contracts", "EntryCredit", "CostToCloseBid", "CostToClose", "UnrealizedGL_$",
                   "UnrealizedGL_%", "MaxLoss"]
@@ -225,7 +239,7 @@ def build_positions_table():
             print(f"POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=POSITIONS_COLS), errs
-    df = pd.DataFrame(rows)[POSITIONS_COLS].sort_values("DTE", ascending=True)
+    df = _sort_grouped(pd.DataFrame(rows)[POSITIONS_COLS], "DTE")
     return df, errs
 
 
@@ -477,7 +491,7 @@ def build_closed_positions_table(window_days=30):
             print(f"CLOSED POSITION {pos.get('ticker', '?')}: ERROR {e}", file=sys.stderr)
     if not rows:
         return pd.DataFrame(columns=CLOSED_COLS), errs
-    df = pd.DataFrame(rows)[CLOSED_COLS].sort_values("Closed", ascending=True)
+    df = _sort_grouped(pd.DataFrame(rows)[CLOSED_COLS], "Closed")
     return df, errs
 
 
