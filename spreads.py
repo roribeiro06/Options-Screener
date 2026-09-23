@@ -194,7 +194,12 @@ def _ann_ror_range(credit_range, width, dte):
 
 
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
-                 credit, credit_best, width, max_loss, pop, iv, otm, oi=0, avg_credit=None):
+                 credit, credit_best, width, max_loss, pop, iv, otm, oi=0, avg_credit=None, *,
+                 width_base):
+    """width_base is the SHORT strike Width_% is measured against (long leg to
+    short leg, the same base SPREAD_WIDTH_PCT targets -- see _long_strike), so
+    the column reads ~the width setting on every row regardless of how far OTM
+    the spread is. For an iron condor pass the wider side's short strike."""
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
@@ -204,7 +209,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": put_legs, "Call Legs": call_legs,
             "Expiration": exp, "DTE": dte, "OTM_%": otm,
-            "Width": round(width, 2), "Width_%": (width / spot if spot else float("nan")),
+            "Width": round(width, 2), "Width_%": (width / width_base if width_base else float("nan")),
             "Max Profit": round(credit, 2), "Max Profit (Best)": round(credit_best, 2),
             "Breakeven": "-",
             "MaxLoss": round(max_loss, 2),
@@ -263,7 +268,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             acr = _ann_ror_range(_acd, s["width"], dte)
             r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
                              s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
-                             s["short"].get("iv") or 0, otm, oi, acr)
+                             s["short"].get("iv") or 0, otm, oi, acr, width_base=sk)
             if r["AnnROR_%"] >= ROR_ANN_MIN:
                 seen.add(key)
                 out.append(r)
@@ -322,7 +327,9 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
                          f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
                          f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                         credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr)
+                         credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr,
+                         width_base=(ps["short"]["strike"] if ps["width"] >= cs["width"]
+                                     else cs["short"]["strike"]))
         # Each side's own worst/best-case credit (see SPREAD_COLS) -- not
         # displayed, just carried through for the click-to-copy summary.
         r["Put Max Profit"] = round(ps["credit"], 2)
@@ -720,7 +727,8 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
             else:
                 put_legs, call_legs = "", f"sell {short_strike:g}C / buy {long_strike:g}C"
             rows.append(_defined_row(symbol, price, exp, dte, earnings, strat, put_legs, call_legs,
-                                     credit, credit_best, width, max_loss, pop, iv, otm, oi))
+                                     credit, credit_best, width, max_loss, pop, iv, otm, oi,
+                                     width_base=short_strike))
     return rows
 
 
@@ -777,7 +785,8 @@ def _fmt(df):
         d["MaxLoss"] = [_ml(v, n) for v, n in zip(d["MaxLoss"], d["# of contracts"])]
     elif "MaxLoss" in d.columns:
         d["MaxLoss"] = d["MaxLoss"].apply(lambda v: f"${v:.2f}" if pd.notna(v) else "-")
-    # Width: "$width (width % of price)" -- folds the old separate Width_% column in here.
+    # Width: "$width (width % of the short strike; % of price for long straddle/strangle,
+    # which have no short leg)" -- folds the old separate Width_% column in here.
     if "Width" in d.columns and "Width_%" in d.columns:
         def _w(v, p):
             if pd.isna(v):

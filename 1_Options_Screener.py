@@ -975,7 +975,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Structure: credit-spread short legs scanned from ~{sp.SHORT_DELTA:.2f} delta and further OTM; iron condors use two matched shorts. POP ranges from the floor up (safer variants included).
 - Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
-- Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of price (distance from short strike to long/protective strike)
+- Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of the short strike (distance from short strike to long/protective strike); the Width column shows that same % (long straddle/strangle have no short leg, so theirs is % of price)
 - OTM floor on the short leg(s): {ws.OTM_MIN_INDEX:.0%} for index ETFs / {ws.OTM_MIN_OTHER:.0%} for other tickers
 - Each short leg's OTM must also be >= {getattr(sp, "SPREAD_MIN_OTM_OVER_IV", 0):.0%} of its IV (same volatility-scaled cushion as puts/calls)
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX}; never spans earnings
