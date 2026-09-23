@@ -108,6 +108,9 @@ OPEN_POSITIONS = [
     # short 160C $4,577.91 / 2,800 = 1.634968, long 170C $2,170.00 / 2,800 = 0.775.
     {"ticker": "NOW", "type": "call_spread", "short_strike": 160, "long_strike": 170,
      "expiration": "2026-10-16", "contracts": 28, "entry_credit": 0.859968, "entry_date": "2026-09-21"},
+    # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
+    {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
+     "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
