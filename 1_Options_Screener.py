@@ -320,7 +320,32 @@ def _spread_action_summary(row):
     is a buy-back)."""
     if row.get("Kind") == "roll":
         return _roll_position_summary(row)
+    if row.get("Type") == "Iron Condor":
+        return _close_condor_summary(row)
     return _close_position_summary(row)
+
+
+def _close_condor_summary(row):
+    """Copy-paste summary to CLOSE a whole iron condor (a Credit Spread Actions
+    row where the condor is judged as one position): the broker has no native
+    condor order type, so it's written as the two spread orders to place, each
+    with its own contract count and target cost to close (same bid-to-halfway
+    quote _close_position_summary uses)."""
+    def _side(label, strike, n, bid, ask):
+        n_int = int(n) if pd.notna(n) else None
+        strike_disp = f"(${'/$'.join(str(strike).split('/'))})"
+        return [f"{label} Spread {strike_disp}",
+                f"{n_int if n_int is not None else '-'} Contracts",
+                f"Cost to Close: {_bid_avg_range(bid, ask, n_int)}"]
+    put_strike, call_strike = str(row["Strike"]), str(row["CStrike"])
+    lines = [f"Close {row['Ticker']} Iron Condor", str(row["Ticker"]),
+             f"Expiration: {row['Expiration']}", "",
+             *_side("Put", put_strike, row["Contracts"], row["CostToCloseBid"], row["CostToClose"]), "",
+             *_side("Call", call_strike, row["CContracts"], row["CCostToCloseBid"], row["CCostToClose"])]
+    current_price = row.get("CurrentPrice")
+    if pd.notna(current_price):
+        lines += ["", f"Current Price: ${current_price:.2f}"]
+    return "\n".join(lines)
 
 
 @st.fragment
@@ -737,7 +762,14 @@ try:
                    "Click a row for an advisor-ready order to copy: the Close summary (same as Open Positions) or, for a "
                    "roll, the new expiration, sell/buy strikes and net premium. "
                    "If nothing qualifies the action says CLOSE and why (e.g. a deep in-the-money spread costs "
-                   "more to buy back than any out-of-the-money spread can pay). Winners never roll. Entry rules "
+                   "more to buy back than any out-of-the-money spread can pay). Winners never roll. **Iron condors are judged "
+                   "as ONE position:** a put spread and a call spread on the same ticker and expiration are combined "
+                   "into a single Iron Condor row (Open Positions above still lists the two sides separately), "
+                   "with every rule applied to the combined credit vs the combined cost to close -- shown as dollar "
+                   "totals, since the two sides can have different contract counts. A short strike counts as "
+                   "\"tested\" if EITHER side is; the group comes from the older leg's entry; and if a condor "
+                   "should be rolled, only its worse-losing side is rolled while the other stays open. A condor "
+                   "close copies as the two spread orders to place. Entry rules "
                    "(short delta, IV Rank) aren't tracked for open positions, so they aren't checked here.")
         _acts, _acts_raw = scan_spread_actions(_dpos)
         if len(_acts):

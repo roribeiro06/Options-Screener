@@ -260,7 +260,8 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
-                           "RollNetLow", "RollNetHigh"]
+                           "RollNetLow", "RollNetHigh", "CStrike", "CContracts",
+                           "CCostToCloseBid", "CCostToClose"]
 
 
 def _spread_group(dte, days_held):
@@ -287,14 +288,31 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
     next-month quote is fetched."""
     if not credit or credit <= 0 or dte is None or price != price:
         return None
-    group = _spread_group(dte, days_held)
-    profit_frac = (credit - cost) / credit
     if kind == "put":
         itm = price < short_strike
         tested = price <= short_strike * (1 + TESTED_PCT)
     else:
         itm = price > short_strike
         tested = price >= short_strike * (1 - TESTED_PCT)
+    return _apply_rules(dte, days_held, credit, cost, itm, tested)
+
+
+def condor_action(put_short, call_short, price, dte, days_held, credit, cost):
+    """Same rules as spread_action, applied to an iron condor as ONE position:
+    credit and cost are the COMBINED figures (any consistent unit -- the rules
+    only use ratios, so the table passes dollar totals, which also handles a
+    condor whose two sides have different contract counts). "ITM" / "tested"
+    mean EITHER short strike is through / within TESTED_PCT of the price."""
+    if not credit or credit <= 0 or dte is None or price != price:
+        return None
+    itm = price < put_short or price > call_short
+    tested = price <= put_short * (1 + TESTED_PCT) or price >= call_short * (1 - TESTED_PCT)
+    return _apply_rules(dte, days_held, credit, cost, itm, tested)
+
+
+def _apply_rules(dte, days_held, credit, cost, itm, tested):
+    group = _spread_group(dte, days_held)
+    profit_frac = (credit - cost) / credit
 
     if cost >= SPREAD_STOP_MULT * credit:
         return 0, f"STOP: close (cost to close >= {SPREAD_STOP_MULT:g}x credit)"
@@ -371,23 +389,74 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
             f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), roll
 
 
+def _try_roll(ticker, exp, kind, cost, cost_bid, n, action, label="", closing="CLOSE"):
+    """Roll-before-close for a LOSING position whose rule says to get out:
+    -> (new action text, roll dict or None). Falls back to `closing` (with the
+    reason) when there is no qualifying roll, or the search itself fails."""
+    try:
+        text, roll = _find_roll(ticker, exp, kind, cost, cost_bid, n)
+    except Exception as e:
+        print(f"ROLL SEARCH {ticker}: ERROR {e}", file=sys.stderr)
+        return f"{action} -> {closing} (roll search failed: {e})", None
+    if roll:
+        return f"{action} -> {label}{text}", roll
+    return f"{action} -> {closing} (no roll: {text})", None
+
+
 def build_spread_actions_table(df):
     """Credit spreads from build_positions_table()'s raw output that currently
     trip a management rule (see spread_action), with the action to take.
-    Only spreads that need action appear -- an empty result means nothing is
+    Only positions that need action appear -- an empty result means nothing is
     triggered. Priced from the rows already quoted, plus (only for a LOSING
-    spread whose rule says to get out) the roll search in _find_roll -- a
+    position whose rule says to get out) the roll search in _find_roll -- a
     roll for a net credit that passes the screener beats a plain CLOSE.
+
+    IRON CONDORS are evaluated as ONE position: a put spread and a call spread
+    on the same ticker and expiration (exactly one of each, nothing else on
+    that ticker/expiry) are combined into a single "Iron Condor" row, judged on
+    the combined dollar credit vs the combined dollar cost to close (see
+    condor_action). Dollar totals, not per-share, because the two sides can
+    have different contract counts (e.g. 60 put spreads / 28 call spreads).
+    The condor's group comes from its OLDEST leg's entry (when the trade was
+    opened; a later leg completing the condor doesn't restart the plan). A
+    condor's roll search runs on its worse-losing side only -- the other side
+    stays open. Open Positions itself still lists the two sides separately.
+
     Returns (display_df, raw_df), same row order: display_df is the formatted
     table; raw_df carries the unformatted numbers the click-to-copy summaries
     need (Kind is "roll" only when a roll was found, else "close" -- covers
-    STOP/TIME EXIT/TAKE PROFIT/CLOSE/DEAD TRADE alike, all a buy-back)."""
+    STOP/TIME EXIT/TAKE PROFIT/CLOSE/DEAD TRADE alike, all a buy-back; a
+    condor close row carries both legs, a condor roll row just the rolled side)."""
     import pandas as pd
+    PUT, CALL = TYPE_LABELS["put_spread"], TYPE_LABELS["call_spread"]
+    spreads = [r for _, r in df.iterrows() if r["Type"] in (PUT, CALL)]
+    groups = {}
+    for r in spreads:
+        groups.setdefault((r["Ticker"], r["Expiration"]), []).append(r)
+    condors = {k for k, g in groups.items()
+               if len(g) == 2 and {x["Type"] for x in g} == {PUT, CALL}}
     rows = []
-    for _, r in df.iterrows():
-        kind = "put" if r["Type"] == TYPE_LABELS["put_spread"] else                "call" if r["Type"] == TYPE_LABELS["call_spread"] else None
-        if kind is None:
+    nan = float("nan")
+
+    def _raw(r, n, kind, roll, condor_call=None):
+        d = {"Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
+             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
+             "CostToClose": r["CostToClose"], "CurrentPrice": r["CurrentPrice"], "Kind": kind,
+             "RollExp": roll["exp"] if roll else None,
+             "RollSell": roll["sell"] if roll else nan, "RollBuy": roll["buy"] if roll else nan,
+             "RollNetLow": roll["net_low"] if roll else nan,
+             "RollNetHigh": roll["net_high"] if roll else nan,
+             "CStrike": None, "CContracts": nan, "CCostToCloseBid": nan, "CCostToClose": nan}
+        if condor_call is not None:
+            c, cn = condor_call
+            d.update({"Type": "Iron Condor", "CStrike": c["Strike"], "CContracts": cn,
+                      "CCostToCloseBid": c["CostToCloseBid"], "CCostToClose": c["CostToClose"]})
+        return d
+
+    for r in spreads:
+        if (r["Ticker"], r["Expiration"]) in condors:
             continue
+        kind = "put" if r["Type"] == PUT else "call"
         credit, cost, n = r["EntryCredit"], r["CostToClose"], int(r["Contracts"])
         hit = spread_action(kind, float(str(r["Strike"]).split("/")[0]), r["CurrentPrice"],
                             r["DTE"], r["DaysHeld"], credit, cost)
@@ -401,32 +470,67 @@ def build_spread_actions_table(df):
         # Winners (TAKE PROFIT, 21 DTE close above 40%) and DEAD TRADE never roll.
         roll = None
         if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
-            try:
-                text, roll = _find_roll(r["Ticker"], r["Expiration"], kind, cost,
-                                        r["CostToCloseBid"], n)
-                action = (f"{action} -> {text}" if roll
-                          else f"{action} -> CLOSE (no roll: {text})")
-            except Exception as e:
-                print(f"ROLL SEARCH {r['Ticker']}: ERROR {e}", file=sys.stderr)
-                action = f"{action} -> CLOSE (roll search failed: {e})"
+            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
+                                     r["CostToCloseBid"], n, action)
+        group = _spread_group(r["DTE"], r["DaysHeld"])
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
             "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),
             "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
-                      3: "3 (entered >45)"}[_spread_group(r["DTE"], r["DaysHeld"])],
-            "Contracts": n, "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
-            "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[_spread_group(r['DTE'], r['DaysHeld'])]):.2f}", "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
+                      3: "3 (entered >45)"}[group],
+            "Contracts": str(n), "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
+            "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[group]):.2f}",
+            "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
-            "Action": action}, {
-            "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
-            "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
-            "CostToClose": cost, "CurrentPrice": r["CurrentPrice"],
-            "Kind": "roll" if roll else "close",
-            "RollExp": roll["exp"] if roll else None,
-            "RollSell": roll["sell"] if roll else float("nan"),
-            "RollBuy": roll["buy"] if roll else float("nan"),
-            "RollNetLow": roll["net_low"] if roll else float("nan"),
-            "RollNetHigh": roll["net_high"] if roll else float("nan")}))
+            "Action": action}, _raw(r, n, "roll" if roll else "close", roll)))
+
+    for key in sorted(condors):
+        put = next(x for x in groups[key] if x["Type"] == PUT)
+        call = next(x for x in groups[key] if x["Type"] == CALL)
+        n_p, n_c = int(put["Contracts"]), int(call["Contracts"])
+        credit_p, credit_c = put["EntryCredit"] * 100 * n_p, call["EntryCredit"] * 100 * n_c
+        cost_p, cost_c = put["CostToClose"] * 100 * n_p, call["CostToClose"] * 100 * n_c
+        credit, cost = credit_p + credit_c, cost_p + cost_c
+        held = [x for x in (put["DaysHeld"], call["DaysHeld"]) if x == x]
+        days_held = max(held) if held else nan
+        dte, price = put["DTE"], put["CurrentPrice"]
+        hit = condor_action(float(str(put["Strike"]).split("/")[0]),
+                            float(str(call["Strike"]).split("/")[0]),
+                            price, dte, days_held, credit, cost)
+        if not hit:
+            continue
+        rank, action = hit
+        roll, rolled = None, None
+        if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
+            # Only the worse-losing side is rolled; the other side stays open.
+            side, srow, sn = max((("Put", put, n_p), ("Call", call, n_c)),
+                                 key=lambda t: t[1]["CostToClose"] * 100 * t[2]
+                                 - t[1]["EntryCredit"] * 100 * t[2])
+            action, roll = _try_roll(put["Ticker"], put["Expiration"], side.lower(),
+                                     srow["CostToClose"], srow["CostToCloseBid"], sn, action,
+                                     label=f"{side} side: ", closing="CLOSE both sides")
+            rolled = (srow, sn) if roll else None
+        group = _spread_group(dte, days_held)
+        gl = credit - cost
+        disp = {
+            "Ticker": put["Ticker"], "Type": "Iron Condor",
+            "Strike": f"{put['Strike']} | {call['Strike']}",
+            "CurrentPrice": f"${price:.2f}", "DTE": int(dte),
+            "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
+                      3: "3 (entered >45)"}[group],
+            "Contracts": f"{n_p}P / {n_c}C", "EntryCredit": f"${credit:,.0f} total",
+            "CostToClose": f"${cost:,.0f} total",
+            "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[group]):,.0f} total",
+            "StopBTC": f"${credit * SPREAD_STOP_MULT:,.0f} total",
+            "UnrealizedGL": f"{_fmt_dollar_signed(gl)} ({_fmt_pct_signed(gl / credit)})",
+            "Action": action}
+        if rolled:
+            srow, sn = rolled
+            raw = _raw(srow, sn, "roll", roll)
+        else:
+            raw = _raw(put, n_p, "close", None, condor_call=(call, n_c))
+        rows.append((rank, dte, disp, raw))
+
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))
