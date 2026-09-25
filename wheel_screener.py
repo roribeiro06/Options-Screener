@@ -73,8 +73,6 @@ HOLDINGS_SHARES = {
 OPEN_POSITIONS = [
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
      "contracts": 3, "entry_credit": 9.75, "entry_date": "2026-08-03"},
-    {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
-     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21"},
     {"ticker": "SKHY", "type": "put_spread", "short_strike": 145, "long_strike": 138,
      "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
     {"ticker": "ORCL", "type": "call_spread", "short_strike": 167.5, "long_strike": 175,
@@ -111,6 +109,10 @@ OPEN_POSITIONS = [
     # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
      "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
+    # QQQ put credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 675P $4,271.91 / 800 = 5.3398875, long 640P $2,352.00 / 800 = 2.94.
+    {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
+     "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -119,6 +121,13 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # SPCX 160/170 call spread closed 09/25: short 160C bought back at $3,593.00
+    # (2.395333/sh) and long 170C sold for $1,477.96 (0.985307/sh) across 15
+    # contracts -- exit_cost = 2.395333 - 0.985307 = 1.410027. Realized +$434.79,
+    # matching the brokerage's +$4,728.83 (short) and -$4,294.04 (long) legs.
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 160, "long_strike": 170,
+     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.699887, "entry_date": "2026-08-21",
+     "exit_cost": 1.410027, "exit_date": "2026-09-25"},
     # Short leg (67.5P) bought back at $0.06/share ($642.00 total on 107
     # contracts), long leg (65P) sold at $0.01/share ($106.99 total) --
     # exit_cost = 0.06 - 0.01 = 0.05, same short-ask-minus-long-bid
