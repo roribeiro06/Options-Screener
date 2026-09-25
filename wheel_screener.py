@@ -113,6 +113,12 @@ OPEN_POSITIONS = [
     # legs -- short 675P $4,271.91 / 800 = 5.3398875, long 640P $2,352.00 / 800 = 2.94.
     {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
      "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25"},
+    # SPCX call credit spread (rolled up from the closed 160/170). Entry credit from
+    # the 09/25 fills only -- short 170C $2,838.93 / 2,700 = 1.051456, long 180C
+    # $1,219.00 / 2,700 = 0.451481 (the brokerage's 08/21 lot rows belong to the old
+    # long 170C and are ignored).
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 170, "long_strike": 180,
+     "expiration": "2026-10-16", "contracts": 27, "entry_credit": 0.599974, "entry_date": "2026-09-25"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
