@@ -242,13 +242,13 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
             siv = s["short"].get("iv") or 0
             if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
                 continue
-            # Same tech-sector risk gate as single-leg puts/calls (see
-            # wheel_screener.tech_otm_ok) plus the universal total-premium
+            # High-volatility-tier risk gate (see wheel_screener.vol_otm_ok --
+            # multi-leg only) plus the universal total-premium
             # floor (MIN_TOTAL_PREMIUM) -- worst-case credit, sized the same
             # way the real "# of contracts" column is.
             _n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
             _total_prem = s["credit"] * 100 * _n
-            if not ws.tech_otm_ok(sym, otm, _total_prem):
+            if not ws.vol_otm_ok(sym, otm, _total_prem):
                 continue
             if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
                 continue
@@ -295,7 +295,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         max_loss = width - credit
         if max_loss <= 0:
             continue
-        # Same tech-sector risk gate as credit spreads above, plus the
+        # Same high-volatility-tier gate as credit spreads above, plus the
         # universal total-premium floor -- both legs are the same ticker, so
         # one check suffices; uses the tighter of the two legs' OTM (same
         # value the row's own OTM_% column reports) and the combined
@@ -303,7 +303,7 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
         # column is.
         _n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
         _total_prem = credit * 100 * _n
-        if not ws.tech_otm_ok(sym, min(p_otm, c_otm), _total_prem):
+        if not ws.vol_otm_ok(sym, min(p_otm, c_otm), _total_prem):
             continue
         if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
             continue

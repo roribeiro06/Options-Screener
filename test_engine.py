@@ -11,10 +11,16 @@ CASES = [
     ("XYZ 90P (high-vol, clean)",   "XYZ",  100.0,  90, 2.10, 0.55,  40, False),
 ]
 
+# Offline test: pin each ticker's volatility tier instead of looking it up.
+import datetime as _dt
+_HV = {"SPY": 0.13, "AVGO": 0.47, "XYZ": 0.55}          # SPY low, the others medium
+for _t, _v in _HV.items():
+    ws._VOL_TIERS[_t] = {"hv30": _v, "hv1y": _v, "days": 250, "as_of": _dt.date.today().isoformat()}
+
 full = []
 for label, tkr, spot, strike, prem, iv, dte, earn in CASES:
     res = ws.evaluate_put({"strike": strike, "premium": prem, "iv": iv}, spot, dte, earn,
-                          otm_min=ws.otm_min_for(tkr), is_index=(tkr in ws.INDEX_TICKERS))
+                          otm_min=ws.otm_min_for(tkr), low_vol=ws.is_low_vol(tkr))
     rec = {"Case": label, "Ticker": tkr, "Spot": spot, "Strike": strike,
            "Expiration": "(example)", "DTE": dte, "EarningsDate": earn, **res}
     full.append(rec)

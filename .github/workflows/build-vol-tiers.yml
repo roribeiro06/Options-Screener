@@ -1,0 +1,36 @@
+name: Build volatility tiers
+
+# Refreshes vol_tiers.json -- each ticker's 30-day and 1-year historical
+# volatility, which wheel_screener.vol_tier turns into the low/medium/high tier
+# the screener's OTM / premium rules key off. Runs once a day after the close
+# (after the volume-leaders job, which also commits to main) using yfinance daily
+# closes -- no Tradier token needed. Entries the app treats as stale after
+# VOL_MAX_AGE_DAYS, so a failing run can't leave an old "low" in place forever.
+on:
+  schedule:
+    - cron: "0 21 * * 1-5"     # weekdays 21:00 UTC (~5pm ET, after close)
+  workflow_dispatch:
+
+permissions:
+  contents: write            # needed to commit the updated JSON
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build volatility tiers
+        run: python build_vol_tiers.py
+      - name: Commit updated table
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vol_tiers.json
+          git commit -m "Update volatility tiers" || echo "no changes to commit"
+          git pull --rebase
+          git push

@@ -958,8 +958,9 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 
 **Cash-Secured Puts & Covered Calls**
 - Probability of profit (POP): {ws.POP_MIN:.0%} to {ws.POP_MAX:.0%}  (about 0.30 delta = 70% POP)
-- Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%} for stocks, {getattr(ws, "MIN_ANN_YIELD_INDEX", ws.MIN_ANN_YIELD):.0%} for broad indexes (SPY/QQQ/DIA, which also skip the per-share premium floors since they're lower risk)
-- OTM floor: {ws.OTM_MIN_INDEX:.0%} for SPY/QQQ/DIA, {ws.OTM_MIN_OTHER:.0%} for all other tickers  (OTM max {ws.OTM_MAX:.0%})
+- **Volatility tiers** (every strategy): each ticker is tiered by its historical volatility -- the HIGHER of its 30-day and 1-year figure, so a quiet month can't hide a volatile name -- **Low** below {ws.VOL_LOW:.0%}, **Medium** {ws.VOL_LOW:.0%}-{ws.VOL_HIGH:.0%}, **High** {ws.VOL_HIGH:.0%}+. A ticker with under {ws.VOL_MIN_DAYS} trading days of history, or no fresh volatility data, is treated as High (strictest). Refreshed daily (`vol_tiers.json`); tickers outside it (e.g. Discover) are computed live
+- Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%}, but {ws.MIN_ANN_YIELD_LOW_VOL:.0%} for **Low**-volatility tickers (which also skip the per-share premium floors since they're lower risk)
+- OTM floor: {ws.OTM_MIN_LOW_VOL:.0%} for **Low**-volatility tickers, {ws.OTM_MIN_OTHER:.0%} for all others  (OTM max {ws.OTM_MAX:.0%})
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
 - **Puts only** extra filters: {("premium >= \$%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
 - **Covered calls** extra filter: OTM >= {getattr(ws, "CALL_MIN_OTM_OVER_IV", 0):.0%} of IV (same volatility-scaled cushion as puts)
@@ -976,7 +977,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
 - Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of the short strike (distance from short strike to long/protective strike); the Width column shows that same % (long straddle/strangle have no short leg, so theirs is % of price)
-- OTM floor on the short leg(s): {ws.OTM_MIN_INDEX:.0%} for index ETFs / {ws.OTM_MIN_OTHER:.0%} for other tickers
+- OTM floor on the short leg(s): {ws.OTM_MIN_LOW_VOL:.0%} for Low-volatility tickers / {ws.OTM_MIN_OTHER:.0%} for others; **High**-volatility tickers additionally need >= {ws.HIGH_VOL_OTM_MIN:.0%} OTM, or {ws.HIGH_VOL_OTM_FLOOR:.0%}-{ws.HIGH_VOL_OTM_MIN:.0%} OTM with >= \${ws.HIGH_VOL_MIN_PREMIUM:,} total premium (worst-case bid basis)
 - Each short leg's OTM must also be >= {getattr(sp, "SPREAD_MIN_OTM_OVER_IV", 0):.0%} of its IV (same volatility-scaled cushion as puts/calls)
 - Days to expiration: {sp.SPREAD_DTE_MIN} to {sp.SPREAD_DTE_MAX}; never spans earnings
 

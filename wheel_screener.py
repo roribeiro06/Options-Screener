@@ -239,7 +239,7 @@ DTE_MIN           = 7      # include short weeklies
 DTE_MAX           = 60     # no long-dated contracts
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
-MIN_ANN_YIELD_INDEX = 0.10   # broad indexes (SPY/QQQ/DIA) are lower risk -> lower yield floor is OK
+MIN_ANN_YIELD_LOW_VOL = 0.10 # LOW-volatility tier (see vol_tier) is lower risk -> lower yield floor is OK
 MIN_PERIOD_YIELD  = 0.01     # require at least 1% period (per-contract) yield
 MIN_OPEN_INTEREST = 1000     # minimum open interest for a contract/leg to appear (0 to disable)
 CASH_TARGET = 40000          # capital target; screener shows # of contracts to reach at least this
@@ -291,26 +291,40 @@ YIELD_OVER_IV_SHORT = 1.0    #   short-dated (<=21 DTE): annualized yield must b
 YIELD_OVER_IV_LONG  = 0.7    # 22+ DTE: annualized yield must be > 70% of IV
 USE_YIELD_OVER_IV   = False  # OFF: don't require yield to beat IV (set True to re-enable)
 REQUIRE_STRIKE_ABOVE_COST = False  # OFF: covered-call strike need NOT be above your cost basis
-INDEX_TICKERS       = {"SPY", "QQQ", "DIA"}   # these get the 5% OTM floor; all others 10%
-OTM_MIN_INDEX       = 0.05   # min % OTM for index ETFs (applies to ALL strategies)
+OTM_MIN_LOW_VOL     = 0.05   # min % OTM for LOW-volatility tickers (applies to ALL strategies) -- the old "index" rule
 OTM_MIN_OTHER       = 0.10   # min % OTM for every other ticker (applies to ALL strategies)
 OTM_MAX             = 1.0    # max % OTM for single-leg (1.0 = effectively off)
-# Added after the META loss -- felt like too much risk was being taken in
-# mega-cap tech names at the same OTM cushion as everything else. ADDITIONAL
-# gate on top of OTM_MIN_OTHER above, MULTI-LEG STRATEGIES ONLY (credit
-# spreads/iron condor, via spreads.py -> tech_otm_ok) -- single-leg puts/
-# calls (Cash-Secured Puts/Covered Calls, incl. Contract Lookup) intentionally
-# do NOT get this extra gate; the plain OTM_MIN_OTHER (10%) + MIN_TOTAL_PREMIUM
-# ($1,000) floors above are the whole rule there, tech or not. For multi-leg:
-# a Tech-sector ticker (get_sector_bucket) needs >= 15% OTM to pass outright;
-# between 10-15% OTM it can still pass, but only if it's collecting real
-# money for the extra proximity (>= $5,000 total premium, worst-case/bid
-# basis, at the same contract sizing the "# of contracts" column uses);
-# below 10% OTM it's excluded no matter the premium. Non-tech tickers are
-# completely unaffected.
-TECH_OTM_MIN        = 0.15
-TECH_OTM_FLOOR      = 0.10
-TECH_MIN_PREMIUM    = 5000
+
+# ---- Volatility tiers (replace the old Tech/Non-Tech screening rule) --------
+# Each ticker gets a tier from its historical volatility: max(30-day, 1-year),
+# annualized close-to-close. Taking the HIGHER of the two means a name only
+# counts as calm when it's been calm both recently AND over the year -- one
+# quiet month can't demote a volatile name (MU: 53% now, 81% over the year ->
+# stays HIGH), while a fresh spike promotes it immediately.
+#   LOW    (< VOL_LOW):  the old "index" treatment on every strategy -- OTM floor
+#                        OTM_MIN_LOW_VOL (5%), lower yield floor
+#                        MIN_ANN_YIELD_LOW_VOL, and for puts no per-share premium
+#                        floors (the low_vol path in evaluate_put).
+#   MEDIUM:              the plain rule: OTM_MIN_OTHER (10%) + MIN_TOTAL_PREMIUM.
+#   HIGH   (>= VOL_HIGH): MULTI-LEG STRATEGIES ONLY (credit spreads/iron condor,
+#                        via spreads.py -> vol_otm_ok) get the extra gate the old
+#                        Tech rule had (added after the META loss): >= 15% OTM to
+#                        pass outright; 10-15% OTM only with >= $5,000 total
+#                        premium (worst-case/bid basis, same contract sizing as the
+#                        "# of contracts" column); below 10% excluded no matter the
+#                        premium. Single-leg puts/calls (incl. Contract Lookup) do
+#                        NOT get this gate -- just OTM_MIN_OTHER + MIN_TOTAL_PREMIUM.
+# FAIL-CLOSED: a ticker with too little history (< VOL_MIN_DAYS closes), or no
+# usable/fresh data at all, is treated as HIGH -- the strictest tier -- so a
+# missing or broken data source can only make screening stricter, never looser
+# (the old sector lookup failed the other way and silently disabled its gate).
+VOL_HIGH            = 0.60
+VOL_LOW             = 0.35
+VOL_MIN_DAYS        = 120    # fewer closes than this -> can't trust it -> HIGH
+VOL_MAX_AGE_DAYS    = 10     # vol_tiers.json entries older than this are ignored (a dead updater must not leave a stale "low")
+HIGH_VOL_OTM_MIN    = 0.15
+HIGH_VOL_OTM_FLOOR  = 0.10
+HIGH_VOL_MIN_PREMIUM = 5000
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV", "EWY"}   # ETFs: no earnings to span
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
 ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans an earnings date. False: exclude them.
@@ -544,27 +558,116 @@ def bs_call_delta(S, K, T, sigma, r):
     return norm.cdf(_d1(S, K, T, sigma, r))
 
 
-def otm_min_for(symbol):
-    """Per-ticker minimum OTM: 5% for index ETFs, 10% for everything else."""
-    return OTM_MIN_INDEX if symbol in INDEX_TICKERS else OTM_MIN_OTHER
+VOL_TIERS_FILE = "vol_tiers.json"
+VOL_LIVE_RETRY_SECONDS = 1800   # after a failed live lookup, don't retry that ticker for this long
 
 
-def tech_otm_ok(symbol, otm, total_premium):
-    """Tech-specific risk gate for MULTI-LEG strategies only (credit spreads/
-    iron condor, called from spreads.py) -- see TECH_OTM_MIN/TECH_OTM_FLOOR/
-    TECH_MIN_PREMIUM above for the full rationale. Deliberately NOT applied
-    to single-leg puts/calls (evaluate_put/evaluate_call) -- those just use
-    the plain OTM_MIN_OTHER + MIN_TOTAL_PREMIUM floors, tech or not.
-    `symbol=None` always passes -- this is an ADDITIONAL screen, not
-    something that should ever silently reject a call site that predates
-    it."""
-    if symbol is None or get_sector_bucket(symbol) != "Tech":
-        return True
-    if otm >= TECH_OTM_MIN:
-        return True
-    if otm < TECH_OTM_FLOOR:
+def _load_vol_tiers():
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), VOL_TIERS_FILE)
+        with open(path) as f:
+            return json.load(f).get("tickers", {})
+    except Exception:
+        return {}
+
+
+_VOL_TIERS = _load_vol_tiers()   # {ticker: {hv30, hv1y, days, as_of}} -- written daily by build_vol_tiers.py
+_VOL_LIVE = {}                   # {ticker: (entry-or-None, fetched_at)} for tickers not in the file (e.g. Discover)
+
+
+def vol_metrics(closes):
+    """(hv30, hv1y, n_closes) from daily closes, oldest first. hv30 = annualized
+    sample st.dev of the last 30 daily log returns, hv1y the same over the last
+    252 (or all, if fewer) -- same formula as build_history.rolling_rv. hv30 is
+    None with fewer than 30 returns."""
+    rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))
+            if closes[i - 1] > 0 and closes[i] > 0]
+
+    def _hv(r):
+        if len(r) < 2:
+            return None
+        m = sum(r) / len(r)
+        return math.sqrt(sum((x - m) ** 2 for x in r) / (len(r) - 1)) * math.sqrt(252)
+    return (_hv(rets[-30:]) if len(rets) >= 30 else None), _hv(rets[-252:]), len(closes)
+
+
+def _vol_fresh(entry):
+    try:
+        return (dt.date.today() - dt.date.fromisoformat(entry["as_of"])).days <= VOL_MAX_AGE_DAYS
+    except Exception:
         return False
-    return total_premium >= TECH_MIN_PREMIUM
+
+
+def _vol_live(symbol):
+    """Vol entry computed from Tradier daily history for a ticker that isn't in
+    vol_tiers.json, or None if it can't be fetched/computed."""
+    try:
+        end = dt.date.today()
+        j = _td_get("/markets/history", {"symbol": symbol, "interval": "daily",
+                                         "start": (end - dt.timedelta(days=400)).isoformat(),
+                                         "end": end.isoformat()})
+        days = (j.get("history") or {}).get("day") or []
+        if isinstance(days, dict):
+            days = [days]
+        hv30, hv1y, n = vol_metrics([float(d["close"]) for d in days if d.get("close")])
+        if hv30 is None or hv1y is None:
+            return None
+        return {"hv30": hv30, "hv1y": hv1y, "days": n, "as_of": end.isoformat()}
+    except Exception:
+        return None
+
+
+def _vol_entry(symbol):
+    e = _VOL_TIERS.get(symbol)
+    if e and _vol_fresh(e):
+        return e
+    hit = _VOL_LIVE.get(symbol)
+    if hit:
+        entry, at = hit
+        if entry is not None and _vol_fresh(entry):
+            return entry
+        if entry is None and _time.time() - at < VOL_LIVE_RETRY_SECONDS:
+            return None
+    entry = _vol_live(symbol)
+    _VOL_LIVE[symbol] = (entry, _time.time())
+    return entry
+
+
+def vol_tier(symbol):
+    """'low' / 'medium' / 'high' -- see the Volatility tiers block above.
+    max(hv30, hv1y) < VOL_LOW -> low; >= VOL_HIGH -> high; else medium.
+    Fail-closed: no fresh data, hv30/hv1y missing, or fewer than VOL_MIN_DAYS
+    closes -> 'high'."""
+    e = _vol_entry(symbol)
+    if not e or e.get("hv30") is None or e.get("hv1y") is None or e.get("days", 0) < VOL_MIN_DAYS:
+        return "high"
+    v = max(e["hv30"], e["hv1y"])
+    return "high" if v >= VOL_HIGH else "low" if v < VOL_LOW else "medium"
+
+
+def is_low_vol(symbol):
+    return vol_tier(symbol) == "low"
+
+
+def otm_min_for(symbol):
+    """Per-ticker minimum OTM: 5% for LOW-volatility tickers, 10% for everything else."""
+    return OTM_MIN_LOW_VOL if is_low_vol(symbol) else OTM_MIN_OTHER
+
+
+def vol_otm_ok(symbol, otm, total_premium):
+    """HIGH-volatility risk gate for MULTI-LEG strategies only (credit spreads/
+    iron condor, called from spreads.py) -- see the Volatility tiers block
+    above for the full rule. Deliberately NOT applied to single-leg puts/calls
+    (evaluate_put/evaluate_call). `symbol=None` always passes -- this is an
+    ADDITIONAL screen, not something that should ever silently reject a call
+    site that predates it."""
+    if symbol is None or vol_tier(symbol) != "high":
+        return True
+    if otm >= HIGH_VOL_OTM_MIN:
+        return True
+    if otm < HIGH_VOL_OTM_FLOOR:
+        return False
+    return total_premium >= HIGH_VOL_MIN_PREMIUM
 
 
 def _load_history():
@@ -825,9 +928,9 @@ TECH_SECTORS = {"Technology", "Communication Services"}
 #   Community Cloud (Yahoo Finance is known to rate-limit/block traffic
 #   from cloud-provider IP ranges) -- get_sector_bucket's except-and-default
 #   swallows that failure and quietly reports "Non-Tech" for every one of
-#   these names, which was silently making the entire tech-specific
-#   screening gate (see TECH_OTM_MIN and spreads.py's use of tech_otm_ok) a
-#   no-op in production despite working correctly in every local test. Every
+#   these names, which had silently made the (since replaced -- see the
+#   Volatility tiers block) tech-specific screening gate a no-op in production.
+#   The sector split now only drives the Concentration of Positions tables. Every
 #   ticker below was verified against a live, working yfinance lookup before
 #   being added -- this list covers PUT_TICKERS/HOLDINGS/HOLDINGS_SHARES/
 #   OPEN_POSITIONS/CLOSED_POSITIONS as of when it was written; a newly
@@ -905,7 +1008,7 @@ def tiered_yield_needed(otm):
 
 
 def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, otm_min=None,
-                 is_index=False):
+                 low_vol=False):
     strike, premium, iv = row["strike"], row["premium"], row["iv"]
     otm     = (spot - strike) / spot
     per_yld = premium / strike if strike else float("nan")
@@ -917,19 +1020,19 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     risk_prem = ann_yld - tbill
     needed   = YIELD_HURDLE_BASE - otm
     yiv      = YIELD_OVER_IV_SHORT if dte <= DTE_SHORT_CUTOFF else YIELD_OVER_IV_LONG
-    # broad indexes get a lower yield floor (lower risk) and skip the stock-oriented premium floors
-    flat_floor = MIN_ANN_YIELD_INDEX if is_index else MIN_ANN_YIELD
+    # LOW-volatility tickers get a lower yield floor (lower risk) and skip the stock-oriented premium floors
+    flat_floor = MIN_ANN_YIELD_LOW_VOL if low_vol else MIN_ANN_YIELD
     req_yield = tiered_yield_needed(otm) if USE_TIERED_YIELD else flat_floor
     _om = otm_min if otm_min is not None else OTM_MIN_OTHER
     # Same contract sizing the real "# of contracts" column uses for a put
     # (contracts_for_target(strike * 100)) -- see MIN_TOTAL_PREMIUM. No
-    # tech-specific gate here (see TECH_OTM_MIN above) -- single-leg puts
-    # just need the plain OTM_MIN_OTHER (via _om) + this $ floor, tech or not.
+    # high-volatility gate here (see the Volatility tiers block) -- single-leg
+    # puts just need the tier's OTM floor (via _om) + this $ floor.
     _total_premium = premium * 100 * contracts_for_target(strike * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
         "min_yield":    ann_yld >= req_yield,
-        "min_period_yield": is_index or (per_yld >= MIN_PERIOD_YIELD),
+        "min_period_yield": low_vol or (per_yld >= MIN_PERIOD_YIELD),
         "dte_window":   DTE_MIN <= dte <= DTE_MAX,
         "otm_range":    _om <= otm <= OTM_MAX,
         "no_earnings":  not earnings_in_window,
@@ -937,7 +1040,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
     }
     if PUT_MIN_PREMIUM > 0:
         tests["min_premium"] = premium >= PUT_MIN_PREMIUM
-    if PUT_MIN_PREMIUM_PCT > 0 and not is_index:
+    if PUT_MIN_PREMIUM_PCT > 0 and not low_vol:
         tests["min_premium_pct"] = per_yld >= PUT_MIN_PREMIUM_PCT
     if PUT_MIN_YIELD_OVER_IV > 0:
         tests["yield_vs_iv"] = bool(iv) and ann_yld >= PUT_MIN_YIELD_OVER_IV * iv
@@ -1008,9 +1111,9 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
     # this gate doesn't have that context, so it uses the same spot-based
     # fallback contracts_for_target(price*100) uses when shares aren't
     # known. A reasonable stand-in for this risk check, not the displayed
-    # count. See MIN_TOTAL_PREMIUM. No tech-specific gate here (see
-    # TECH_OTM_MIN above) -- single-leg calls just need the plain
-    # OTM_MIN_OTHER (via _om) + this $ floor, tech or not.
+    # count. See MIN_TOTAL_PREMIUM. No high-volatility gate here (see the
+    # Volatility tiers block) -- single-leg calls just need the tier's OTM
+    # floor (via _om) + this $ floor.
     _total_premium = premium * 100 * contracts_for_target(spot * 100)
     tests = {
         "pop_target":   POP_MIN <= delta_pct <= POP_MAX,
@@ -1194,7 +1297,7 @@ def screen_puts(symbol):
             res = evaluate_put({"strike": o["strike"], "premium": float(premium),
                                 "iv": float(o["iv"] or 0)}, price, dte, earn_win,
                                delta=o["delta"], otm_min=otm_min_for(symbol),
-                               is_index=(symbol in INDEX_TICKERS))
+                               low_vol=is_low_vol(symbol))
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte, iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
@@ -1274,7 +1377,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
     price = float(price)
     earnings = get_earnings_date(symbol)
     today = dt.date.today()
-    idx = symbol in INDEX_TICKERS
+    idx = is_low_vol(symbol)
     rows = []
     for exp in td_expirations(symbol):
         try:
@@ -1309,7 +1412,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
             if kind == "put":
                 res = evaluate_put({"strike": k, "premium": float(premium),
                                     "iv": float(o["iv"] or 0)}, price, dte, earn_win,
-                                   delta=o["delta"], otm_min=otm_min_for(symbol), is_index=idx)
+                                   delta=o["delta"], otm_min=otm_min_for(symbol), low_vol=idx)
                 _apr = avg_premium_range(symbol, (price - k) / price, dte, "put", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
