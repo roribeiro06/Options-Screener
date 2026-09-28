@@ -117,6 +117,10 @@ OPEN_POSITIONS = [
     # long 170C and are ignored).
     {"ticker": "SPCX", "type": "call_spread", "short_strike": 170, "long_strike": 180,
      "expiration": "2026-10-16", "contracts": 27, "entry_credit": 0.599974, "entry_date": "2026-09-25"},
+    # NVDA put credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
+    {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
+     "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
