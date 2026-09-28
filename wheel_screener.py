@@ -77,8 +77,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-09-04", "contracts": 39, "entry_credit": 0.699964, "entry_date": "2026-08-27"},
     {"ticker": "ORCL", "type": "call_spread", "short_strike": 167.5, "long_strike": 175,
      "expiration": "2026-09-04", "contracts": 35, "entry_credit": 0.34998, "entry_date": "2026-08-27"},
-    {"ticker": "INTC", "type": "call_spread", "short_strike": 105, "long_strike": 110,
-     "expiration": "2026-10-16", "contracts": 56, "entry_credit": 0.55, "entry_date": "2026-09-01"},
     {"ticker": "AMZN", "type": "put", "strike": 230, "expiration": "2026-10-16",
      "contracts": 2, "entry_credit": 2.40, "entry_date": "2026-09-01"},
     {"ticker": "GOOG", "type": "put", "strike": 300, "expiration": "2026-11-20",
@@ -127,6 +125,20 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # INTC 105/110 call spread closed 09/28, deep ITM (spot ~$120+, well through
+    # both strikes) -- the STOP-triggered position flagged earlier. Short 105C
+    # bought back for $72,329.00 total (56 contracts); original short-sale
+    # proceeds were $11,311.77, so the short leg alone realized -$61,017.23,
+    # matching the brokerage's own total exactly. Long 110C sold for $53,067.89
+    # total against its $8,232.00 cost basis, realizing +$44,835.89 (the
+    # brokerage's displayed "+$43,288.00" total for that leg is stale -- it's
+    # the original lot's unrealized G/L at a $9.20 mark, not the sum of the
+    # actual $9.47-$9.51 executed sells; the real fills are used here instead).
+    # Combined realized -$16,181.34 -> exit_cost = 0.55 - (-16181.34/5600) =
+    # 3.439525.
+    {"ticker": "INTC", "type": "call_spread", "short_strike": 105, "long_strike": 110,
+     "expiration": "2026-10-16", "contracts": 56, "entry_credit": 0.55, "entry_date": "2026-09-01",
+     "exit_cost": 3.439525, "exit_date": "2026-09-28"},
     # SPCX 160/170 call spread closed 09/25: short 160C bought back at $3,593.00
     # (2.395333/sh) and long 170C sold for $1,477.96 (0.985307/sh) across 15
     # contracts -- exit_cost = 2.395333 - 0.985307 = 1.410027. Realized +$434.79,
