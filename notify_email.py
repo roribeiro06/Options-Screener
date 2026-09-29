@@ -301,6 +301,16 @@ def main():
     spreads  = build_spreads()
     d_puts, d_spreads = build_discover()
     open_pos = build_positions()
+    # Refreshes position_peaks.json (each open credit spread's all-time-high
+    # unrealized G/L%, which the Credit Spread Actions table's PROFIT PULLBACK
+    # rule reads) on this script's own schedule -- see
+    # positions.update_position_peaks. Done unconditionally, before the
+    # "nothing to send" early-return below, so the peak history stays current
+    # even on a run that doesn't end up emailing anything.
+    try:
+        positions.write_position_peaks(open_pos)
+    except Exception as e:
+        print(f"POSITION PEAKS: ERROR {e}", file=sys.stderr)
     spread_actions = build_spread_actions(open_pos)
     closed_pos = build_closed_positions()
     concentration_history = build_concentration_history()

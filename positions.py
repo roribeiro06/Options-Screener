@@ -43,6 +43,8 @@ default possible without being told otherwise. If a position actually finished
 ITM/assigned instead, add the real CLOSED_POSITIONS entry with its true
 exit_cost -- an explicit entry always overrides this assumption.
 """
+import json
+import os
 import re
 import sys
 import datetime as dt
@@ -256,12 +258,19 @@ CLOSE_PROFIT_21 = 0.40      # at the 21 DTE check, close if already > 40% profit
 TESTED_PCT = 0.02           # short strike is "tested" if the stock is through it or within 2% of it
 DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the original credit
 ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested"
+# Fires once a spread's current unrealized G/L% has fallen this many
+# percentage points below its own all-time-high G/L% (only when that high was
+# itself a real gain -- a peak of -5% dropping to -20% isn't "gave back
+# profit," it's just STOP's territory). The peak is tracked in
+# position_peaks.json (see PEAKS_FILE / update_position_peaks below).
+PULLBACK_DRAWDOWN = 0.10
+PULLBACK_PREFIX = "PROFIT PULLBACK:"
+PEAKS_FILE = "position_peaks.json"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
-                           "RollNetLow", "RollNetHigh", "CStrike", "CContracts",
-                           "CCostToCloseBid", "CCostToClose"]
+                           "RollNetLow", "RollNetHigh"]
 
 
 def _spread_group(dte, days_held):
@@ -278,14 +287,19 @@ def _spread_group(dte, days_held):
     return 3 if dte > CHECK_21_DTE else 2
 
 
-def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
+def spread_action(kind, short_strike, price, dte, days_held, credit, cost, peak_gl_pct=None):
     """(rank, action text) for one credit spread, or None if no rule fires.
     kind is "put" or "call" (which side the spread is on). credit is the
     entry credit per share (C); cost is the live ASK to close per share, the
-    same conservative basis UnrealizedGL uses. Rules in priority order:
-    stop, time exit, Group 1 ITM short strike, profit target, 21-DTE check,
-    Group 3 dead-trade check. Roll suggestions are advisory only -- no live
-    next-month quote is fetched."""
+    same conservative basis UnrealizedGL uses. peak_gl_pct is this spread's
+    all-time-high unrealized G/L% (None if not yet known -- see
+    build_spread_actions_table/PULLBACK_DRAWDOWN), used only for the PROFIT
+    PULLBACK check. Rules in priority order: stop, time exit, Group 1 ITM
+    short strike, profit target, profit pullback, 21-DTE check, Group 3
+    dead-trade check. Roll suggestions are advisory only -- no live
+    next-month quote is fetched. Each side of an iron condor is judged
+    independently here, same as any other spread -- a tested/losing side can
+    be flagged without forcing a decision on its safe counterpart."""
     if not credit or credit <= 0 or dte is None or price != price:
         return None
     if kind == "put":
@@ -294,23 +308,10 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost):
     else:
         itm = price > short_strike
         tested = price >= short_strike * (1 - TESTED_PCT)
-    return _apply_rules(dte, days_held, credit, cost, itm, tested)
+    return _apply_rules(dte, days_held, credit, cost, itm, tested, peak_gl_pct)
 
 
-def condor_action(put_short, call_short, price, dte, days_held, credit, cost):
-    """Same rules as spread_action, applied to an iron condor as ONE position:
-    credit and cost are the COMBINED figures (any consistent unit -- the rules
-    only use ratios, so the table passes dollar totals, which also handles a
-    condor whose two sides have different contract counts). "ITM" / "tested"
-    mean EITHER short strike is through / within TESTED_PCT of the price."""
-    if not credit or credit <= 0 or dte is None or price != price:
-        return None
-    itm = price < put_short or price > call_short
-    tested = price <= put_short * (1 + TESTED_PCT) or price >= call_short * (1 - TESTED_PCT)
-    return _apply_rules(dte, days_held, credit, cost, itm, tested)
-
-
-def _apply_rules(dte, days_held, credit, cost, itm, tested):
+def _apply_rules(dte, days_held, credit, cost, itm, tested, peak_gl_pct=None):
     group = _spread_group(dte, days_held)
     profit_frac = (credit - cost) / credit
 
@@ -324,6 +325,9 @@ def _apply_rules(dte, days_held, credit, cost, itm, tested):
     target = SPREAD_PROFIT_TARGET[group]
     if profit_frac >= target:
         return 2, f"TAKE PROFIT: buy back (>= {target:.0%} of credit captured)"
+    if peak_gl_pct is not None and peak_gl_pct > 0 and (peak_gl_pct - profit_frac) >= PULLBACK_DRAWDOWN:
+        return 2, (f"{PULLBACK_PREFIX} now {profit_frac:.0%} vs its {peak_gl_pct:.0%} high "
+                  f"(down {(peak_gl_pct - profit_frac):.0%} pts)")
     if CHECK_21_DTE <= dte <= CHECK_21_DTE + CHECK_21_WINDOW and group == 2:
         if profit_frac > CLOSE_PROFIT_21:
             return 3, f"21 DTE CHECK: close (> {CLOSE_PROFIT_21:.0%} profit)"
@@ -403,73 +407,129 @@ def _try_roll(ticker, exp, kind, cost, cost_bid, n, action, label="", closing="C
     return f"{action} -> {closing} (no roll: {text})", None
 
 
+def _row_key(r):
+    """Stable identity for one credit-spread row of build_positions_table()'s
+    output -- same components as _pos_key (ticker/type/strikes/expiration/
+    entry_date), just built from the already-formatted display row instead of
+    a raw OPEN_POSITIONS dict, since that's what's on hand both when this is
+    written (update_position_peaks, from notify_email.py's own priced
+    dataframe) and when it's read (build_spread_actions_table)."""
+    return f"{r['Ticker']}|{r['Type']}|{r['Strike']}|{r['Expiration']}|{r.get('Opened', '')}"
+
+
+def _load_peaks():
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PEAKS_FILE)
+        with open(path) as f:
+            return json.load(f).get("positions", {})
+    except Exception:
+        return {}
+
+
+def update_position_peaks(df):
+    """New position_peaks.json "positions" dict from an already-priced Open
+    Positions dataframe (build_positions_table()'s raw output): for every
+    credit spread (put_spread/call_spread; single-leg puts/calls and covered
+    calls don't use PROFIT PULLBACK, so aren't tracked), the highest
+    UnrealizedGL_% ever recorded -- this run's own value, or whatever was
+    already stored, whichever is higher. A spread no longer in df (closed,
+    or rolled into a new key) is simply left out, so this doubles as pruning.
+
+    Called ONLY from notify_email.py's own scheduled run (~every 30 min
+    during market hours, the same cadence that already live-quotes every open
+    position there) via write_position_peaks -- this is the SOLE writer;
+    the Streamlit app and build_spread_actions_table only ever read the
+    file (via _load_peaks), same read-only pattern as wheel_screener's
+    vol_tiers.json. A freshly opened spread has no peak until the next
+    scheduled run picks it up -- "unknown" never counts as "dropped 10
+    points," so PROFIT PULLBACK simply can't fire for it yet."""
+    prev = _load_peaks()
+    now = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    new = {}
+    for _, r in df.iterrows():
+        if r["Type"] not in (TYPE_LABELS["put_spread"], TYPE_LABELS["call_spread"]):
+            continue
+        key = _row_key(r)
+        prior = prev.get(key, {}).get("peak_gl_pct")
+        cur = r["UnrealizedGL_%"]
+        if cur != cur:   # NaN -- can't evaluate this run, keep whatever was already on file
+            if key in prev:
+                new[key] = prev[key]
+            continue
+        peak = max(prior, cur) if prior is not None else cur
+        new[key] = {"peak_gl_pct": round(peak, 6), "as_of": now}
+    return new
+
+
+def write_position_peaks(df):
+    """Computes update_position_peaks(df) and writes it to PEAKS_FILE --
+    called once per notify_email.py run; the scheduled workflow (see
+    .github/workflows/screener-email.yml) commits the result."""
+    positions = update_position_peaks(df)
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PEAKS_FILE)
+    with open(path, "w") as f:
+        json.dump({"_meta": {"note": "peak unrealized G/L % per open credit spread, "
+                             "refreshed on notify_email.py's own schedule"},
+                   "positions": dict(sorted(positions.items()))}, f, indent=0, sort_keys=False)
+        f.write("\n")
+
+
 def build_spread_actions_table(df):
     """Credit spreads from build_positions_table()'s raw output that currently
-    trip a management rule (see spread_action), with the action to take.
-    Only positions that need action appear -- an empty result means nothing is
-    triggered. Priced from the rows already quoted, plus (only for a LOSING
-    position whose rule says to get out) the roll search in _find_roll -- a
+    trip a management rule (see spread_action), with the action to take. Each
+    side of an iron condor -- a put spread and a call spread on the same
+    ticker/expiration -- is judged INDEPENDENTLY here, same as any other
+    spread; a tested/losing side gets flagged without forcing a decision on
+    its safe counterpart. Only spreads that need action appear -- an empty
+    result means nothing is triggered. Priced from the rows already quoted,
+    plus (for a LOSING spread whose rule says to get out, or any spread the
+    PROFIT PULLBACK check below flags) the roll search in _find_roll -- a
     roll for a net credit that passes the screener beats a plain CLOSE.
 
-    IRON CONDORS are evaluated as ONE position: a put spread and a call spread
-    on the same ticker and expiration (exactly one of each, nothing else on
-    that ticker/expiry) are combined into a single "Iron Condor" row, judged on
-    the combined dollar credit vs the combined dollar cost to close (see
-    condor_action). Dollar totals, not per-share, because the two sides can
-    have different contract counts (e.g. 60 put spreads / 28 call spreads).
-    The condor's group comes from its OLDEST leg's entry (when the trade was
-    opened; a later leg completing the condor doesn't restart the plan). A
-    condor's roll search runs on its worse-losing side only -- the other side
-    stays open. Open Positions itself still lists the two sides separately.
+    PROFIT PULLBACK: once a spread's current unrealized G/L% has fallen
+    PULLBACK_DRAWDOWN (10 points) or more below its own all-time high (and
+    that high was a real gain), it's flagged for a roll-or-close decision
+    even if it's still net profitable overall -- protecting a fading peak,
+    not necessarily a loss (see spread_action/_apply_rules). The peak comes
+    from position_peaks.json (_load_peaks -- written on notify_email.py's own
+    schedule, this table only ever reads it), taking the max of the stored
+    value and this run's own live G/L% so a brand-new all-time high can never
+    look like a drop. A spread with no peak on file yet (opened since the
+    last scheduled write) can't trigger this check.
 
     Returns (display_df, raw_df), same row order: display_df is the formatted
     table; raw_df carries the unformatted numbers the click-to-copy summaries
     need (Kind is "roll" only when a roll was found, else "close" -- covers
-    STOP/TIME EXIT/TAKE PROFIT/CLOSE/DEAD TRADE alike, all a buy-back; a
-    condor close row carries both legs, a condor roll row just the rolled side)."""
+    STOP/TIME EXIT/TAKE PROFIT/PROFIT PULLBACK/CLOSE/DEAD TRADE alike, all a
+    buy-back)."""
     import pandas as pd
-    PUT, CALL = TYPE_LABELS["put_spread"], TYPE_LABELS["call_spread"]
-    spreads = [r for _, r in df.iterrows() if r["Type"] in (PUT, CALL)]
-    groups = {}
-    for r in spreads:
-        groups.setdefault((r["Ticker"], r["Expiration"]), []).append(r)
-    condors = {k for k, g in groups.items()
-               if len(g) == 2 and {x["Type"] for x in g} == {PUT, CALL}}
+    peaks = _load_peaks()
     rows = []
-    nan = float("nan")
-
-    def _raw(r, n, kind, roll, condor_call=None):
-        d = {"Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
-             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
-             "CostToClose": r["CostToClose"], "CurrentPrice": r["CurrentPrice"], "Kind": kind,
-             "RollExp": roll["exp"] if roll else None,
-             "RollSell": roll["sell"] if roll else nan, "RollBuy": roll["buy"] if roll else nan,
-             "RollNetLow": roll["net_low"] if roll else nan,
-             "RollNetHigh": roll["net_high"] if roll else nan,
-             "CStrike": None, "CContracts": nan, "CCostToCloseBid": nan, "CCostToClose": nan}
-        if condor_call is not None:
-            c, cn = condor_call
-            d.update({"Type": "Iron Condor", "CStrike": c["Strike"], "CContracts": cn,
-                      "CCostToCloseBid": c["CostToCloseBid"], "CCostToClose": c["CostToClose"]})
-        return d
-
-    for r in spreads:
-        if (r["Ticker"], r["Expiration"]) in condors:
+    for _, r in df.iterrows():
+        kind = ("put" if r["Type"] == TYPE_LABELS["put_spread"] else
+               "call" if r["Type"] == TYPE_LABELS["call_spread"] else None)
+        if kind is None:
             continue
-        kind = "put" if r["Type"] == PUT else "call"
         credit, cost, n = r["EntryCredit"], r["CostToClose"], int(r["Contracts"])
+        stored_peak = peaks.get(_row_key(r), {}).get("peak_gl_pct")
+        cur_gl = r["UnrealizedGL_%"]
+        peak_gl_pct = (max(stored_peak, cur_gl) if (stored_peak is not None and cur_gl == cur_gl)
+                      else stored_peak)
         hit = spread_action(kind, float(str(r["Strike"]).split("/")[0]), r["CurrentPrice"],
-                            r["DTE"], r["DaysHeld"], credit, cost)
+                            r["DTE"], r["DaysHeld"], credit, cost, peak_gl_pct=peak_gl_pct)
         if not hit:
             continue
         rank, action = hit
-        # Rolling takes priority over closing for a LOSING spread: whenever a rule
-        # says to get out (STOP, TIME EXIT, Group 1 ITM close, or the 21 DTE check
-        # on a tested short strike), look for a net-credit roll that passes the
-        # screener first (_find_roll); only if there is none is it a CLOSE.
-        # Winners (TAKE PROFIT, 21 DTE close above 40%) and DEAD TRADE never roll.
+        # Rolling takes priority over closing whenever a rule says to get out
+        # of a LOSING spread (STOP, TIME EXIT, Group 1 ITM close, or the 21 DTE
+        # check on a tested short strike) OR PROFIT PULLBACK fires (which can
+        # trip on a still-net-profitable spread, since it's about a fading
+        # peak, not necessarily a loss): look for a net-credit roll that
+        # passes the screener first (_find_roll); only if there is none is it
+        # a CLOSE. TAKE PROFIT and DEAD TRADE never roll.
         roll = None
-        if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
+        if ((cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT))
+                or action.startswith(PULLBACK_PREFIX)):
             action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
                                      r["CostToCloseBid"], n, action)
         group = _spread_group(r["DTE"], r["DaysHeld"])
@@ -478,59 +538,19 @@ def build_spread_actions_table(df):
             "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),
             "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
                       3: "3 (entered >45)"}[group],
-            "Contracts": str(n), "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
+            "Contracts": n, "EntryCredit": f"${credit:.2f}", "CostToClose": f"${cost:.2f}",
             "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[group]):.2f}",
             "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
-            "Action": action}, _raw(r, n, "roll" if roll else "close", roll)))
-
-    for key in sorted(condors):
-        put = next(x for x in groups[key] if x["Type"] == PUT)
-        call = next(x for x in groups[key] if x["Type"] == CALL)
-        n_p, n_c = int(put["Contracts"]), int(call["Contracts"])
-        credit_p, credit_c = put["EntryCredit"] * 100 * n_p, call["EntryCredit"] * 100 * n_c
-        cost_p, cost_c = put["CostToClose"] * 100 * n_p, call["CostToClose"] * 100 * n_c
-        credit, cost = credit_p + credit_c, cost_p + cost_c
-        held = [x for x in (put["DaysHeld"], call["DaysHeld"]) if x == x]
-        days_held = max(held) if held else nan
-        dte, price = put["DTE"], put["CurrentPrice"]
-        hit = condor_action(float(str(put["Strike"]).split("/")[0]),
-                            float(str(call["Strike"]).split("/")[0]),
-                            price, dte, days_held, credit, cost)
-        if not hit:
-            continue
-        rank, action = hit
-        roll, rolled = None, None
-        if cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT):
-            # Only the worse-losing side is rolled; the other side stays open.
-            side, srow, sn = max((("Put", put, n_p), ("Call", call, n_c)),
-                                 key=lambda t: t[1]["CostToClose"] * 100 * t[2]
-                                 - t[1]["EntryCredit"] * 100 * t[2])
-            action, roll = _try_roll(put["Ticker"], put["Expiration"], side.lower(),
-                                     srow["CostToClose"], srow["CostToCloseBid"], sn, action,
-                                     label=f"{side} side: ", closing="CLOSE both sides")
-            rolled = (srow, sn) if roll else None
-        group = _spread_group(dte, days_held)
-        gl = credit - cost
-        disp = {
-            "Ticker": put["Ticker"], "Type": "Iron Condor",
-            "Strike": f"{put['Strike']} | {call['Strike']}",
-            "CurrentPrice": f"${price:.2f}", "DTE": int(dte),
-            "Group": {1: "1 (entered <21 DTE)", 2: "2 (entered 21-45)",
-                      3: "3 (entered >45)"}[group],
-            "Contracts": f"{n_p}P / {n_c}C", "EntryCredit": f"${credit:,.0f} total",
-            "CostToClose": f"${cost:,.0f} total",
-            "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[group]):,.0f} total",
-            "StopBTC": f"${credit * SPREAD_STOP_MULT:,.0f} total",
-            "UnrealizedGL": f"{_fmt_dollar_signed(gl)} ({_fmt_pct_signed(gl / credit)})",
-            "Action": action}
-        if rolled:
-            srow, sn = rolled
-            raw = _raw(srow, sn, "roll", roll)
-        else:
-            raw = _raw(put, n_p, "close", None, condor_call=(call, n_c))
-        rows.append((rank, dte, disp, raw))
-
+            "Action": action}, {
+            "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
+            "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
+            "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if roll else "close",
+            "RollExp": roll["exp"] if roll else None,
+            "RollSell": roll["sell"] if roll else float("nan"),
+            "RollBuy": roll["buy"] if roll else float("nan"),
+            "RollNetLow": roll["net_low"] if roll else float("nan"),
+            "RollNetHigh": roll["net_high"] if roll else float("nan")}))
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))

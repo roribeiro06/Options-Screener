@@ -32,6 +32,9 @@ on:
   repository_dispatch:
     types: [screener-email-tick]
 
+permissions:
+  contents: write            # needed to commit the updated position_peaks.json
+
 jobs:
   email:
     runs-on: ubuntu-latest
@@ -50,3 +53,17 @@ jobs:
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: python notify_email.py
+      - name: Commit updated position peaks
+        # Runs every ~30 min on weekdays during market hours -- position_peaks.json
+        # (each open credit spread's all-time-high unrealized G/L%, see
+        # positions.write_position_peaks) is written every run regardless of
+        # whether an email went out. `git pull --rebase` first since this is by
+        # far the most frequent scheduled job in the repo and most exposed to
+        # racing another job's commit.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add position_peaks.json
+          git commit -m "Update position peaks" || echo "no changes to commit"
+          git pull --rebase
+          git push

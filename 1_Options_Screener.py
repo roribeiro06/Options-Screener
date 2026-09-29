@@ -316,36 +316,13 @@ def _roll_position_summary(row):
 def _spread_action_summary(row):
     """Credit Spread Actions row -> its click-to-copy text: the roll order when
     the action is a roll, otherwise the same Close summary Open Positions uses
-    (every non-roll action -- STOP, TIME EXIT, TAKE PROFIT, CLOSE, DEAD TRADE --
-    is a buy-back)."""
+    (every non-roll action -- STOP, TIME EXIT, TAKE PROFIT, PROFIT PULLBACK,
+    CLOSE, DEAD TRADE -- is a buy-back). Each side of an iron condor is its
+    own row here (see positions.build_spread_actions_table), so there's no
+    combined-condor case to special-case."""
     if row.get("Kind") == "roll":
         return _roll_position_summary(row)
-    if row.get("Type") == "Iron Condor":
-        return _close_condor_summary(row)
     return _close_position_summary(row)
-
-
-def _close_condor_summary(row):
-    """Copy-paste summary to CLOSE a whole iron condor (a Credit Spread Actions
-    row where the condor is judged as one position): the broker has no native
-    condor order type, so it's written as the two spread orders to place, each
-    with its own contract count and target cost to close (same bid-to-halfway
-    quote _close_position_summary uses)."""
-    def _side(label, strike, n, bid, ask):
-        n_int = int(n) if pd.notna(n) else None
-        strike_disp = f"(${'/$'.join(str(strike).split('/'))})"
-        return [f"{label} Spread {strike_disp}",
-                f"{n_int if n_int is not None else '-'} Contracts",
-                f"Cost to Close: {_bid_avg_range(bid, ask, n_int)}"]
-    put_strike, call_strike = str(row["Strike"]), str(row["CStrike"])
-    lines = [f"Close {row['Ticker']} Iron Condor", str(row["Ticker"]),
-             f"Expiration: {row['Expiration']}", "",
-             *_side("Put", put_strike, row["Contracts"], row["CostToCloseBid"], row["CostToClose"]), "",
-             *_side("Call", call_strike, row["CContracts"], row["CCostToCloseBid"], row["CCostToClose"])]
-    current_price = row.get("CurrentPrice")
-    if pd.notna(current_price):
-        lines += ["", f"Current Price: ${current_price:.2f}"]
-    return "\n".join(lines)
 
 
 @st.fragment
@@ -749,27 +726,28 @@ try:
                    "Groups 1 and 3, 65% in Group 2, so 50% / 35% of the credit), **StopBTC** = 2x the credit, both per share; "
                    "**CostToClose** is the live ask. Actions: **STOP** (cost to close >= 2x credit), **TIME EXIT** "
                    "(close by 5 DTE in Group 1, 7 DTE in Group 2), **CLOSE** (Group 1 short strike in the money), "
-                   "**TAKE PROFIT** (>= 50% of the credit captured, 65% in Group 2), **21 DTE CHECK** (Group 2 at 21-23 DTE: close "
-                   "above 40% profit, or roll/close if losing with the short strike tested), **DEAD TRADE** "
+                   "**TAKE PROFIT** (>= 50% of the credit captured, 65% in Group 2), **PROFIT PULLBACK** (this spread's "
+                   "current G/L% has fallen 10+ percentage points below its own all-time high, even if it's still "
+                   "net profitable -- see below), **21 DTE CHECK** (Group 2 at 21-23 DTE: close above 40% profit, or "
+                   "roll/close if losing with the short strike tested), **DEAD TRADE** "
                    "(entered at 45+ DTE, halfway through, buy-back still within 10% of the credit). A short strike "
-                   "is \"tested\" when the stock is through it or within 2%. **Rolling takes priority over "
-                   "closing for a LOSING spread:** when STOP, TIME EXIT, the Group 1 ITM close or the 21 DTE "
-                   "check fires, the app first searches for a roll -- buy the spread back at the ask and sell a "
-                   "new spread on the same side in a LATER expiration, at strikes further from the money, for a "
-                   "**net credit** (never a debit). The new spread must be one the Multi-Leg screener itself "
-                   "would show (same POP, OTM incl. the tech rule, AnnROR, $1,000 premium floor, open interest and "
-                   "earnings exclusion), same contract count; the best-Score one is proposed with its net credit. "
-                   "Click a row for an advisor-ready order to copy: the Close summary (same as Open Positions) or, for a "
-                   "roll, the new expiration, sell/buy strikes and net premium. "
-                   "If nothing qualifies the action says CLOSE and why (e.g. a deep in-the-money spread costs "
-                   "more to buy back than any out-of-the-money spread can pay). Winners never roll. **Iron condors are judged "
-                   "as ONE position:** a put spread and a call spread on the same ticker and expiration are combined "
-                   "into a single Iron Condor row (Open Positions above still lists the two sides separately), "
-                   "with every rule applied to the combined credit vs the combined cost to close -- shown as dollar "
-                   "totals, since the two sides can have different contract counts. A short strike counts as "
-                   "\"tested\" if EITHER side is; the group comes from the older leg's entry; and if a condor "
-                   "should be rolled, only its worse-losing side is rolled while the other stays open. A condor "
-                   "close copies as the two spread orders to place. Entry rules "
+                   "is \"tested\" when the stock is through it or within 2%. **Each side of an iron condor is judged "
+                   "independently** -- a put spread and a call spread on the same ticker/expiration each get their "
+                   "own row and their own action, so a tested/losing side can be flagged without forcing a decision "
+                   "on its safe counterpart. **Rolling takes priority over closing:** when STOP, TIME EXIT, the "
+                   "Group 1 ITM close, the 21 DTE check, or PROFIT PULLBACK fires, the app first searches for a "
+                   "roll -- buy the spread back at the ask and sell a new spread on the same side in a LATER "
+                   "expiration, at strikes further from the money, for a **net credit** (never a debit). The new "
+                   "spread must be one the Multi-Leg screener itself would show (same POP, OTM incl. the volatility-"
+                   "tier rule, AnnROR, $1,000 premium floor, open interest and earnings exclusion), same contract "
+                   "count; the best-Score one is proposed with its net credit. Click a row for an advisor-ready "
+                   "order to copy: the Close summary (same as Open Positions) or, for a roll, the new expiration, "
+                   "sell/buy strikes and net premium. If nothing qualifies the action says CLOSE and why (e.g. a "
+                   "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
+                   "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "
+                   "`position_peaks.json`, refreshed only on the scheduled email script's own ~30-min cadence during "
+                   "market hours (not live on every page load) -- a spread opened since the last refresh has no peak "
+                   "on file yet and can't trigger this check until it does. Entry rules "
                    "(short delta, IV Rank) aren't tracked for open positions, so they aren't checked here.")
         _acts, _acts_raw = scan_spread_actions(_dpos)
         if len(_acts):

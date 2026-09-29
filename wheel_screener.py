@@ -857,11 +857,11 @@ def _spread_roll_advised(pos, cost_to_close):
     """True when the Credit Spread Actions table (positions.spread_action) is
     currently advising "close or roll" for this credit spread -- its 21-DTE
     check: a Group 2 spread at 21-23 DTE that is losing AND has its short
-    strike tested. Uses that function directly, per spread -- the table
-    itself judges an iron condor's two spreads combined (condor_action), so
-    for a condor's legs this can flag a tested side the table stays quiet
-    about while the condor as a whole is fine; the screener only frees that
-    side up to show new candidates, it doesn't act on it."""
+    strike tested. Uses that function directly, per spread -- same as the
+    table itself, which judges each side of an iron condor independently, not
+    combined. Doesn't know about the table's other rules (STOP, PROFIT
+    PULLBACK, etc.) or its roll search; this only frees the screener to show
+    new candidates for this side, it doesn't act on it."""
     import positions   # lazy: positions imports this module at load time
     price = td_quote(pos["ticker"])
     if not price:
