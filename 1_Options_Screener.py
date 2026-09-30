@@ -126,6 +126,33 @@ def _leg_lines(text):
     return lines
 
 
+def _raw_range(lo, hi, contracts=None):
+    """'$lo-$hi (total)' -- the RAW worst-to-best range, unlike _avg_max_range/
+    _bid_avg_range's midpoint compression: used where the caller already
+    computed a realistic low/high itself (a roll's own worst-case and
+    best-case net credit, from _find_roll), so showing it further compressed
+    toward the average would throw away real information rather than being a
+    conservative-but-fair opening quote. E.g. $1.46/$1.68 stays "$1.46-$1.68",
+    not "$1.57-$1.68". Same total-in-parentheses convention as the other
+    range formatters -- computed from the full-precision lo/hi, not the
+    2-decimal display string, so the total can look like it doesn't
+    perfectly multiply out from the rounded numbers shown."""
+    if pd.isna(hi) and pd.isna(lo):
+        return "-"
+    if pd.isna(hi):
+        lo_disp = hi_disp = lo
+    elif pd.isna(lo):
+        lo_disp = hi_disp = hi
+    else:
+        lo_disp, hi_disp = lo, hi
+    base = f"${hi_disp:.2f}" if lo_disp == hi_disp else f"${lo_disp:.2f}-${hi_disp:.2f}"
+    if pd.isna(contracts):
+        return base
+    lo_tot, hi_tot = lo_disp * 100 * contracts, hi_disp * 100 * contracts
+    total = f"(${hi_tot:,.0f})" if lo_disp == hi_disp else f"(${lo_tot:,.0f}-${hi_tot:,.0f})"
+    return f"{base} {total}"
+
+
 def _avg_max_range(lo, hi, contracts=None):
     """'$avg-$hi (total)' -- the target premium to quote an advisor: the
     midpoint between worst- and best-case, not the conservative worst case
@@ -290,11 +317,11 @@ def _close_position_summary(row):
 def _roll_position_summary(row):
     """Copy-paste summary for a financial advisor to ROLL a losing credit
     spread (from the Credit Spread Actions table): the spread being rolled,
-    the NEW expiration, the new short/long strikes, and the NET credit target
+    the NEW expiration, the new short/long strikes, and the NET credit range
     for the whole roll order (buy back the old spread, sell the new one) --
-    quoted the same way every other opening premium is (_avg_max_range: the
-    midpoint of the worst/best net credit through the best case, with the
-    total across the contracts in parentheses)."""
+    the RAW worst-to-best range _find_roll already computed (see
+    _raw_range), not compressed toward the midpoint the way a fresh-open
+    premium quote is."""
     strike_str = str(row.get("Strike", "-"))
     strike_disp = f"(${'/$'.join(strike_str.split('/'))})"
     type_label = _CLOSE_TYPE_LABELS.get(row.get("Type"), row.get("Type", ""))
@@ -306,7 +333,7 @@ def _roll_position_summary(row):
              f"Expiration: {row['RollExp']}",
              f"Sell ${row['RollSell']:g} {opt}",
              f"Buy ${row['RollBuy']:g} {opt}",
-             f"Premium: {_avg_max_range(row.get('RollNetLow'), row.get('RollNetHigh'), n_int)}"]
+             f"Premium: {_raw_range(row.get('RollNetLow'), row.get('RollNetHigh'), n_int)}"]
     current_price = row.get("CurrentPrice")
     if pd.notna(current_price):
         lines += ["", f"Current Price: ${current_price:.2f}"]

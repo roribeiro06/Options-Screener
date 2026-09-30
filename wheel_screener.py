@@ -95,8 +95,6 @@ OPEN_POSITIONS = [
     # OPEN_POSITIONS has no combined iron_condor type.
     {"ticker": "SPY", "type": "put_spread", "short_strike": 690, "long_strike": 655,
      "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.69, "entry_date": "2026-09-12"},
-    {"ticker": "SPY", "type": "call_spread", "short_strike": 805, "long_strike": 845,
-     "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.56, "entry_date": "2026-09-12"},
     {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.79, "entry_date": "2026-09-12"},
     # Iron condor with the NOW put spread above -- tracked as separate entries
@@ -129,6 +127,22 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # SPY 805/845 call spread closed 09/30. The entry recorded here (0.56/sh,
+    # 09/12) didn't match the brokerage's own original opening lot -- corrected
+    # to match: short 805C sold 09/02 for $948.98 total (7 contracts) ->
+    # 1.355686/sh, long 845C bought same day for $70.00 -> 0.10/sh, net credit
+    # 1.255686/sh (same "live number trusted over a stale record" precedent as
+    # the AVGO adjustment). Exit: short bought back for $189.00 (0.27/sh, all 4
+    # fills at a clean $0.27 -- matches the header exactly) and long sold for
+    # $20.96 (0.029943/sh, real fills -- the brokerage's own "-$45.50" total for
+    # that leg is a stale mark, not the actual $0.03 sells; the short leg's own
+    # "+$759.98" total, by contrast, IS the real fill-based total and matches
+    # exactly). exit_cost = 0.27 - 0.029943 = 0.240057. Realized +$710.94,
+    # cross-checked two ways: (1.255686-0.240057)*700 = 710.94, and
+    # 759.98 + (20.96-70.00) = 710.94.
+    {"ticker": "SPY", "type": "call_spread", "short_strike": 805, "long_strike": 845,
+     "expiration": "2026-10-16", "contracts": 7, "entry_credit": 1.255686, "entry_date": "2026-09-02",
+     "exit_cost": 0.240057, "exit_date": "2026-09-30"},
     # INTC 105/110 call spread closed 09/28, deep ITM (spot ~$120+, well through
     # both strikes) -- the STOP-triggered position flagged earlier. Short 105C
     # bought back for $72,329.00 total (56 contracts); original short-sale
