@@ -258,11 +258,15 @@ CLOSE_PROFIT_21 = 0.40      # at the 21 DTE check, close if already > 40% profit
 TESTED_PCT = 0.02           # short strike is "tested" if the stock is through it or within 2% of it
 DEAD_TRADE_BAND = 0.10      # Group 3 "flat": buy-back still within 10% of the original credit
 ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested"
-# Fires once a spread's current unrealized G/L% has fallen this many
-# percentage points below its own all-time-high G/L% (only when that high was
-# itself a real gain -- a peak of -5% dropping to -20% isn't "gave back
-# profit," it's just STOP's territory). The peak is tracked in
+# Fires once a spread's all-time-high unrealized G/L% has reached
+# PULLBACK_MIN_PEAK AND it has since fallen PULLBACK_DRAWDOWN or more
+# percentage points below that high. Both floors matter: a peak under 60% is
+# too little money on the table for a pullback to be worth acting on (e.g.
+# 30% peak down to 20% -- still just 30% of the credit ever at stake, not
+# worth a roll/close decision), and a drop under 10 points off a real peak is
+# normal day-to-day noise, not a real reversal. The peak is tracked in
 # position_peaks.json (see PEAKS_FILE / update_position_peaks below).
+PULLBACK_MIN_PEAK = 0.60
 PULLBACK_DRAWDOWN = 0.10
 PULLBACK_PREFIX = "PROFIT PULLBACK:"
 PEAKS_FILE = "position_peaks.json"
@@ -293,8 +297,9 @@ def spread_action(kind, short_strike, price, dte, days_held, credit, cost, peak_
     entry credit per share (C); cost is the live ASK to close per share, the
     same conservative basis UnrealizedGL uses. peak_gl_pct is this spread's
     all-time-high unrealized G/L% (None if not yet known -- see
-    build_spread_actions_table/PULLBACK_DRAWDOWN), used only for the PROFIT
-    PULLBACK check. Rules in priority order: stop, time exit, Group 1 ITM
+    build_spread_actions_table/PULLBACK_MIN_PEAK/PULLBACK_DRAWDOWN), used
+    only for the PROFIT PULLBACK check. Rules in priority order: stop, time
+    exit, Group 1 ITM
     short strike, profit target, profit pullback, 21-DTE check, Group 3
     dead-trade check. Roll suggestions are advisory only -- no live
     next-month quote is fetched. Each side of an iron condor is judged
@@ -325,7 +330,11 @@ def _apply_rules(dte, days_held, credit, cost, itm, tested, peak_gl_pct=None):
     target = SPREAD_PROFIT_TARGET[group]
     if profit_frac >= target:
         return 2, f"TAKE PROFIT: buy back (>= {target:.0%} of credit captured)"
-    if peak_gl_pct is not None and peak_gl_pct > 0 and (peak_gl_pct - profit_frac) >= PULLBACK_DRAWDOWN:
+    # 1e-9 tolerance on both floors: e.g. 0.60 - 0.50 == 0.09999999999999998 in
+    # binary floating point, not exactly 0.10 -- without it, a spread sitting
+    # exactly at the 60%-peak/10-point boundary could silently fail to trigger.
+    if (peak_gl_pct is not None and peak_gl_pct >= PULLBACK_MIN_PEAK - 1e-9
+            and (peak_gl_pct - profit_frac) >= PULLBACK_DRAWDOWN - 1e-9):
         return 2, (f"{PULLBACK_PREFIX} now {profit_frac:.0%} vs its {peak_gl_pct:.0%} high "
                   f"(down {(peak_gl_pct - profit_frac):.0%} pts)")
     if CHECK_21_DTE <= dte <= CHECK_21_DTE + CHECK_21_WINDOW and group == 2:
@@ -486,11 +495,15 @@ def build_spread_actions_table(df):
     PROFIT PULLBACK check below flags) the roll search in _find_roll -- a
     roll for a net credit that passes the screener beats a plain CLOSE.
 
-    PROFIT PULLBACK: once a spread's current unrealized G/L% has fallen
-    PULLBACK_DRAWDOWN (10 points) or more below its own all-time high (and
-    that high was a real gain), it's flagged for a roll-or-close decision
-    even if it's still net profitable overall -- protecting a fading peak,
-    not necessarily a loss (see spread_action/_apply_rules). The peak comes
+    PROFIT PULLBACK: once a spread's all-time-high unrealized G/L% has
+    reached PULLBACK_MIN_PEAK (60%) AND its current G/L% has since fallen
+    PULLBACK_DRAWDOWN (10 points) or more below that high, it's flagged for
+    a roll-or-close decision even if it's still net profitable overall --
+    protecting a fading peak, not necessarily a loss (see spread_action/
+    _apply_rules). Both floors matter: a peak under 60% is too little money
+    on the table to be worth acting on (a 30% peak sliding to 20% stays
+    quiet), and a sub-10-point drop off a real peak is normal noise, not a
+    reversal. The peak comes
     from position_peaks.json (_load_peaks -- written on notify_email.py's own
     schedule, this table only ever reads it), taking the max of the stored
     value and this run's own live G/L% so a brand-new all-time high can never
