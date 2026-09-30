@@ -119,6 +119,10 @@ OPEN_POSITIONS = [
     # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
     {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
      "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28"},
+    # MSFT put credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 490P $2,837.94 / 1,100 = 2.579945, long 465P $748.00 / 1,100 = 0.68.
+    {"ticker": "MSFT", "type": "put_spread", "short_strike": 490, "long_strike": 465,
+     "expiration": "2026-10-16", "contracts": 11, "entry_credit": 1.899945, "entry_date": "2026-09-30"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
