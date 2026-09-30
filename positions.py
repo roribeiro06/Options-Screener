@@ -246,7 +246,7 @@ def build_positions_table():
 
 
 # --- Credit-spread management rules (Options Alpha style), see build_spread_actions_table ---
-SPREAD_PROFIT_TARGET = {1: 0.50, 2: 0.65, 3: 0.50}   # take profit once this share of the credit is captured, by group
+SPREAD_PROFIT_TARGET = {1: 0.50, 2: 0.70, 3: 0.50}   # take profit once this share of the credit is captured, by group
 SPREAD_STOP_MULT = 2.0      # stop once buy-back reaches 2x the credit
 G1_MAX_DTE = 20             # Group 1: entered under 21 DTE
 G2_MAX_DTE = 45             # Group 2: entered 21-45 DTE (core); Group 3: over 45
