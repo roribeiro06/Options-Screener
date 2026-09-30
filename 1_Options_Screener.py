@@ -341,14 +341,19 @@ def _roll_position_summary(row):
 
 
 def _spread_action_summary(row):
-    """Credit Spread Actions row -> its click-to-copy text: the roll order when
-    the action is a roll, otherwise the same Close summary Open Positions uses
-    (every non-roll action -- STOP, TIME EXIT, TAKE PROFIT, PROFIT PULLBACK,
-    CLOSE, DEAD TRADE -- is a buy-back). Each side of an iron condor is its
-    own row here (see positions.build_spread_actions_table), so there's no
+    """Credit Spread Actions row -> its click-to-copy text. When a roll was
+    found (Kind == "roll"), shows BOTH orders -- the roll AND the close --
+    stacked in one box separated by "--- OR ---", so there's a ready-to-copy
+    close order too if you'd rather take the close instead of the proposed
+    roll; the table's own CostToClose column already prices that, this just
+    makes it copy-paste-ready alongside the roll. When no roll exists (Kind
+    == "close" -- every non-roll action: STOP, TIME EXIT, TAKE PROFIT,
+    PROFIT PULLBACK, CLOSE, DEAD TRADE, all a buy-back), there's nothing to
+    roll, so just the Close summary. Each side of an iron condor is its own
+    row here (see positions.build_spread_actions_table), so there's no
     combined-condor case to special-case."""
     if row.get("Kind") == "roll":
-        return _roll_position_summary(row)
+        return _roll_position_summary(row) + "\n\n--- OR ---\n\n" + _close_position_summary(row)
     return _close_position_summary(row)
 
 
@@ -768,8 +773,10 @@ try:
                    "spread must be one the Multi-Leg screener itself would show (same POP, OTM incl. the volatility-"
                    "tier rule, AnnROR, $1,000 premium floor, open interest and earnings exclusion), same contract "
                    "count; the best-Score one is proposed with its net credit. Click a row for an advisor-ready "
-                   "order to copy: the Close summary (same as Open Positions) or, for a roll, the new expiration, "
-                   "sell/buy strikes and net premium. If nothing qualifies the action says CLOSE and why (e.g. a "
+                   "order to copy: when a roll was found, BOTH orders -- the roll (new expiration, sell/buy "
+                   "strikes, net premium) and the Close summary (same as Open Positions), stacked in one box "
+                   "separated by \"--- OR ---\" so you can take either; when no roll exists, just the Close "
+                   "summary. If nothing qualifies the action says CLOSE and why (e.g. a "
                    "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
                    "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "
                    "`position_peaks.json`, refreshed only on the scheduled email script's own ~30-min cadence during "
