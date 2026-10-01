@@ -111,36 +111,6 @@ def _long_strike(chain, opt_type, short_strike, width_pct=None):
     return min(cand, key=lambda s: abs(s - target)) if cand else None
 
 
-def _nearest_credit_spread(chain, opt_type, target_delta, tol):
-    """Single nearest-to-target-delta credit spread -- the OLD _credit_spread
-    behavior, kept as-is for the iron condor scan below (each leg still
-    picked by delta-closeness; not in scope for the best-Score change --
-    see _credit_spread_candidates, which the single-leg credit spread loop
-    above uses instead)."""
-    cands = _find_candidates_by_delta(chain, opt_type, target_delta, tol)
-    if not cands:
-        return None
-    short = min(cands, key=lambda o: abs(abs(o["delta"]) - target_delta))
-    ls = _long_strike(chain, opt_type, short["strike"])
-    if ls is None:
-        return None
-    lng = _leg_at(chain, opt_type, ls)
-    if not lng:
-        return None
-    if ws.MIN_OPEN_INTEREST > 0 and any((leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST for leg in (short, lng)):
-        return None
-    credit = (short["bid"] or 0) - (lng["ask"] or 0)
-    credit_best = (short["ask"] or 0) - (lng["bid"] or 0)
-    width = abs(short["strike"] - ls)
-    if credit < MIN_CREDIT or width <= 0:
-        return None
-    max_loss = width - credit
-    if max_loss <= 0:
-        return None
-    return {"short": short, "long": lng, "long_strike": ls, "credit": credit,
-            "credit_best": credit_best, "width": width, "max_loss": max_loss}
-
-
 def _credit_spread_candidates(chain, opt_type, target_delta, tol):
     """Every viable credit spread -- not just the single nearest-to-target-
     delta one (that was the old _credit_spread) -- for every short strike
@@ -324,70 +294,89 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                 seen.add(key)
                 out.append(r)
 
-    # Iron condors: scan several per-leg deltas -> combined POP from the floor upward
+    # Iron condors: scan several per-leg delta WINDOWS -> combined POP from the
+    # floor upward. Same fix as the single-leg credit spreads above: within
+    # each (put window x call window) pair, every PUT candidate paired with
+    # every CALL candidate is a condor candidate; the one with the highest
+    # Score among those passing every criterion wins the slot, instead of
+    # just pairing whichever single put and single call happen to sit
+    # nearest the target delta on each side independently.
     for td in IC_LEG_DELTAS:
-        ps = _nearest_credit_spread(chain, "put", td, SCAN_TOL)
-        cs = _nearest_credit_spread(chain, "call", td, SCAN_TOL)
-        if not (ps and cs):
+        p_cands = _credit_spread_candidates(chain, "put", td, SCAN_TOL)
+        c_cands = _credit_spread_candidates(chain, "call", td, SCAN_TOL)
+        if not (p_cands and c_cands):
             continue
-        p_otm = (spot - ps["short"]["strike"]) / spot
-        c_otm = (cs["short"]["strike"] - spot) / spot
-        if p_otm < omin or c_otm < omin:
-            continue
-        p_iv = ps["short"].get("iv") or 0
-        c_iv = cs["short"].get("iv") or 0
-        if SPREAD_MIN_OTM_OVER_IV > 0:
-            if (p_iv > 0 and p_otm < SPREAD_MIN_OTM_OVER_IV * p_iv) or \
-               (c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv):
+        best = None   # (score, row, key) -- the best PASSING condor seen so far in this window
+        for ps in p_cands:
+            p_otm = (spot - ps["short"]["strike"]) / spot
+            if p_otm < omin:
                 continue
-        credit = ps["credit"] + cs["credit"]
-        credit_best = ps["credit_best"] + cs["credit_best"]
-        width = max(ps["width"], cs["width"])
-        max_loss = width - credit
-        if max_loss <= 0:
-            continue
-        # Same high-volatility-tier gate as credit spreads above, plus the
-        # universal total-premium floor -- both legs are the same ticker, so
-        # one check suffices; uses the tighter of the two legs' OTM (same
-        # value the row's own OTM_% column reports) and the combined
-        # worst-case credit, sized the same way the real "# of contracts"
-        # column is.
-        _n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
-        _total_prem = credit * 100 * _n
-        if not ws.vol_otm_ok(sym, min(p_otm, c_otm), _total_prem):
-            continue
-        if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
-            continue
-        pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
-        if pop < pmin:
-            continue
-        key = ("ic", ps["short"]["strike"], cs["short"]["strike"])
-        if key in seen:
-            continue
-        iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
-        oi = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
-        _pcd = _avg_credit_dollars(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot,
-                                   short_iv=ps["short"].get("iv"), long_iv=ps["long"].get("iv"))
-        _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot,
-                                   short_iv=cs["short"].get("iv"), long_iv=cs["long"].get("iv"))
-        if _pcd and _ccd:
-            _combined_credit = (_pcd[0] + _ccd[0], _pcd[1] + _ccd[1])
-            acr = _ann_ror_range(_combined_credit, width, dte)
-        else:
-            acr = None
-        r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
-                         f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
-                         f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
-                         credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr,
-                         width_base=(ps["short"]["strike"] if ps["width"] >= cs["width"]
-                                     else cs["short"]["strike"]))
-        # Each side's own worst/best-case credit (see SPREAD_COLS) -- not
-        # displayed, just carried through for the click-to-copy summary.
-        r["Put Max Profit"] = round(ps["credit"], 2)
-        r["Put Max Profit (Best)"] = round(ps["credit_best"], 2)
-        r["Call Max Profit"] = round(cs["credit"], 2)
-        r["Call Max Profit (Best)"] = round(cs["credit_best"], 2)
-        if r["AnnROR_%"] >= ROR_ANN_MIN:
+            p_iv = ps["short"].get("iv") or 0
+            if SPREAD_MIN_OTM_OVER_IV > 0 and p_iv > 0 and p_otm < SPREAD_MIN_OTM_OVER_IV * p_iv:
+                continue
+            for cs in c_cands:
+                c_otm = (cs["short"]["strike"] - spot) / spot
+                if c_otm < omin:
+                    continue
+                c_iv = cs["short"].get("iv") or 0
+                if SPREAD_MIN_OTM_OVER_IV > 0 and c_iv > 0 and c_otm < SPREAD_MIN_OTM_OVER_IV * c_iv:
+                    continue
+                credit = ps["credit"] + cs["credit"]
+                credit_best = ps["credit_best"] + cs["credit_best"]
+                width = max(ps["width"], cs["width"])
+                max_loss = width - credit
+                if max_loss <= 0:
+                    continue
+                # Same high-volatility-tier gate as credit spreads above, plus the
+                # universal total-premium floor -- both legs are the same ticker, so
+                # one check suffices; uses the tighter of the two legs' OTM (same
+                # value the row's own OTM_% column reports) and the combined
+                # worst-case credit, sized the same way the real "# of contracts"
+                # column is.
+                _n = ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET)
+                _total_prem = credit * 100 * _n
+                if not ws.vol_otm_ok(sym, min(p_otm, c_otm), _total_prem):
+                    continue
+                if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
+                    continue
+                pop = 1 - (abs(ps["short"]["delta"]) + abs(cs["short"]["delta"]))
+                if pop < pmin:
+                    continue
+                key = ("ic", ps["short"]["strike"], cs["short"]["strike"])
+                if key in seen:
+                    continue
+                iv = ((ps["short"].get("iv") or 0) + (cs["short"].get("iv") or 0)) / 2
+                oi = _leg_liquidity(ps["short"], ps["long"], cs["short"], cs["long"])
+                _pcd = _avg_credit_dollars(sym, dte, "put", ps["short"]["strike"], ps["long_strike"], spot,
+                                           short_iv=ps["short"].get("iv"), long_iv=ps["long"].get("iv"))
+                _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot,
+                                           short_iv=cs["short"].get("iv"), long_iv=cs["long"].get("iv"))
+                if _pcd and _ccd:
+                    _combined_credit = (_pcd[0] + _ccd[0], _pcd[1] + _ccd[1])
+                    acr = _ann_ror_range(_combined_credit, width, dte)
+                else:
+                    acr = None
+                r = _defined_row(sym, spot, exp, dte, earn, "Iron condor",
+                                 f"sell {ps['short']['strike']:g}P / buy {ps['long_strike']:g}P",
+                                 f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
+                                 credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr,
+                                 width_base=(ps["short"]["strike"] if ps["width"] >= cs["width"]
+                                             else cs["short"]["strike"]))
+                if r["AnnROR_%"] < ROR_ANN_MIN:
+                    continue
+                sc = r["Score"]
+                # Same NaN guard as the single-leg loop: a NaN Score must
+                # never win, and must never block a later valid candidate.
+                if sc == sc and (best is None or best[0] != best[0] or sc > best[0]):
+                    # Each side's own worst/best-case credit (see SPREAD_COLS) --
+                    # not displayed, just carried through for the click-to-copy summary.
+                    r["Put Max Profit"] = round(ps["credit"], 2)
+                    r["Put Max Profit (Best)"] = round(ps["credit_best"], 2)
+                    r["Call Max Profit"] = round(cs["credit"], 2)
+                    r["Call Max Profit (Best)"] = round(cs["credit_best"], 2)
+                    best = (sc, r, key)
+        if best is not None:
+            _, r, key = best
             seen.add(key)
             out.append(r)
     return out
