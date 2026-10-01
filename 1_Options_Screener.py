@@ -425,10 +425,15 @@ def scan_spreads(tickers, sc):
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None):
+def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None, csmin=None, csmax=None):
     if kind in ("put", "call"):
         rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
         return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
+    if kind == "iron_condor":
+        # smin/smax bound the PUT short strike, csmin/csmax the CALL short strike --
+        # two independent ranges, since a condor pairs one of each (see lookup_iron_condor).
+        rows = sp.lookup_iron_condor(ticker, smin, smax, csmin, csmax, estart, eend, width_pct=width_pct)
+        return sp._df(rows)
     rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend, width_pct=width_pct)
     return sp._df(rows)
 
@@ -557,26 +562,34 @@ if ec:
 st.markdown("---")
 st.header("Contract Lookup")
 st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
-           "(cash-secured puts), calls (covered calls, as if you held the shares), or put/call credit "
-           "spreads - even ones that don't pass the criteria above. Puts/put spreads show strikes below "
-           "the price, calls/call spreads above it. For spreads, Strike min/max filters the SHORT leg; "
-           "the long leg is auto-picked at the Spread width % set below (independent of the sidebar's "
-           "own Spread width %, which only affects Multi-Leg Strategies). Same stats (Score, yields, "
-           "IV, liquidity) as everywhere else.")
+           "(cash-secured puts), calls (covered calls, as if you held the shares), put/call credit "
+           "spreads, or iron condors - even ones that don't pass the criteria above. Puts/put spreads "
+           "show strikes below the price, calls/call spreads above it. For spreads, Strike min/max "
+           "filters the SHORT leg; the long leg is auto-picked at the Spread width % set below "
+           "(independent of the sidebar's own Spread width %, which only affects Multi-Leg Strategies). "
+           "**For an iron condor**, Strike min/max filters the PUT side's short strike and Call strike "
+           "min/max filters the CALL side's -- two independent ranges, since a condor pairs one of each; "
+           "the result count is the PRODUCT of how many strikes qualify on each side, not the sum, so "
+           "narrow both ranges more than you would for a single-sided spread search. Same stats (Score, "
+           "yields, IV, liquidity) as everywhere else.")
 with st.form("lookup_form"):
     _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
     lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
-    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread"], horizontal=True,
+    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread", "iron_condor"], horizontal=True,
                         format_func=lambda k: {"put": "Put", "call": "Call",
                                                "put_spread": "Put Spread",
-                                               "call_spread": "Call Spread"}[k])
+                                               "call_spread": "Call Spread",
+                                               "iron_condor": "Iron Condor"}[k])
     lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
     lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
+    _e1, _e2 = st.columns(2)
+    lk_csmin = _e1.number_input("Call strike min (iron condor only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_csmax = _e2.number_input("Call strike max (iron condor only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
     _d1, _d2, _d3 = st.columns(3)
     _today = datetime.now().date()
     lk_start = _d1.date_input("Expiration from", _today)
     lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
-    lk_width = _d3.number_input("Spread width % (spreads only)", 1, 50,
+    lk_width = _d3.number_input("Spread width % (spreads/condor only)", 1, 50,
                                 int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
     lk_go = st.form_submit_button("Search")
 
@@ -588,17 +601,20 @@ if lk_go and lk_ticker:
     # results (and the row you just clicked) disappear instead of showing
     # the summary. Keying off session_state instead survives any rerun.
     st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
-                                        lk_smax or None, lk_start, lk_end, lk_width / 100)
+                                        lk_smax or None, lk_start, lk_end, lk_width / 100,
+                                        lk_csmin or None, lk_csmax or None)
 
 _lq = st.session_state.get("lookup_query")
 if _lq:
-    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width = _lq
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax = _lq
     try:
-        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width)
+        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width,
+                           csmin=_q_csmin, csmax=_q_csmax)
         if len(_res):
             _label = {"put": "cash-secured put", "call": "covered call",
-                      "put_spread": "put credit spread", "call_spread": "call credit spread"}[_q_kind]
-            _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread") else ""
+                      "put_spread": "put credit spread", "call_spread": "call credit spread",
+                      "iron_condor": "iron condor"}[_q_kind]
+            _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread", "iron_condor") else ""
             st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker}{_width_note} ({_q_start} to {_q_end}).")
             if _q_kind in ("put", "call"):
                 _selectable_table(_res, ws._fmt(_res), "lookup_tbl")

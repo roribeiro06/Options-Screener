@@ -732,6 +732,115 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
     return rows
 
 
+def lookup_iron_condor(symbol, put_strike_min=None, put_strike_max=None,
+                       call_strike_min=None, call_strike_max=None,
+                       exp_start=None, exp_end=None, width_pct=None):
+    """Manual lookup: every viable iron condor for a ticker -- every PUT short
+    strike within [put_strike_min, put_strike_max] paired with every CALL
+    short strike within [call_strike_min, call_strike_max], in the given
+    expiration range. Each leg's long/protective strike is auto-picked at
+    `width_pct` (defaults to the live SPREAD_WIDTH_PCT if not given, same as
+    lookup_spreads). Every strike pair is shown regardless of whether it
+    passes the screener's POP/AnnROR/OTM criteria or the MIN_OPEN_INTEREST
+    floor -- same "show everything, you decide" ethos as lookup_spreads/
+    wheel_screener.lookup_contracts.
+
+    UNLIKE lookup_spreads (one short strike -> one row), this pairs TWO
+    independent strikes, so the result count is the PRODUCT of how many put
+    strikes and call strikes qualify in each leg's own range, not the sum --
+    narrow both ranges to keep this bounded, same as you would for the
+    single-sided lookups, just more so.
+
+    Reuses the real screener's own Iron condor row shape (_for_expiration):
+    combined credit/width/max loss, min(put OTM, call OTM), the tighter
+    side's strike as Width_%'s base, and the per-leg Put/Call Max Profit
+    (Best) fields the click-to-copy summary needs to write it as the two
+    separate spread orders a broker actually takes."""
+    price = ws.td_quote(symbol)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = ws.get_earnings_date(symbol)
+    today = dt.date.today()
+    rows = []
+    for exp, exp_date, dte in _all_expirations(symbol, today):
+        if exp_start and exp_date < exp_start:
+            continue
+        if exp_end and exp_date > exp_end:
+            continue
+        chain = ws.td_chain(symbol, exp)
+        put_strikes = sorted({o["strike"] for o in chain if o["type"] == "put" and o["strike"] < price})
+        call_strikes = sorted({o["strike"] for o in chain if o["type"] == "call" and o["strike"] > price})
+
+        put_legs = {}
+        for ps in put_strikes:
+            if put_strike_min is not None and ps < put_strike_min:
+                continue
+            if put_strike_max is not None and ps > put_strike_max:
+                continue
+            short = _leg_at(chain, "put", ps)
+            if not short or (short.get("bid") or 0) <= 0:
+                continue
+            long_strike = _long_strike(chain, "put", ps, width_pct)
+            if long_strike is None:
+                continue
+            long_leg = _leg_at(chain, "put", long_strike)
+            if not long_leg:
+                continue
+            width = abs(ps - long_strike)
+            if width <= 0:
+                continue
+            put_legs[ps] = {"short": short, "long": long_leg, "long_strike": long_strike, "width": width,
+                            "credit": (short["bid"] or 0) - (long_leg["ask"] or 0),
+                            "credit_best": (short["ask"] or 0) - (long_leg["bid"] or 0)}
+
+        call_legs = {}
+        for cs in call_strikes:
+            if call_strike_min is not None and cs < call_strike_min:
+                continue
+            if call_strike_max is not None and cs > call_strike_max:
+                continue
+            short = _leg_at(chain, "call", cs)
+            if not short or (short.get("bid") or 0) <= 0:
+                continue
+            long_strike = _long_strike(chain, "call", cs, width_pct)
+            if long_strike is None:
+                continue
+            long_leg = _leg_at(chain, "call", long_strike)
+            if not long_leg:
+                continue
+            width = abs(cs - long_strike)
+            if width <= 0:
+                continue
+            call_legs[cs] = {"short": short, "long": long_leg, "long_strike": long_strike, "width": width,
+                             "credit": (short["bid"] or 0) - (long_leg["ask"] or 0),
+                             "credit_best": (short["ask"] or 0) - (long_leg["bid"] or 0)}
+
+        for ps, p in put_legs.items():
+            for cs, c in call_legs.items():
+                credit = p["credit"] + c["credit"]
+                credit_best = p["credit_best"] + c["credit_best"]
+                width = max(p["width"], c["width"])
+                max_loss = width - credit
+                if max_loss <= 0:
+                    continue
+                pop = 1 - (abs(p["short"].get("delta") or 0) + abs(c["short"].get("delta") or 0))
+                iv = ((p["short"].get("iv") or 0) + (c["short"].get("iv") or 0)) / 2
+                p_otm, c_otm = (price - ps) / price, (cs - price) / price
+                oi = _leg_liquidity(p["short"], p["long"], c["short"], c["long"])
+                r = _defined_row(symbol, price, exp, dte, earnings, "Iron condor",
+                                 f"sell {ps:g}P / buy {p['long_strike']:g}P",
+                                 f"sell {cs:g}C / buy {c['long_strike']:g}C",
+                                 credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi,
+                                 width_base=(ps if p["width"] >= c["width"] else cs))
+                r["Put Max Profit"] = round(p["credit"], 2)
+                r["Put Max Profit (Best)"] = round(p["credit_best"], 2)
+                r["Call Max Profit"] = round(c["credit"], 2)
+                r["Call Max Profit (Best)"] = round(c["credit_best"], 2)
+                rows.append(r)
+    return rows
+
+
 def _df(rows):
     if not rows:
         return pd.DataFrame(columns=SPREAD_COLS)
