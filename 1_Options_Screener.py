@@ -1004,7 +1004,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 **Multi-Leg - all defined-risk (short strangles/straddles excluded -- undefined risk)**
 
 *Credit Spreads & Iron Condors (selling premium)*
-- Structure: credit-spread short legs scanned from ~{sp.SHORT_DELTA:.2f} delta and further OTM; iron condors use two matched shorts. POP ranges from the floor up (safer variants included).
+- Structure: credit-spread short legs scanned in windows around {", ".join(f"{d:.0%}" for d in sp.SHORT_DELTAS)} delta (POP ranges from the floor up). Within each window, every strike that clears every other criterion is a candidate, and the one with the **highest Score** wins that slot -- not just whichever strike's delta happens to be closest to the target. Iron condors use two matched shorts, each still picked by delta-closeness (not yet best-Score).
 - Probability of profit (POP): {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}
 - Minimum annualized ROR: {sp.ROR_ANN_MIN:.0%}
 - Spread width: about {sp.SPREAD_WIDTH_PCT:.0%} of the short strike (distance from short strike to long/protective strike); the Width column shows that same % (long straddle/strangle have no short leg, so theirs is % of price)

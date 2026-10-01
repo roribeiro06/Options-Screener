@@ -79,19 +79,17 @@ SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "E
 PCT_COLS = {"OTM_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}   # Width_% is folded into Width in _fmt
 
 
-def _find_by_delta(chain, opt_type, target, tol):
-    best, bestdiff = None, 1e9
-    for o in chain:
-        if o["type"] != opt_type or o.get("delta") is None:
-            continue
-        if (o.get("bid") or 0) <= 0:
-            continue
-        diff = abs(abs(o["delta"]) - target)
-        if diff < bestdiff:
-            best, bestdiff = o, diff
-    if best is not None and abs(abs(best["delta"]) - target) <= tol:
-        return best
-    return None
+def _find_candidates_by_delta(chain, opt_type, target, tol):
+    """Every strike within `tol` of `target` delta -- unlike the old
+    _find_by_delta, this is NOT just the single nearest one. Used so the
+    caller can evaluate every strike in the window against its own full
+    criteria and pick the best-scoring one that actually passes, instead of
+    committing to whichever strike happens to sit closest to the target
+    delta and dropping the whole slot if THAT ONE strike fails something
+    else (OTM floor, premium floor, ROR, ...) while a nearby strike in the
+    same window would have passed just fine."""
+    return [o for o in chain if o["type"] == opt_type and o.get("delta") is not None
+           and (o.get("bid") or 0) > 0 and abs(abs(o["delta"]) - target) <= tol]
 
 
 def _leg_at(chain, opt_type, strike):
@@ -113,22 +111,26 @@ def _long_strike(chain, opt_type, short_strike, width_pct=None):
     return min(cand, key=lambda s: abs(s - target)) if cand else None
 
 
-def _credit_spread(chain, opt_type, target_delta, tol):
-    short = _find_by_delta(chain, opt_type, target_delta, tol)
-    if not short:
+def _nearest_credit_spread(chain, opt_type, target_delta, tol):
+    """Single nearest-to-target-delta credit spread -- the OLD _credit_spread
+    behavior, kept as-is for the iron condor scan below (each leg still
+    picked by delta-closeness; not in scope for the best-Score change --
+    see _credit_spread_candidates, which the single-leg credit spread loop
+    above uses instead)."""
+    cands = _find_candidates_by_delta(chain, opt_type, target_delta, tol)
+    if not cands:
         return None
+    short = min(cands, key=lambda o: abs(abs(o["delta"]) - target_delta))
     ls = _long_strike(chain, opt_type, short["strike"])
     if ls is None:
         return None
     lng = _leg_at(chain, opt_type, ls)
     if not lng:
         return None
-    if ws.MIN_OPEN_INTEREST > 0:
-        for leg in (short, lng):
-            if (leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST:
-                return None
-    credit = (short["bid"] or 0) - (lng["ask"] or 0)          # worst case: sell at bid, buy at ask
-    credit_best = (short["ask"] or 0) - (lng["bid"] or 0)      # best case: sell at ask, buy at bid
+    if ws.MIN_OPEN_INTEREST > 0 and any((leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST for leg in (short, lng)):
+        return None
+    credit = (short["bid"] or 0) - (lng["ask"] or 0)
+    credit_best = (short["ask"] or 0) - (lng["bid"] or 0)
     width = abs(short["strike"] - ls)
     if credit < MIN_CREDIT or width <= 0:
         return None
@@ -137,6 +139,37 @@ def _credit_spread(chain, opt_type, target_delta, tol):
         return None
     return {"short": short, "long": lng, "long_strike": ls, "credit": credit,
             "credit_best": credit_best, "width": width, "max_loss": max_loss}
+
+
+def _credit_spread_candidates(chain, opt_type, target_delta, tol):
+    """Every viable credit spread -- not just the single nearest-to-target-
+    delta one (that was the old _credit_spread) -- for every short strike
+    within `tol` of `target_delta`: same per-candidate construction/filters
+    as before (auto-picked long leg via _long_strike, open interest,
+    MIN_CREDIT, a real positive max loss), just for every qualifying strike
+    in the window, so the caller can rank them instead of being handed one."""
+    out = []
+    for short in _find_candidates_by_delta(chain, opt_type, target_delta, tol):
+        ls = _long_strike(chain, opt_type, short["strike"])
+        if ls is None:
+            continue
+        lng = _leg_at(chain, opt_type, ls)
+        if not lng:
+            continue
+        if ws.MIN_OPEN_INTEREST > 0 and any((leg.get("oi") or 0) < ws.MIN_OPEN_INTEREST
+                                            for leg in (short, lng)):
+            continue
+        credit = (short["bid"] or 0) - (lng["ask"] or 0)          # worst case: sell at bid, buy at ask
+        credit_best = (short["ask"] or 0) - (lng["bid"] or 0)      # best case: sell at ask, buy at bid
+        width = abs(short["strike"] - ls)
+        if credit < MIN_CREDIT or width <= 0:
+            continue
+        max_loss = width - credit
+        if max_loss <= 0:
+            continue
+        out.append({"short": short, "long": lng, "long_strike": ls, "credit": credit,
+                    "credit_best": credit_best, "width": width, "max_loss": max_loss})
+    return out
 
 
 def _leg_liquidity(*legs):
@@ -229,54 +262,72 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
     pmin = SPREAD_POP_MIN            # floor only - no upper POP cap
     omin = ws.otm_min_for(sym)
 
-    # Credit spreads: scan several short-leg deltas so POP ranges from the floor upward
+    # Credit spreads: scan several short-leg delta WINDOWS so POP ranges from
+    # the floor upward. Within each window, every strike that passes every
+    # criterion below is a candidate; the one with the highest Score wins
+    # that slot -- NOT whichever strike happens to sit closest to the target
+    # delta (the old behavior), which could silently drop the whole slot if
+    # that one nearest-delta strike failed a later check while a
+    # same-window, slightly-further-from-target strike would have passed
+    # with a perfectly good Score.
     for td in SHORT_DELTAS:
         for opt_type in ("put", "call"):
-            s = _credit_spread(chain, opt_type, td, SCAN_TOL)
-            if not s:
-                continue
-            sk = s["short"]["strike"]
-            otm = (spot - sk) / spot if opt_type == "put" else (sk - spot) / spot
-            if otm < omin:
-                continue
-            siv = s["short"].get("iv") or 0
-            if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
-                continue
-            # High-volatility-tier risk gate (see wheel_screener.vol_otm_ok --
-            # multi-leg only) plus the universal total-premium
-            # floor (MIN_TOTAL_PREMIUM) -- worst-case credit, sized the same
-            # way the real "# of contracts" column is.
-            _n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
-            _total_prem = s["credit"] * 100 * _n
-            if not ws.vol_otm_ok(sym, otm, _total_prem):
-                continue
-            if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
-                continue
-            pop = 1 - abs(s["short"]["delta"])
-            if pop < pmin:
-                continue
-            key = (opt_type, sk, s["long_strike"])
-            if key in seen:
-                continue
-            if opt_type == "put":
-                strat, pl, cl = "Put credit spread", f"sell {sk:g}P / buy {s['long_strike']:g}P", ""
-            else:
-                strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
-            oi = _leg_liquidity(s["short"], s["long"])
-            _acd = _avg_credit_dollars(sym, dte, opt_type, sk, s["long_strike"], spot,
-                                       short_iv=s["short"].get("iv"), long_iv=s["long"].get("iv"))
-            acr = _ann_ror_range(_acd, s["width"], dte)
-            r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
-                             s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
-                             s["short"].get("iv") or 0, otm, oi, acr, width_base=sk)
-            if r["AnnROR_%"] >= ROR_ANN_MIN:
+            best = None   # (score, row, key) -- the best PASSING candidate seen so far in this window
+            for s in _credit_spread_candidates(chain, opt_type, td, SCAN_TOL):
+                sk = s["short"]["strike"]
+                otm = (spot - sk) / spot if opt_type == "put" else (sk - spot) / spot
+                if otm < omin:
+                    continue
+                siv = s["short"].get("iv") or 0
+                if SPREAD_MIN_OTM_OVER_IV > 0 and siv > 0 and otm < SPREAD_MIN_OTM_OVER_IV * siv:
+                    continue
+                # High-volatility-tier risk gate (see wheel_screener.vol_otm_ok --
+                # multi-leg only) plus the universal total-premium
+                # floor (MIN_TOTAL_PREMIUM) -- worst-case credit, sized the same
+                # way the real "# of contracts" column is.
+                _n = ws.contracts_for_target(s["max_loss"] * 100, target=SPREAD_CASH_TARGET)
+                _total_prem = s["credit"] * 100 * _n
+                if not ws.vol_otm_ok(sym, otm, _total_prem):
+                    continue
+                if ws.MIN_TOTAL_PREMIUM > 0 and _total_prem < ws.MIN_TOTAL_PREMIUM:
+                    continue
+                pop = 1 - abs(s["short"]["delta"])
+                if pop < pmin:
+                    continue
+                key = (opt_type, sk, s["long_strike"])
+                if key in seen:
+                    continue
+                if opt_type == "put":
+                    strat, pl, cl = "Put credit spread", f"sell {sk:g}P / buy {s['long_strike']:g}P", ""
+                else:
+                    strat, pl, cl = "Call credit spread", "", f"sell {sk:g}C / buy {s['long_strike']:g}C"
+                oi = _leg_liquidity(s["short"], s["long"])
+                _acd = _avg_credit_dollars(sym, dte, opt_type, sk, s["long_strike"], spot,
+                                           short_iv=s["short"].get("iv"), long_iv=s["long"].get("iv"))
+                acr = _ann_ror_range(_acd, s["width"], dte)
+                r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
+                                 s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
+                                 s["short"].get("iv") or 0, otm, oi, acr, width_base=sk)
+                if r["AnnROR_%"] < ROR_ANN_MIN:
+                    continue
+                sc = r["Score"]
+                # Only replace `best` with a REAL score -- a NaN Score (missing
+                # IV/DTE) must never win a slot, but it also must never get
+                # stuck as `best` and block a later, validly-scored candidate:
+                # NaN compares False against everything in both directions, so
+                # without the explicit "best is NaN" check a NaN pick could
+                # never be displaced once set.
+                if sc == sc and (best is None or best[0] != best[0] or sc > best[0]):
+                    best = (sc, r, key)
+            if best is not None:
+                _, r, key = best
                 seen.add(key)
                 out.append(r)
 
     # Iron condors: scan several per-leg deltas -> combined POP from the floor upward
     for td in IC_LEG_DELTAS:
-        ps = _credit_spread(chain, "put", td, SCAN_TOL)
-        cs = _credit_spread(chain, "call", td, SCAN_TOL)
+        ps = _nearest_credit_spread(chain, "put", td, SCAN_TOL)
+        cs = _nearest_credit_spread(chain, "call", td, SCAN_TOL)
         if not (ps and cs):
             continue
         p_otm = (spot - ps["short"]["strike"]) / spot
