@@ -97,11 +97,6 @@ OPEN_POSITIONS = [
      "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.69, "entry_date": "2026-09-12"},
     {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
      "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.79, "entry_date": "2026-09-12"},
-    # Iron condor with the NOW put spread above -- tracked as separate entries
-    # (see GOOG/SMH). Entry credit from the brokerage's cost basis on both legs:
-    # short 160C $4,577.91 / 2,800 = 1.634968, long 170C $2,170.00 / 2,800 = 0.775.
-    {"ticker": "NOW", "type": "call_spread", "short_strike": 160, "long_strike": 170,
-     "expiration": "2026-10-16", "contracts": 28, "entry_credit": 0.859968, "entry_date": "2026-09-21"},
     # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
      "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
@@ -131,6 +126,17 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # NOW 160/170 call spread (the call side of the NOW iron condor, tracked as
+    # separate entries) closed 10/02. Short 160C bought back for $790.00 total
+    # (28 contracts, vs $4,577.91 original proceeds -> +$3,787.91, matching the
+    # brokerage's own total exactly); long 170C sold for $229.96 total vs its
+    # $2,170.00 cost -> -$1,940.04 on the real fills (the brokerage's displayed
+    # "-$1,918.00" for that leg is the original lot at a $0.09 mark, not the
+    # actual $0.07-$0.10 sells). exit_cost = (790.00 - 229.96) / 2,800 =
+    # 0.200014; realized +$1,847.87, cross-checked both ways.
+    {"ticker": "NOW", "type": "call_spread", "short_strike": 160, "long_strike": 170,
+     "expiration": "2026-10-16", "contracts": 28, "entry_credit": 0.859968, "entry_date": "2026-09-21",
+     "exit_cost": 0.200014, "exit_date": "2026-10-02"},
     # SPY 805/845 call spread closed 09/30. The entry recorded here (0.56/sh,
     # 09/12) didn't match the brokerage's own original opening lot -- corrected
     # to match: short 805C sold 09/02 for $948.98 total (7 contracts) ->
