@@ -83,16 +83,6 @@ OPEN_POSITIONS = [
      "contracts": 2, "entry_credit": 2.40, "entry_date": "2026-09-01"},
     {"ticker": "GOOG", "type": "put", "strike": 300, "expiration": "2026-11-20",
      "contracts": 2, "entry_credit": 6.75, "entry_date": "2026-09-01"},
-    # AVGO 320P -- converted from a naked put to a put spread by buying the
-    # 300P protective leg. Net entry credit recomputed from the brokerage's
-    # actual cost basis on both legs (short 320P $2.57/share, long 300P
-    # $0.935/share) rather than kept at the original naked-put entry_credit
-    # (4.2706) -- that recorded price no longer matches the account's cost
-    # basis for the 320P leg, so the live number is trusted instead.
-    # entry_date kept as the original 320P open date, same convention as an
-    # averaged/adjusted position elsewhere in this file (see LLY).
-    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
-     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 1.635, "entry_date": "2026-09-04"},
     # Iron condor -- tracked as separate put_spread/call_spread entries since
     # OPEN_POSITIONS has no combined iron_condor type.
     {"ticker": "SPY", "type": "put_spread", "short_strike": 690, "long_strike": 655,
@@ -128,6 +118,22 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # AVGO 320/300 put spread closed 10/05 (originally a naked 320P opened 09/04,
+    # later converted to a spread by buying the 300P). Entry credit now taken
+    # from the opening lots the brokerage shows in the closing statement --
+    # short 320P sold for $6,405.87 (15 contracts, 4.2706/sh), long 300P bought
+    # for $2,398.00 (1.5987/sh) -> 2.671913/sh -- NOT the 1.635/sh that had been
+    # recorded here from an earlier brokerage cost-basis view (short $2.57, long
+    # $0.935); the short leg's own realized total below matches the brokerage's
+    # exactly on these lots, so they're trusted. Exit: short bought back for
+    # $604.00 (0.402667/sh) and long sold for $134.97 (0.089980/sh) on the real
+    # fills (the brokerage's displayed -$2,248.00 for the long leg is a stale
+    # mark, not the actual $0.09 sells) -> exit_cost 0.312687. Realized
+    # +$3,538.84 = short +$5,801.87 + long -$2,263.03. (On the old 1.635 credit
+    # it would have been +$1,983.47.)
+    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
+     "expiration": "2026-10-16", "contracts": 15, "entry_credit": 2.671913, "entry_date": "2026-09-04",
+     "exit_cost": 0.312687, "exit_date": "2026-10-05"},
     # NOW 160/170 call spread (the call side of the NOW iron condor, tracked as
     # separate entries) closed 10/02. Short 160C bought back for $790.00 total
     # (28 contracts, vs $4,577.91 original proceeds -> +$3,787.91, matching the
