@@ -87,8 +87,6 @@ OPEN_POSITIONS = [
     # OPEN_POSITIONS has no combined iron_condor type.
     {"ticker": "SPY", "type": "put_spread", "short_strike": 690, "long_strike": 655,
      "expiration": "2026-10-16", "contracts": 7, "entry_credit": 0.69, "entry_date": "2026-09-12"},
-    {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
-     "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.79, "entry_date": "2026-09-12"},
     # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
      "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
@@ -114,6 +112,20 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # NOW 115/110 put spread closed 10/05. Entry re-derived from the opening lots
+    # shown in the brokerage's closing statement -- short 115P sold 09/10 for
+    # $14,545.70 (60 contracts, 2.4243/sh), long 110P bought for $9,086.00
+    # (1.5143/sh) -> 0.909950/sh, opened 09/10 -- NOT the 0.79/sh, 09/12
+    # previously recorded here; the short leg's realized total on these lots
+    # matches the brokerage's exactly, so they're trusted. Exit: short bought
+    # back for $1,025.00 (8 fills) and long sold for $424.92 on the real fills
+    # (the brokerage's displayed -$8,576.00 for the long leg is a stale mark, not
+    # the actual $0.06-$0.08 sells) -> exit_cost = (1,025.00 - 424.92) / 6,000 =
+    # 0.100013. Realized +$4,859.62 = short +$13,520.70 + long -$8,661.08. (On
+    # the old 0.79 credit it would have been +$4,139.92.)
+    {"ticker": "NOW", "type": "put_spread", "short_strike": 115, "long_strike": 110,
+     "expiration": "2026-10-16", "contracts": 60, "entry_credit": 0.90995, "entry_date": "2026-09-10",
+     "exit_cost": 0.100013, "exit_date": "2026-10-05"},
     # MSFT 490/465 put spread closed 10/05. Entry credit from the brokerage's cost
     # basis on both legs -- short 490P $2,837.94 / 1,100 = 2.579945, long 465P
     # $748.00 / 1,100 = 0.68 -> 1.899945 (matches the opening lots shown in the
