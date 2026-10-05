@@ -3,25 +3,21 @@
 "note": "peak unrealized G/L % per open credit spread, refreshed on notify_email.py's own schedule"
 },
 "positions": {
-"NOW|Put Credit Spread|115/110|2026-10-16|2026-09-12": {
-"peak_gl_pct": 0.873418,
-"as_of": "2026-10-05T18:35:45Z"
-},
 "NVDA|Put Credit Spread|205/195|2026-10-30|2026-09-28": {
-"peak_gl_pct": 0.649336,
-"as_of": "2026-10-05T18:35:45Z"
+"peak_gl_pct": 0.662323,
+"as_of": "2026-10-05T19:05:27Z"
 },
 "QQQ|Put Credit Spread|675/640|2026-11-20|2026-09-25": {
 "peak_gl_pct": 0.287467,
-"as_of": "2026-10-05T18:35:45Z"
+"as_of": "2026-10-05T19:05:27Z"
 },
 "SPCX|Call Credit Spread|170/180|2026-10-16|2026-09-25": {
 "peak_gl_pct": 0.61665,
-"as_of": "2026-10-05T18:35:45Z"
+"as_of": "2026-10-05T19:05:27Z"
 },
 "SPY|Put Credit Spread|690/655|2026-10-16|2026-09-12": {
 "peak_gl_pct": 0.913043,
-"as_of": "2026-10-05T18:35:45Z"
+"as_of": "2026-10-05T19:05:27Z"
 }
 }
 }
