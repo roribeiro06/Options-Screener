@@ -40,7 +40,7 @@ HOLDINGS = {
     "FLUT": 95.28,
     "FDL": 37.07,
     "EDV": 59.47,
-    "LLY": 1150.0,
+    "LLY": 1128.0,
 }
 
 # Actual shares owned, from the brokerage -- used only to cap covered calls'
