@@ -104,6 +104,10 @@ OPEN_POSITIONS = [
     # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
     {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
      "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28"},
+    # AAPL put credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 315P $2,286.95 / 1,800 = 1.270528, long 300P $577.00 / 1,800 = 0.320556.
+    {"ticker": "AAPL", "type": "put_spread", "short_strike": 315, "long_strike": 300,
+     "expiration": "2026-10-23", "contracts": 18, "entry_credit": 0.949972, "entry_date": "2026-10-06"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
