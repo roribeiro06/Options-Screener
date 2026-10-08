@@ -108,6 +108,10 @@ OPEN_POSITIONS = [
     # legs -- short 315P $2,286.95 / 1,800 = 1.270528, long 300P $577.00 / 1,800 = 0.320556.
     {"ticker": "AAPL", "type": "put_spread", "short_strike": 315, "long_strike": 300,
      "expiration": "2026-10-23", "contracts": 18, "entry_credit": 0.949972, "entry_date": "2026-10-06"},
+    # ORCL put credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P $5,264.00 / 5,600 = 0.94.
+    {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
+     "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
