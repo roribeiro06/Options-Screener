@@ -354,18 +354,23 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     for the chosen roll or None if there isn't one (text then says why).
     A roll = buy the current spread back at the ASK (`cost`, conservative, same
     basis as the rest of the table) and sell a NEW spread on the same side, in a
-    LATER expiration, for a NET CREDIT (worst-case bid/ask credit, same basis
-    the screener uses) -- never a net debit. The new spread must be one the
+    LATER expiration (new credit at the worst-case bid/ask, same basis the
+    screener uses). The roll is shown even when it comes out a NET DEBIT -- any
+    spread that passes the screener counts, and the net (credit or debit) is
+    spelled out so the call is yours; a net-credit roll is preferred when one
+    exists. The new spread must be one the
     screener itself would show: candidates come from spreads._for_expiration,
     the exact function behind the Multi-Leg tab, so every screener criterion
     already applies (POP, OTM incl. the tech 15%/10%+$5k gate, AnnROR, OTM vs
     IV, the $1,000 premium floor, open interest, earnings-window exclusion,
     SPREAD_DTE_MIN..MAX). Deliberately NOT gated by open_position_sides -- the
     spread being rolled is itself what would block it. Same contract count as
-    the position. Among qualifying rolls, the highest screener Score wins.
+    the position. Among net-credit rolls (or, if none, among all of them) the
+    highest screener Score wins.
     roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
     the bid/ask minus buy-back at the ask), net_high (best case: new credit at
-    the ask/bid minus buy-back at the bid)}, all per share."""
+    the ask/bid minus buy-back at the bid)}, all per share; a negative net is
+    a debit."""
     strat = "Put credit spread" if kind == "put" else "Call credit spread"
     today = dt.date.today()
     cur = dt.date.fromisoformat(exp)
@@ -387,18 +392,17 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     if not cands:
         return "no spread in a later expiration passes the screener criteria", None
     scored = [(r["Max Profit"] - cost, r) for r in cands]
-    viable = [(net, r) for net, r in scored if net > 0]
-    if not viable:
-        best = max(net for net, _ in scored)
-        return (f"{len(cands)} later spread(s) pass the screener but the best would be a "
-                f"${abs(best):.2f}/sh net debit"), None
-    net, r = max(viable, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
+    credits = [(net, r) for net, r in scored if net > 0]
+    pool = credits or scored      # prefer a net-credit roll; otherwise the best-scoring debit one
+    net, r = max(pool, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
     legs = r["Put Legs"] or r["Call Legs"]
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
             "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid}
+    net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
+               f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"ROLL to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
-            f"-> net +${net:.2f}/sh (+${net * 100 * contracts:,.0f}), OTM {r['OTM_%']:.1%}, "
+            f"-> {net_txt}, OTM {r['OTM_%']:.1%}, "
             f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), roll
 
 
@@ -493,7 +497,8 @@ def build_spread_actions_table(df):
     result means nothing is triggered. Priced from the rows already quoted,
     plus (for a LOSING spread whose rule says to get out, or any spread the
     PROFIT PULLBACK check below flags) the roll search in _find_roll -- a
-    roll for a net credit that passes the screener beats a plain CLOSE.
+    roll that passes the screener -- even a net debit, spelled out for you to
+    judge -- beats a plain CLOSE.
 
     PROFIT PULLBACK: once a spread's all-time-high unrealized G/L% has
     reached PULLBACK_MIN_PEAK (60%) AND its current G/L% has since fallen

@@ -130,7 +130,7 @@ def _raw_range(lo, hi, contracts=None):
     """'$lo-$hi (total)' -- the RAW worst-to-best range, unlike _avg_max_range/
     _bid_avg_range's midpoint compression: used where the caller already
     computed a realistic low/high itself (a roll's own worst-case and
-    best-case net credit, from _find_roll), so showing it further compressed
+    best-case net credit or debit, from _find_roll), so showing it further compressed
     toward the average would throw away real information rather than being a
     conservative-but-fair opening quote. E.g. $1.46/$1.68 stays "$1.46-$1.68",
     not "$1.57-$1.68". Same total-in-parentheses convention as the other
@@ -314,6 +314,22 @@ def _close_position_summary(row):
     return "\n".join(lines)
 
 
+def _roll_premium_line(lo, hi, n_int):
+    """The roll's premium line. A roll can come out a net DEBIT (it's shown
+    anyway -- you make the call), so a negative net must not be printed as a
+    "premium": a debit across the whole range reads "Net Debit: $low-$high"
+    (as positive costs, smaller first), and a range that straddles zero spells
+    out both ends. A plain net credit is unchanged ("Premium: ...")."""
+    if pd.isna(lo) or pd.isna(hi):
+        return f"Premium: {_raw_range(lo, hi, n_int)}"
+    if hi <= 0:
+        return f"Net Debit: {_raw_range(-hi, -lo, n_int)}"
+    if lo < 0:
+        tot = (f" (-${-lo * 100 * n_int:,.0f} to +${hi * 100 * n_int:,.0f})" if n_int else "")
+        return f"Premium: net debit ${-lo:.2f} to net credit ${hi:.2f}{tot}"
+    return f"Premium: {_raw_range(lo, hi, n_int)}"
+
+
 def _roll_position_summary(row):
     """Copy-paste summary for a financial advisor to ROLL a losing credit
     spread (from the Credit Spread Actions table): the spread being rolled,
@@ -333,7 +349,7 @@ def _roll_position_summary(row):
              f"Expiration: {row['RollExp']}",
              f"Sell ${row['RollSell']:g} {opt}",
              f"Buy ${row['RollBuy']:g} {opt}",
-             f"Premium: {_raw_range(row.get('RollNetLow'), row.get('RollNetHigh'), n_int)}"]
+             _roll_premium_line(row.get("RollNetLow"), row.get("RollNetHigh"), n_int)]
     current_price = row.get("CurrentPrice")
     if pd.notna(current_price):
         lines += ["", f"Current Price: ${current_price:.2f}"]
@@ -788,10 +804,12 @@ try:
                    "on its safe counterpart. **Rolling takes priority over closing:** when STOP, TIME EXIT, the "
                    "Group 1 ITM close, the 21 DTE check, or PROFIT PULLBACK fires, the app first searches for a "
                    "roll -- buy the spread back at the ask and sell a new spread on the same side in a LATER "
-                   "expiration, at strikes further from the money, for a **net credit** (never a debit). The new "
+                   "expiration, at strikes further from the money. It's shown **even when it's a net debit** -- "
+                   "any roll that passes the screener counts, with the net credit or debit spelled out so the "
+                   "call is yours (a net-credit roll is preferred when one exists). The new "
                    "spread must be one the Multi-Leg screener itself would show (same POP, OTM incl. the volatility-"
                    "tier rule, AnnROR, $1,000 premium floor, open interest and earnings exclusion), same contract "
-                   "count; the best-Score one is proposed with its net credit. Click a row for an advisor-ready "
+                   "count; the best-Score one is proposed with its net credit or debit. Click a row for an advisor-ready "
                    "order to copy: when a roll was found, BOTH orders a roll actually needs -- Step 1, close the "
                    "existing spread (same Close summary as Open Positions), THEN Step 2, open the new one (new "
                    "expiration, sell/buy strikes, net premium) -- in that execution order, not as alternatives; "
