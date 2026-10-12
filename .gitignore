@@ -7,3 +7,5 @@ __pycache__/
 qualifying_contracts.xlsx
 qualifying_contracts.html
 qualifying_contracts_SAMPLE.xlsx
+schwab_tokens.json
+schwab_sample_*.json
