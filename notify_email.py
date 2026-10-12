@@ -241,11 +241,17 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
     open_fin = positions.build_open_financials(open_pos)
     closed_fin = positions.build_closed_financials(closed_pos)
     combined_fin = positions.build_combined_financials(open_pos, closed_pos)
+    try:
+        import schwab_data
+        _dw = schwab_data.delay_warning()
+    except Exception:
+        _dw = None
+    delay_banner = (f"<p style='background:#c00;color:#fff;padding:8px;font-weight:bold'>{_dw}</p>" if _dw else "")
 
     return (f"<html><head>{style}</head><body>"
             f"<h1>Options Screener</h1>"
             f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. Educational only, not financial advice. "
-            f"Prices via Tradier sandbox (~15 min delayed).</p>"
+            f"Prices via Schwab (real-time).</p>{delay_banner}"
             f"{section('Cash-Secured Puts', puts, ws._fmt)}"
             f"{section('Covered Calls', calls, ws._fmt)}"
             f"<h2>Multi-Leg Strategies</h2>{spreads_body}"
@@ -327,6 +333,12 @@ def main():
     subject = (f"Screener: {len(puts)} puts, {len(calls)} calls, {len(spreads)} spreads, "
                f"{len(d_puts) + len(d_spreads)} discovered, {len(open_pos)} open positions "
                f"- {now_et:%b %d %I:%M %p ET}")
+    try:
+        import schwab_data
+        if schwab_data.delay_warning():
+            subject = "[DELAYED DATA] " + subject
+    except Exception:
+        pass
     send(subject, html_email(puts, calls, spreads, d_puts, d_spreads, open_pos, closed_pos,
                              concentration_history, concentration_gl, monthly, now_et,
                              spread_actions),

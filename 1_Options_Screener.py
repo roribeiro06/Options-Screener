@@ -33,6 +33,7 @@ st.caption("Tip: click any row in a contract table below for a copy-paste summar
 if not (os.environ.get("TRADIER_TOKEN") or ws.use_schwab()):
     st.error("No market-data credentials found. Add SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET and SCHWAB_REFRESH_TOKEN "
              "(or TRADIER_TOKEN) in the app's Settings -> Secrets, then Rerun.")
+_delay_slot = st.empty()      # filled at the very bottom, once this run's data has been fetched
 
 # --- Auto-refresh aligned to the market clock (9:30, 10:00, ... 4:00 ET) ---
 from datetime import datetime, timedelta
@@ -1060,7 +1061,15 @@ ratio would.
   is the real gate here.
 - **At most one straddle AND one strangle kept per ticker**, not one overall winner -- among the strangle widths, whichever needs the smallest move to breakeven wins, not whichever has the tightest-OTM strikes (a tighter strike often costs enough extra debit to push its own breakeven further away than a cheaper, slightly-wider alternative -- e.g. 2%-OTM strikes with an 8% breakeven loses to 3%-OTM strikes with a 5% breakeven)
 
-Prices are live via Tradier (sandbox data ~15 min delayed). Educational only - not financial advice; verify every contract in your broker.
+Prices are live via Schwab (real-time; a red banner at the top appears if Schwab ever flags data as delayed). Educational only - not financial advice; verify every contract in your broker.
 """)
 except Exception as _e:
     st.caption(f"(legend unavailable: {_e})")
+
+try:
+    import schwab_data as _sd
+    _w = _sd.delay_warning()
+    if _w:
+        _delay_slot.error(_w)
+except Exception:
+    pass

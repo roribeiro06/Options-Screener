@@ -29,6 +29,7 @@ CHAIN_TTL_S = 60
 _SYMBOL_MAP = {"VIX": "$VIX", "SPX": "$SPX", "NDX": "$NDX", "RUT": "$RUT", "DJX": "$DJX"}
 
 _lock = threading.Lock()
+_delayed = {}                 # what Schwab flagged as delayed this run: symbol -> where it was flagged
 _last_call = [0.0]
 _chain_cache = {}             # symbol -> (fetched_at, horizon_date, {exp_iso: [contract dicts]})
 
@@ -58,6 +59,21 @@ def _get(path, params):
     raise RuntimeError("Schwab request kept failing: " + path)
 
 
+def delay_warning():
+    """None while everything Schwab returned was real-time; otherwise a human-readable warning
+    (Schwab flags delayed data per response: quotes carry `realtime`, chains carry `isDelayed`)."""
+    if not _delayed:
+        return None
+    syms = ", ".join(sorted(_delayed)[:8]) + ("..." if len(_delayed) > 8 else "")
+    return ("DELAYED DATA: Schwab flagged quotes/chains as delayed (not real-time) for " + syms +
+            ". Check your Schwab market-data agreements / entitlements.")
+
+
+def _flag(symbol, delayed, what):
+    if delayed:
+        _delayed[symbol.upper()] = what
+
+
 def _num(x, default=None):
     try:
         v = float(x)
@@ -69,6 +85,7 @@ def _num(x, default=None):
 def quote(symbol):
     s = _sym(symbol)
     j = _get("/quotes", {"symbols": s, "fields": "quote"})
+    _flag(s, (j.get(s) or {}).get("realtime") is False, "quote")
     q = (j.get(s) or {}).get("quote") or {}
     return _num(q.get("lastPrice")) or _num(q.get("mark")) or _num(q.get("closePrice"))
 
@@ -82,6 +99,7 @@ def quotes(symbols):
         e = j.get(s)
         if not isinstance(e, dict):
             continue
+        _flag(s, e.get("realtime") is False, "quote")
         q, f = e.get("quote") or {}, e.get("fundamental") or {}
         out.append({"symbol": s.lstrip("$") if s.startswith("$") else s,
                     "last": _num(q.get("lastPrice")) or _num(q.get("mark")),
@@ -123,6 +141,7 @@ def _contracts(side_map, kind):
 def _fetch_chain(symbol, from_date, to_date):
     j = _get("/chains", {"symbol": _sym(symbol), "contractType": "ALL", "strategy": "SINGLE",
                          "fromDate": from_date.isoformat(), "toDate": to_date.isoformat()})
+    _flag(symbol, j.get("isDelayed") is True or (j.get("underlying") or {}).get("delayed") is True, "chain")
     out = _contracts(j.get("callExpDateMap"), "call")
     for exp, lst in _contracts(j.get("putExpDateMap"), "put").items():
         out.setdefault(exp, []).extend(lst)
