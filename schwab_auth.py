@@ -13,8 +13,8 @@ Usage (from the project folder):
     .venv\\Scripts\\python.exe schwab_auth.py refresh  # just renew the access token
 
 Your Client ID / Client Secret are read from the environment variables
-SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET, or typed in when prompted (hidden) --
-never hardcoded here and never printed.
+SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET, or typed in when prompted (secret hidden) --
+never hardcoded here; the secret is never printed (the Client ID, being public, is echoed so you can check it).
 
 Other modules: `get_access_token()` returns a valid access token, refreshing it
 automatically when it's about to expire.
@@ -38,8 +38,13 @@ REFRESH_MARGIN_S = 120                       # renew the access token this many 
 
 
 def _credentials():
-    cid = os.environ.get("SCHWAB_CLIENT_ID") or getpass.getpass("Schwab Client ID (hidden): ").strip()
-    secret = os.environ.get("SCHWAB_CLIENT_SECRET") or getpass.getpass("Schwab Client Secret (hidden): ").strip()
+    # The Client ID is the PUBLIC half of the key (it's in the login URL anyway), so
+    # it's typed visibly and echoed back -- a hidden prompt made a bad paste
+    # impossible to spot ("invalid_client"). Only the secret is hidden.
+    cid = (os.environ.get("SCHWAB_CLIENT_ID") or input("Schwab Client ID: ")).strip()
+    if cid:
+        print(f"  using Client ID {cid[:4]}...{cid[-4:]}  ({len(cid)} characters)")
+    secret = (os.environ.get("SCHWAB_CLIENT_SECRET") or getpass.getpass("Schwab Client Secret (hidden): ")).strip()
     if not (cid and secret):
         raise SystemExit("Client ID and Client Secret are both required.")
     return cid, secret
