@@ -20,10 +20,16 @@ Other modules: `get_access_token()` returns a valid access token, refreshing it
 automatically when it's about to expire.
 """
 import base64
+import datetime as dt
 import getpass
+import http.server
+import ipaddress
 import json
 import os
+import ssl
 import sys
+import tempfile
+import threading
 import time
 import urllib.parse
 import webbrowser
@@ -65,7 +71,8 @@ def extract_code(pasted):
     pasted = pasted.strip()
     if "code=" in pasted:
         qs = urllib.parse.urlparse(pasted).query or pasted.split("?", 1)[-1]
-        code = urllib.parse.parse_qs(qs).get("code", [""])[0]
+        # split by hand, not parse_qs: parse_qs would turn a literal "+" in the code into a space
+        code = next((part[5:] for part in qs.split("&") if part.startswith("code=")), "")
     else:
         code = pasted
     return urllib.parse.unquote(code)
@@ -92,18 +99,124 @@ def _save(tok, prev=None):
     return out
 
 
+def _self_signed_cert(directory):
+    """A throwaway self-signed certificate for 127.0.0.1 (needs the `cryptography`
+    package: .venv\\Scripts\\python.exe -m pip install cryptography). Written to
+    `directory`; returns (certfile, keyfile)."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+    now = dt.datetime.now(dt.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - dt.timedelta(minutes=5))
+            .not_valid_after(now + dt.timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                                                        x509.DNSName("localhost")]), critical=False)
+            .sign(key, hashes.SHA256()))
+    certfile, keyfile = os.path.join(directory, "cert.pem"), os.path.join(directory, "key.pem")
+    with open(certfile, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+    with open(keyfile, "wb") as f:
+        f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL,
+                                  serialization.NoEncryption()))
+    return certfile, keyfile
+
+
+def capture_code(timeout=240, port=8182, started=None):
+    """Listen on https://127.0.0.1:<port> and return the authorization code the
+    moment Schwab redirects the browser there -- so the code is swapped for
+    tokens instantly instead of waiting on a human to copy/paste it (Schwab's
+    codes expire within seconds). The certificate is self-signed, so the browser
+    shows a one-time "not private" warning: Advanced -> Proceed to 127.0.0.1.
+    Returns the decoded code, or None if it can't listen (port busy, missing
+    `cryptography`) or nothing arrives within `timeout` seconds -- the caller
+    then falls back to copy/paste. `started` (an Event) is set once listening."""
+    box, got = {}, threading.Event()
+    try:
+        tmp = tempfile.TemporaryDirectory()
+        certfile, keyfile = _self_signed_cert(tmp.name)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile, keyfile)
+    except ImportError:
+        print("  (can't auto-capture: run  .venv\\Scripts\\python.exe -m pip install cryptography  first)")
+        return None
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def setup(self):                                   # TLS handshake per connection, in its own thread
+            self.request = ctx.wrap_socket(self.request, server_side=True)
+            super().setup()
+
+        def do_GET(self):
+            q = urllib.parse.urlparse(self.path).query
+            code = extract_code("?" + q) if "code=" in q else ""
+            body = (b"<html><body style='font-family:sans-serif'><h3>Login captured - you can close this tab "
+                    b"and go back to PowerShell.</h3></body></html>" if code else b"<html><body>waiting...</body></html>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+            if code:
+                box["code"] = code
+                got.set()
+
+        def log_message(self, *a):
+            pass
+
+    class Server(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+
+        def handle_error(self, request, client_address):   # browsers abort the first, untrusted handshake -- ignore
+            pass
+
+    try:
+        server = Server(("127.0.0.1", port), Handler)
+    except OSError as e:
+        print(f"  (can't auto-capture: port {port} unavailable: {e})")
+        tmp.cleanup()
+        return None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    if started is not None:
+        started.set()
+    try:
+        got.wait(timeout)
+    finally:
+        server.shutdown()
+        server.server_close()
+        tmp.cleanup()
+    return box.get("code")
+
+
 def login():
     cid, secret = _credentials()
     url = login_url(cid)
     print("\n1) Your browser will open Schwab's login page. Log in and approve the app.")
-    print("2) You'll then land on an error-looking page (can't connect to 127.0.0.1) -- that's expected.")
-    print("3) Copy the FULL address from the browser's address bar and paste it below.\n")
+    print("2) You'll then land on a 'connection is not private' warning for 127.0.0.1. That's your own")
+    print("   computer catching the login: click Advanced -> Proceed to 127.0.0.1 (unsafe).")
+    print("3) The page then says 'Login captured' and this window finishes by itself.\n")
+    print("If the browser didn't open, paste this into it yourself:\n" + url + "\n")
+    started = threading.Event()
+    result = {}
+    t = threading.Thread(target=lambda: result.update(code=capture_code(started=started)), daemon=True)
+    t.start()
+    started.wait(10)
     try:
         webbrowser.open(url)
     except Exception:
         pass
-    print("If the browser didn't open, paste this into it yourself:\n" + url + "\n")
-    code = extract_code(input("Pasted address: "))
+    print("Waiting for the login (up to 4 minutes)...")
+    t.join()
+    code = result.get("code")
+    if code:
+        print("Got the login code; exchanging it for tokens...")
+    else:
+        print("\nCouldn't capture the login automatically. Fallback: log in, then copy the FULL address from the")
+        print("browser's address bar and paste it here -- be QUICK, Schwab's code expires within seconds.\n")
+        code = extract_code(input("Pasted address: "))
     tok = _token_request(cid, secret, {"grant_type": "authorization_code", "code": code,
                                        "redirect_uri": CALLBACK_URL})
     _save(tok)
