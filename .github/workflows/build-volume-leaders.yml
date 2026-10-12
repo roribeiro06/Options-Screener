@@ -25,6 +25,9 @@ jobs:
       - name: Find high-volume tickers
         env:
           TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+          SCHWAB_CLIENT_ID: ${{ secrets.SCHWAB_CLIENT_ID }}
+          SCHWAB_CLIENT_SECRET: ${{ secrets.SCHWAB_CLIENT_SECRET }}
+          SCHWAB_REFRESH_TOKEN: ${{ secrets.SCHWAB_REFRESH_TOKEN }}
           TRADIER_BASE: "https://sandbox.tradier.com/v1"
         run: python build_volume_leaders.py
       - name: Commit updated results

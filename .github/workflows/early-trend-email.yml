@@ -39,6 +39,9 @@ jobs:
       - name: Run Early Trend Screener and email
         env:
           TRADIER_TOKEN: ${{ secrets.TRADIER_TOKEN }}
+          SCHWAB_CLIENT_ID: ${{ secrets.SCHWAB_CLIENT_ID }}
+          SCHWAB_CLIENT_SECRET: ${{ secrets.SCHWAB_CLIENT_SECRET }}
+          SCHWAB_REFRESH_TOKEN: ${{ secrets.SCHWAB_REFRESH_TOKEN }}
           TRADIER_BASE: "https://sandbox.tradier.com/v1"
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}

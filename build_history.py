@@ -167,8 +167,8 @@ def build_ticker(symbol):
 
 
 def main():
-    if not os.environ.get("TRADIER_TOKEN"):
-        print("TRADIER_TOKEN not set", file=sys.stderr)
+    if not (os.environ.get("TRADIER_TOKEN") or ws.use_schwab()):
+        print("neither SCHWAB_REFRESH_TOKEN (+ client id/secret) nor TRADIER_TOKEN is set", file=sys.stderr)
         sys.exit(1)
     tickers = list(dict.fromkeys(list(ws.PUT_TICKERS) + list(ws.HOLDINGS.keys())))
     out = {"_meta": {"built": dt.date.today().isoformat(),

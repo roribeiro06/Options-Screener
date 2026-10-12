@@ -11,6 +11,7 @@ Tokens are saved to schwab_tokens.json (git-ignored, never commit it).
 Usage (from the project folder):
     .venv\\Scripts\\python.exe schwab_auth.py          # first login / after the refresh token expires
     .venv\\Scripts\\python.exe schwab_auth.py refresh  # just renew the access token
+    .venv\\Scripts\\python.exe schwab_auth.py export  # copy the refresh token to the clipboard (for the cloud secrets)
 
 Your Client ID / Client Secret are read from the environment variables
 SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET, or typed in when prompted (secret hidden) --
@@ -241,25 +242,79 @@ def load_tokens():
         return None
 
 
+_mem = {}                                    # in-process token cache for headless runs (no token file)
+_lock = threading.Lock()
+
+
+def have_credentials():
+    """True when this process can get Schwab tokens: a saved token file (local) or
+    SCHWAB_REFRESH_TOKEN + client id/secret in the environment (GitHub Actions / Streamlit)."""
+    if os.path.exists(TOKEN_FILE):
+        return True
+    return bool(os.environ.get("SCHWAB_REFRESH_TOKEN") and os.environ.get("SCHWAB_CLIENT_ID")
+                and os.environ.get("SCHWAB_CLIENT_SECRET"))
+
+
+def invalidate_access_token():
+    """Force the next get_access_token() to refresh (used after a 401)."""
+    with _lock:
+        _mem.clear()
+        tok = load_tokens()
+        if tok:
+            tok["access_expires_at"] = 0
+            with open(TOKEN_FILE, "w") as f:
+                json.dump(tok, f)
+
+
 def get_access_token():
     """A valid access token, refreshed automatically if it's within REFRESH_MARGIN_S
-    of expiring. Raises if there are no saved tokens or the refresh token no longer
-    works (then run schwab_auth.py again to log in)."""
+    of expiring. Uses schwab_tokens.json when present; otherwise the SCHWAB_REFRESH_TOKEN
+    environment variable (the refresh token itself isn't rotated by a refresh, so the
+    env value stays valid until Schwab expires it ~7 days after login). Raises a clear
+    error when the login has expired -- run schwab_auth.py again and update the secrets."""
+    with _lock:
+        tok = load_tokens() or dict(_mem) or None
+        if tok and tok.get("access_expires_at", 0) - time.time() > REFRESH_MARGIN_S:
+            return tok["access_token"]
+        cid = os.environ.get("SCHWAB_CLIENT_ID")
+        secret = os.environ.get("SCHWAB_CLIENT_SECRET")
+        refresh_token = (tok or {}).get("refresh_token") or os.environ.get("SCHWAB_REFRESH_TOKEN")
+        if not refresh_token:
+            raise RuntimeError("no Schwab tokens -- run schwab_auth.py to log in")
+        if not (cid and secret):
+            raise RuntimeError("SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET not set; can't refresh the access token")
+        try:
+            new = _token_request(cid, secret, {"grant_type": "refresh_token", "refresh_token": refresh_token})
+        except RuntimeError as e:
+            if "invalid_grant" in str(e) or "refresh_token_authentication_error" in str(e) or "HTTP 400" in str(e):
+                raise RuntimeError("Schwab login expired (refresh tokens last ~7 days). Run "
+                                   ".venv/Scripts/python.exe schwab_auth.py, then update SCHWAB_REFRESH_TOKEN "
+                                   "in the GitHub Actions secrets and Streamlit Secrets. (" + str(e)[:120] + ")")
+            raise
+        if os.path.exists(TOKEN_FILE):
+            return _save(new, tok)["access_token"]
+        _mem.update(access_token=new["access_token"], refresh_token=refresh_token,
+                    access_expires_at=int(time.time()) + int(new.get("expires_in", 1800)))
+        return new["access_token"]
+
+
+def export_refresh_token():
+    """Copy the saved refresh token to the Windows clipboard (never printed), plus how
+    many days it has left -- for pasting into the GitHub / Streamlit secrets."""
     tok = load_tokens()
-    if not tok:
-        raise RuntimeError("no Schwab tokens -- run schwab_auth.py to log in")
-    if tok["access_expires_at"] - time.time() > REFRESH_MARGIN_S:
-        return tok["access_token"]
-    cid = os.environ.get("SCHWAB_CLIENT_ID")
-    secret = os.environ.get("SCHWAB_CLIENT_SECRET")
-    if not (cid and secret):
-        raise RuntimeError("SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET not set; can't refresh the access token")
-    new = _token_request(cid, secret, {"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]})
-    return _save(new, tok)["access_token"]
+    if not tok or not tok.get("refresh_token"):
+        raise SystemExit("No saved login -- run schwab_auth.py (no argument) first.")
+    import subprocess
+    subprocess.run(["clip"], input=tok["refresh_token"].encode(), check=True)
+    left = 7 - (time.time() - tok.get("refresh_issued_at", time.time())) / 86400
+    print(f"Refresh token copied to the clipboard (about {left:.1f} days left before Schwab expires it).")
+    print("Paste it as SCHWAB_REFRESH_TOKEN in GitHub (Settings -> Secrets -> Actions) and in Streamlit Secrets.")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "refresh":
         refresh()
+    elif len(sys.argv) > 1 and sys.argv[1] == "export":
+        export_refresh_token()
     else:
         login()

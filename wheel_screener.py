@@ -528,7 +528,26 @@ OUTPUT_FILE = "qualifying_contracts.xlsx"
 
 
 # ------------------------- Tradier data ---------------------------
+def use_schwab():
+    """True when Schwab credentials are available (token file locally, or SCHWAB_REFRESH_TOKEN +
+    SCHWAB_CLIENT_ID/SECRET in the environment). Then every market-data call below goes to
+    Schwab via schwab_data.py, which returns the same shapes Tradier did; otherwise Tradier."""
+    try:
+        import schwab_auth
+        return schwab_auth.have_credentials()
+    except Exception:
+        return False
+
+
 def _td_get(path, params):
+    if use_schwab():                       # Tradier-shaped answers for the two endpoints other modules call directly
+        import schwab_data
+        if path == "/markets/history":
+            return schwab_data.history(params["symbol"], dt.date.fromisoformat(params["start"]),
+                                       dt.date.fromisoformat(params["end"]))
+        if path == "/markets/quotes":
+            return schwab_data.quotes([x for x in str(params["symbols"]).split(",") if x])
+        raise RuntimeError("no Schwab equivalent for " + path)
     import requests
     token = os.environ.get("TRADIER_TOKEN", "")
     base = os.environ.get("TRADIER_BASE", "https://sandbox.tradier.com/v1")
@@ -546,6 +565,9 @@ def _as_list(x):
 
 
 def td_quote(symbol):
+    if use_schwab():
+        import schwab_data
+        return schwab_data.quote(symbol)
     j = _td_get("/markets/quotes", {"symbols": symbol})
     q = (j.get("quotes") or {}).get("quote")
     q = q[0] if isinstance(q, list) else q
@@ -555,12 +577,18 @@ def td_quote(symbol):
 
 
 def td_expirations(symbol):
+    if use_schwab():
+        import schwab_data
+        return schwab_data.expirations(symbol)
     j = _td_get("/markets/options/expirations",
                 {"symbol": symbol, "includeAllRoots": "true"})
     return _as_list((j.get("expirations") or {}).get("date"))
 
 
 def td_chain(symbol, expiration):
+    if use_schwab():
+        import schwab_data
+        return schwab_data.chain(symbol, expiration)
     j = _td_get("/markets/options/chains",
                 {"symbol": symbol, "expiration": expiration, "greeks": "true"})
     out = []

@@ -14,13 +14,14 @@ import sys
 import json
 
 import discover
+import wheel_screener as ws
 
 OUT = "volume_leaders.json"
 
 
 def main():
-    if not os.environ.get("TRADIER_TOKEN"):
-        print("TRADIER_TOKEN not set", file=sys.stderr)
+    if not (os.environ.get("TRADIER_TOKEN") or ws.use_schwab()):
+        print("neither SCHWAB_REFRESH_TOKEN (+ client id/secret) nor TRADIER_TOKEN is set", file=sys.stderr)
         sys.exit(1)
 
     out = discover.run_discovery()

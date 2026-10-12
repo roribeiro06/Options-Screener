@@ -14,6 +14,9 @@ try:
         os.environ["TRADIER_TOKEN"] = str(st.secrets["TRADIER_TOKEN"])
     if "TRADIER_BASE" in st.secrets:
         os.environ["TRADIER_BASE"] = str(st.secrets["TRADIER_BASE"])
+    for _k in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN"):
+        if _k in st.secrets:
+            os.environ[_k] = str(st.secrets[_k])
 except Exception:
     pass
 
@@ -23,12 +26,13 @@ import positions
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
-st.caption("Cash-secured puts & covered calls. Live quotes from Tradier. "
+st.caption("Cash-secured puts & covered calls. Live quotes from Schwab. "
            "Educational only - NOT financial advice. Verify every quote in your broker before trading.")
 st.caption("Tip: click any row in a contract table below for a copy-paste summary (Ticker / # of contracts / "
            "DTE / strike(s) / premium) to send to your financial advisor.")
-if not os.environ.get("TRADIER_TOKEN"):
-    st.error("No Tradier token found. Add TRADIER_TOKEN in the app's Settings -> Secrets, then Rerun.")
+if not (os.environ.get("TRADIER_TOKEN") or ws.use_schwab()):
+    st.error("No market-data credentials found. Add SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET and SCHWAB_REFRESH_TOKEN "
+             "(or TRADIER_TOKEN) in the app's Settings -> Secrets, then Rerun.")
 
 # --- Auto-refresh aligned to the market clock (9:30, 10:00, ... 4:00 ET) ---
 from datetime import datetime, timedelta
