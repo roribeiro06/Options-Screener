@@ -111,6 +111,10 @@ OPEN_POSITIONS = [
     # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
      "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13"},
+    # UBER call credit spread: entry credit from the brokerage's cost basis on both
+    # legs -- short 76C $3,967.91 / 6,900 = 0.575059, long 80C $1,208.00 / 6,900 = 0.175072.
+    {"ticker": "UBER", "type": "call_spread", "short_strike": 76, "long_strike": 80,
+     "expiration": "2026-10-30", "contracts": 69, "entry_credit": 0.399987, "entry_date": "2026-10-13"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
