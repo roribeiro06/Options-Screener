@@ -94,12 +94,6 @@ OPEN_POSITIONS = [
     # legs -- short 675P $4,271.91 / 800 = 5.3398875, long 640P $2,352.00 / 800 = 2.94.
     {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
      "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25"},
-    # SPCX call credit spread (rolled up from the closed 160/170). Entry credit from
-    # the 09/25 fills only -- short 170C $2,838.93 / 2,700 = 1.051456, long 180C
-    # $1,219.00 / 2,700 = 0.451481 (the brokerage's 08/21 lot rows belong to the old
-    # long 170C and are ignored).
-    {"ticker": "SPCX", "type": "call_spread", "short_strike": 170, "long_strike": 180,
-     "expiration": "2026-10-16", "contracts": 27, "entry_credit": 0.599974, "entry_date": "2026-09-25"},
     # NVDA put credit spread: entry credit from the brokerage's cost basis on both
     # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
     {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
@@ -112,6 +106,11 @@ OPEN_POSITIONS = [
     # legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P $5,264.00 / 5,600 = 0.94.
     {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
      "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08"},
+    # AVGO put credit spread (opened 10/13 after the 10/05 close of the 10/16 320/300):
+    # entry credit from the brokerage's cost basis on both legs -- short 320P
+    # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
+    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
+     "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -120,6 +119,16 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # SPCX 170/180 call spread closed 10/13 (the 09/25 roll of the 160/170). Entry
+    # credit from the 09/25 fills only (short 170C $2,838.93 / 2,700 = 1.051456,
+    # long 180C $1,219.00 / 2,700 = 0.451481 -> 0.599974; the brokerage's 08/21
+    # wash-sale lot rows belong to the old 160/170 and are ignored, as is the
+    # wash-sale-adjusted -$2,130.09 it shows on the short leg). Exit: short bought
+    # back for $675.00 (27 x 0.25) and long sold for $161.99 -> exit_cost =
+    # (675.00 - 161.99) / 2,700 = 0.190004. Realized +$1,106.92.
+    {"ticker": "SPCX", "type": "call_spread", "short_strike": 170, "long_strike": 180,
+     "expiration": "2026-10-16", "contracts": 27, "entry_credit": 0.599974, "entry_date": "2026-09-25",
+     "exit_cost": 0.190004, "exit_date": "2026-10-13"},
     # NOW 115/110 put spread closed 10/05. Entry re-derived from the opening lots
     # shown in the brokerage's closing statement -- short 115P sold 09/10 for
     # $14,545.70 (60 contracts, 2.4243/sh), long 110P bought for $9,086.00
