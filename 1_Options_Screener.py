@@ -319,30 +319,29 @@ def _close_position_summary(row):
     return "\n".join(lines)
 
 
-def _roll_premium_line(lo, hi, n_int):
-    """The roll's premium line. A roll can come out a net DEBIT (it's shown
-    anyway -- you make the call), so a negative net must not be printed as a
-    "premium": a debit across the whole range reads "Net Debit: $low-$high"
-    (as positive costs, smaller first), and a range that straddles zero spells
-    out both ends. A plain net credit is unchanged ("Premium: ...")."""
+def _signed(x):
+    return f"{'-' if x < 0 else '+'}${abs(x):.2f}"
+
+
+def _roll_net_line(lo, hi, n_int):
+    """Net gain/loss of the whole roll (the new spread's credit minus the
+    buy-back of the old one), worst to best case: signed per share with the
+    total across Contracts, e.g. "Net Gain/Loss: -$0.67 to -$0.15 (-$3,752 to
+    -$840)". A roll that costs money reads as a loss, one that pays as a gain."""
     if pd.isna(lo) or pd.isna(hi):
-        return f"Premium: {_raw_range(lo, hi, n_int)}"
-    if hi <= 0:
-        return f"Net Debit: {_raw_range(-hi, -lo, n_int)}"
-    if lo < 0:
-        tot = (f" (-${-lo * 100 * n_int:,.0f} to +${hi * 100 * n_int:,.0f})" if n_int else "")
-        return f"Premium: net debit ${-lo:.2f} to net credit ${hi:.2f}{tot}"
-    return f"Premium: {_raw_range(lo, hi, n_int)}"
+        return "Net Gain/Loss: -"
+    tot = (f" ({'-' if lo < 0 else '+'}${abs(lo) * 100 * n_int:,.0f} to "
+           f"{'-' if hi < 0 else '+'}${abs(hi) * 100 * n_int:,.0f})" if n_int else "")
+    return f"Net Gain/Loss: {_signed(lo)} to {_signed(hi)}{tot}"
 
 
 def _roll_position_summary(row):
     """Copy-paste summary for a financial advisor to ROLL a losing credit
     spread (from the Credit Spread Actions table): the spread being rolled,
-    the NEW expiration, the new short/long strikes, and the NET credit range
-    for the whole roll order (buy back the old spread, sell the new one) --
-    the RAW worst-to-best range _find_roll already computed (see
-    _raw_range), not compressed toward the midpoint the way a fresh-open
-    premium quote is."""
+    the NEW expiration, the new short/long strikes, and the price to OPEN the
+    new spread (its own credit -- the RAW worst-to-best range _find_roll
+    already computed, see _raw_range, not compressed toward the midpoint the
+    way a fresh-open premium quote is)."""
     strike_str = str(row.get("Strike", "-"))
     strike_disp = f"(${'/$'.join(strike_str.split('/'))})"
     type_label = _CLOSE_TYPE_LABELS.get(row.get("Type"), row.get("Type", ""))
@@ -354,7 +353,7 @@ def _roll_position_summary(row):
              f"Expiration: {row['RollExp']}",
              f"Sell ${row['RollSell']:g} {opt}",
              f"Buy ${row['RollBuy']:g} {opt}",
-             _roll_premium_line(row.get("RollNetLow"), row.get("RollNetHigh"), n_int)]
+             f"Premium: {_raw_range(row.get('RollOpenLow'), row.get('RollOpenHigh'), n_int)}"]
     current_price = row.get("CurrentPrice")
     if pd.notna(current_price):
         lines += ["", f"Current Price: ${current_price:.2f}"]
@@ -366,16 +365,19 @@ def _spread_action_summary(row):
     choice between two alternatives -- it's TWO orders that both need to be
     placed to actually roll the position: close the existing spread, THEN
     open the new one. So when a roll was found (Kind == "roll"), this shows
-    the Close order first (Step 1) and the Roll order second (Step 2),
-    joined by "--- THEN ---", in that execution order. When no roll exists
-    (Kind == "close" -- every non-roll action: STOP, TIME EXIT, TAKE PROFIT,
-    PROFIT PULLBACK, CLOSE, DEAD TRADE, all a buy-back), there's only the
-    Close order, so just that. Each side of an iron condor is its own row
-    here (see positions.build_spread_actions_table), so there's no
-    combined-condor case to special-case."""
+    the Close order first and the Roll order second, joined by
+    "--- THEN ---", in that execution order, with the roll's net gain/loss
+    at the very bottom. When no roll exists (Kind == "close" -- every
+    non-roll action: STOP, TIME EXIT, TAKE PROFIT, PROFIT PULLBACK, CLOSE,
+    DEAD TRADE, all a buy-back), there's only the Close order, so just that.
+    Each side of an iron condor is its own row here (see
+    positions.build_spread_actions_table), so there's no combined-condor case
+    to special-case."""
     if row.get("Kind") == "roll":
-        return (f"Step 1: {_close_position_summary(row)}\n\n--- THEN ---\n\n"
-                f"Step 2: {_roll_position_summary(row)}")
+        n = row.get("Contracts")
+        return (f"{_close_position_summary(row)}\n\n--- THEN ---\n\n{_roll_position_summary(row)}\n\n"
+                + _roll_net_line(row.get("RollNetLow"), row.get("RollNetHigh"),
+                                 int(n) if pd.notna(n) else None))
     return _close_position_summary(row)
 
 
@@ -815,9 +817,10 @@ try:
                    "spread must be one the Multi-Leg screener itself would show (same POP, OTM incl. the volatility-"
                    "tier rule, AnnROR, $1,000 premium floor, open interest and earnings exclusion), same contract "
                    "count; the best-Score one is proposed with its net credit or debit. Click a row for an advisor-ready "
-                   "order to copy: when a roll was found, BOTH orders a roll actually needs -- Step 1, close the "
-                   "existing spread (same Close summary as Open Positions), THEN Step 2, open the new one (new "
-                   "expiration, sell/buy strikes, net premium) -- in that execution order, not as alternatives; "
+                   "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
+                   "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
+                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom -- "
+                   "in that execution order, not as alternatives; "
                    "when no roll exists, just the Close order. If nothing qualifies the action says CLOSE and why (e.g. a "
                    "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
                    "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "

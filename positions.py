@@ -274,7 +274,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
-                           "RollNetLow", "RollNetHigh"]
+                           "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh"]
 
 
 def _spread_group(dte, days_held):
@@ -369,7 +369,8 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     highest screener Score wins.
     roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
     the bid/ask minus buy-back at the ask), net_high (best case: new credit at
-    the ask/bid minus buy-back at the bid)}, all per share; a negative net is
+    the ask/bid minus buy-back at the bid), open_low/open_high (the new
+    spread's own credit, worst/best case)}, all per share; a negative net is
     a debit."""
     strat = "Put credit spread" if kind == "put" else "Call credit spread"
     today = dt.date.today()
@@ -398,7 +399,8 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     legs = r["Put Legs"] or r["Call Legs"]
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
-            "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid}
+            "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid,
+            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"]}
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"ROLL to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
@@ -568,7 +570,9 @@ def build_spread_actions_table(df):
             "RollSell": roll["sell"] if roll else float("nan"),
             "RollBuy": roll["buy"] if roll else float("nan"),
             "RollNetLow": roll["net_low"] if roll else float("nan"),
-            "RollNetHigh": roll["net_high"] if roll else float("nan")}))
+            "RollNetHigh": roll["net_high"] if roll else float("nan"),
+            "RollOpenLow": roll["open_low"] if roll else float("nan"),
+            "RollOpenHigh": roll["open_high"] if roll else float("nan")}))
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))
