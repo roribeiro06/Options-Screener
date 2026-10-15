@@ -76,16 +76,59 @@ def pick_expirations(exps, today):
     return chosen
 
 
+EST_QUARTER_DAYS = 91       # next report ~ last reported + a quarter
+EST_SLACK_DAYS = 10         # an estimated date is only good to about +-10 days
+
+
+def earnings_status(symbol, today):
+    """(label, date, slack_days) -- NEVER silent about earnings:
+      'YYYY-MM-DD'      a real date (manual override > Yahoo > stockanalysis.com)
+      'none (ETF)'      fund with no earnings to span
+      'est YYYY-MM-DD'  Yahoo/stockanalysis unreachable: estimated from Schwab's last reported
+                        date + ~91 days, with +-EST_SLACK_DAYS of slack when excluding expirations
+      'not found'       nothing worked -- recorded as such; premium_log ignores those records"""
+    if symbol in ws.NO_EARNINGS_TICKERS:
+        return "none (ETF)", None, 0
+    try:
+        d = ws.get_earnings_date(symbol)
+    except Exception:
+        d = None
+    if d:
+        return d.isoformat(), d, 0
+    try:
+        import schwab_data
+        if ws.use_schwab():
+            is_etf, last = schwab_data.earnings_info(symbol)
+            if is_etf:
+                return "none (ETF)", None, 0
+            if last:
+                est = last + dt.timedelta(days=EST_QUARTER_DAYS)
+                while est < today - dt.timedelta(days=EST_SLACK_DAYS):
+                    est += dt.timedelta(days=EST_QUARTER_DAYS)
+                return f"est {est.isoformat()}", est, EST_SLACK_DAYS
+    except Exception as e:
+        print(f"{symbol}: Schwab earnings estimate failed ({e})", file=sys.stderr)
+    return "not found", None, 0
+
+
+def spans_earnings(today, exp_date, earn, slack):
+    """True when [today, exp_date] contains the (possibly estimated) earnings date."""
+    if earn is None:
+        return False
+    return today <= earn + dt.timedelta(days=slack) and exp_date >= earn - dt.timedelta(days=slack)
+
+
 def snapshot_ticker(symbol, today):
-    """Two records (put, call) for one ticker, or [] when nothing could be read."""
+    """Two records (put, call) for one ticker, or [] when nothing could be read.
+    Each record carries "e": the earnings status (see earnings_status)."""
     spot = ws.td_quote(symbol)
     if not spot:
         return []
     spot = float(spot)
-    earn = ws.get_earnings_date(symbol)
+    label, earn, slack = earnings_status(symbol, today)
     puts, calls = [], []
     for e, d in sorted(pick_expirations(ws.td_expirations(symbol), today).items()):
-        if earn is not None and today <= earn <= dt.date.fromisoformat(e):
+        if spans_earnings(today, dt.date.fromisoformat(e), earn, slack):
             continue
         chain = ws.td_chain(symbol, e)
         if not chain:
@@ -95,7 +138,7 @@ def snapshot_ticker(symbol, today):
     recs = []
     for k, rows in (("p", puts), ("c", calls)):
         if rows:
-            recs.append({"d": today.isoformat(), "t": symbol, "k": k, "s": round(spot, 2), "r": rows})
+            recs.append({"d": today.isoformat(), "t": symbol, "k": k, "s": round(spot, 2), "e": label, "r": rows})
     return recs
 
 
@@ -131,12 +174,13 @@ def main():
         return
     tickers = list(dict.fromkeys(list(ws.PUT_TICKERS) + list(ws.HOLDINGS.keys())
                                  + [p["ticker"] for p in ws.OPEN_POSITIONS]))
-    records, failed = [], []
+    records, failed, earn_status = [], [], {}
     for t in tickers:
         try:
             recs = snapshot_ticker(t, today)
             records += recs
-            print(f"{t}: {sum(len(r['r']) for r in recs)} observations")
+            earn_status[t] = recs[0]["e"] if recs else "-"
+            print(f"{t}: {sum(len(r['r']) for r in recs)} observations (earnings: {earn_status[t]})")
             if not recs:
                 failed.append(t)
         except Exception as e:
@@ -148,6 +192,31 @@ def main():
     PL.write_day(today, records)
     print(f"logged {len(records)} ticker/side records for {today}"
           + (f"; no data for: {', '.join(failed)}" if failed else ""))
+    report_earnings(earn_status)
+
+
+def report_earnings(status):
+    """Say out loud which tickers' earnings dates were estimated or not found --
+    printed, raised as a GitHub warning annotation, and added to the run summary."""
+    est = sorted(t for t, s in status.items() if s.startswith("est "))
+    missing = sorted(t for t, s in status.items() if s == "not found")
+    if est:
+        print(f"::warning::Earnings date ESTIMATED (Yahoo/stockanalysis unreachable; Schwab last report + 91d, +-10d "
+              f"excluded) for: {', '.join(est)}")
+    if missing:
+        print(f"::warning::Earnings date NOT FOUND for: {', '.join(missing)} -- logged but ignored by AvgPremium "
+              f"until a date is found (add it to EARNINGS_DATES in wheel_screener.py to fix)")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        nl = chr(10)
+        lines = ["### Earnings dates used for the premium log", "", "| Ticker | Earnings |", "|---|---|"]
+        lines += [f"| {t} | {s} |" for t, s in sorted(status.items())]
+        if missing:
+            lines += ["", f"**NOT FOUND (logged but ignored by AvgPremium):** {', '.join(missing)}"]
+        if est:
+            lines += ["", f"**Estimated:** {', '.join(est)}"]
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(nl.join(lines) + nl)
 
 
 if __name__ == "__main__":

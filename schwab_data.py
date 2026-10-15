@@ -90,6 +90,22 @@ def quote(symbol):
     return _num(q.get("lastPrice")) or _num(q.get("mark")) or _num(q.get("closePrice"))
 
 
+def earnings_info(symbol):
+    """(is_etf, last_reported_earnings_date or None) from Schwab's quote fundamentals --
+    used to ESTIMATE the next report (~91 days later) when Yahoo/stockanalysis can't be reached."""
+    s = _sym(symbol)
+    j = _get("/quotes", {"symbols": s, "fields": "fundamental"})
+    e = j.get(s) or {}
+    sub = str(e.get("assetSubType") or "").upper()
+    is_etf = sub in ("ETF", "ETN", "ETC") or str(e.get("assetMainType") or "").upper() in ("MUTUAL_FUND", "INDEX")
+    last = (e.get("fundamental") or {}).get("lastEarningsDate")
+    try:
+        last = dt.date.fromisoformat(str(last)[:10]) if last else None
+    except ValueError:
+        last = None
+    return is_etf, last
+
+
 def quotes(symbols):
     """Tradier-shaped bulk quotes (used by discover.py / early_trend.py)."""
     syms = [_sym(s) for s in symbols]

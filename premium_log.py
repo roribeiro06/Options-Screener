@@ -12,9 +12,12 @@ AvgPremium column asks:
      OTM%, this IV and this DTE?"   ->  a [25th, 75th percentile] yield band.
 
 Storage: premium_log/YYYY-MM.jsonl, one JSON object per (date, ticker, kind):
-    {"d": "2026-10-15", "t": "MRVL", "k": "p", "s": 123.45,
+    {"d": "2026-10-15", "t": "MRVL", "k": "p", "s": 123.45, "e": "2026-11-18",
      "r": [[otm_pct, dte, iv_pct, ann_yield_pct], ...]}
-(all percentages, 1 decimal). Re-running a day replaces that day's lines.
+(all percentages, 1 decimal). "e" is the earnings status used that day: a date,
+"none (ETF)", "est YYYY-MM-DD" (estimated from Schwab's last report), or "not found"
+(those records are kept for the audit trail but ignored by observed_band).
+Re-running a day replaces that day's lines.
 
 Until a ticker has enough distinct days of data near a query's OTM/IV/DTE
 (MIN_DAYS / MIN_OBS), observed_band() returns None and the caller falls back to
@@ -89,6 +92,8 @@ def _load(force=False):
                     except ValueError:
                         continue
                     if rec.get("d", "") < cutoff:
+                        continue
+                    if rec.get("e") == "not found":      # earnings date unknown that day: could include a report window
                         continue
                     for otm, dte, iv, yld in rec.get("r", []):
                         try:

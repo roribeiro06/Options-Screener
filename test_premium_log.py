@@ -113,3 +113,62 @@ if os.path.exists(sample):
     print("real AAPL chain observations:", n)
 
 print("ALL PREMIUM-LOG TESTS PASSED")
+
+# ---------------- earnings status (never silent) ----------------
+import build_premium_log as B2
+t0 = dt.date(2026, 10, 15)
+# ETF
+assert B2.earnings_status("SPY", t0) == ("none (ETF)", None, 0)
+# real date from Yahoo/stockanalysis
+ws.get_earnings_date = lambda s: dt.date(2026, 11, 18)
+lab, d, sl = B2.earnings_status("MRVL", t0); assert (lab, d, sl) == ("2026-11-18", dt.date(2026, 11, 18), 0)
+# no date anywhere -> estimated from Schwab's last report, with slack
+ws.get_earnings_date = lambda s: None
+ws.use_schwab = lambda: True
+import schwab_data
+schwab_data.earnings_info = lambda s: (False, dt.date(2026, 7, 30))
+lab, d, sl = B2.earnings_status("AAPL", t0); assert lab == "est 2026-10-29" and sl == B2.EST_SLACK_DAYS, (lab, d)
+# a last date long ago rolls forward by quarters
+schwab_data.earnings_info = lambda s: (False, dt.date(2026, 1, 28))
+lab, d, sl = B2.earnings_status("AAPL", t0); assert d >= t0 - dt.timedelta(days=10), (lab, d)
+# fund detected by Schwab -> no earnings
+schwab_data.earnings_info = lambda s: (True, None)
+assert B2.earnings_status("XLK", t0)[0] == "none (ETF)"
+# nothing at all -> explicitly 'not found'
+schwab_data.earnings_info = lambda s: (False, None)
+assert B2.earnings_status("ZZZ", t0) == ("not found", None, 0)
+def boom(s): raise RuntimeError("down")
+schwab_data.earnings_info = boom
+assert B2.earnings_status("ZZZ", t0)[0] == "not found"
+# window logic
+e = dt.date(2026, 10, 29)
+assert B2.spans_earnings(t0, dt.date(2026, 11, 6), e, 0) and not B2.spans_earnings(t0, dt.date(2026, 10, 23), e, 0)
+assert B2.spans_earnings(t0, dt.date(2026, 10, 20), e, 10)          # estimate +-10d -> 10/19+ is excluded
+assert not B2.spans_earnings(t0, dt.date(2026, 10, 16), e, 10)
+assert not B2.spans_earnings(dt.date(2026, 11, 20), dt.date(2026, 12, 18), e, 10)   # report already past
+assert not B2.spans_earnings(t0, dt.date(2026, 12, 18), None, 0)
+# snapshot carries the label; 'not found' records are written but ignored by lookups
+ws.td_quote = lambda s: 100.0
+ws.td_expirations = lambda s: [(t0 + dt.timedelta(days=30)).isoformat()]
+ws.td_chain = lambda s, e: chain()
+ws.get_earnings_date = lambda s: None
+schwab_data.earnings_info = lambda s: (False, None)
+recs = B2.snapshot_ticker("ZZZ", t0)
+assert recs and all(r["e"] == "not found" for r in recs), recs
+PL.reset(); PL.LOG_DIR = tempfile.mkdtemp()
+for i in range(10):
+    dd = (dt.date.today() - dt.timedelta(days=i + 1)).isoformat()
+    PL.write_day(dd, [dict(recs[0], d=dd)])
+PL.reset()
+assert PL.observed_band("ZZZ", "put", 0.15, 30, 0.50) is None, "'not found' days must be ignored"
+for i in range(10):
+    dd = (dt.date.today() - dt.timedelta(days=i + 1)).isoformat()
+    PL.write_day(dd, [dict(recs[0], d=dd, e="2026-11-18")])
+PL.reset()
+assert PL.observed_band("ZZZ", "put", 0.15, 30, 0.50) is not None
+# the summary/annotations
+os.environ["GITHUB_STEP_SUMMARY"] = os.path.join(tempfile.mkdtemp(), "s.md")
+B2.report_earnings({"AAA": "2026-11-18", "BBB": "est 2026-10-29", "CCC": "not found", "SPY": "none (ETF)"})
+txt = open(os.environ["GITHUB_STEP_SUMMARY"]).read()
+assert "| CCC | not found |" in txt and "NOT FOUND" in txt and "Estimated:** BBB" in txt, txt
+print("ALL EARNINGS-STATUS TESTS PASSED")
