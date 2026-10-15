@@ -443,6 +443,17 @@ ETF_TOP_HOLDINGS = {
     "IGV": ["PLTR", "PANW", "MSFT", "CRWD", "ORCL"],
     "EWY": ["005930.KS", "000660.KS", "009150.KS", "402340.KS", "105560.KS"],
 }
+# build_etf_holdings.py (quarterly workflow) rewrites etf_holdings.json; when it's present and
+# sane it replaces the hard-coded lists above, which stay as the fallback.
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "etf_holdings.json"), encoding="utf-8") as _f:
+        _eh = json.load(_f)
+    _etfs = {k: list(v) for k, v in (_eh.get("etfs") or {}).items() if isinstance(v, list) and len(v) >= 1}
+    if _etfs:
+        ETF_TOP_HOLDINGS = {**ETF_TOP_HOLDINGS, **_etfs}
+        ETF_TOP_HOLDINGS_ASOF = (_eh.get("_meta") or {}).get("fetched", ETF_TOP_HOLDINGS_ASOF)
+except Exception:
+    pass
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
 ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans an earnings date. False: exclude them.
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
@@ -1427,7 +1438,7 @@ def get_earnings_date(symbol):
                 return d
         except Exception:
             pass
-    if symbol in NO_EARNINGS_TICKERS:
+    if symbol in NO_EARNINGS_TICKERS or symbol in ETF_TOP_HOLDINGS:
         return None
     tkr = _ticker(symbol)
     today = dt.date.today()

@@ -1,0 +1,52 @@
+{
+ "_meta": {
+  "fetched": "2026-10-15",
+  "source": "stockanalysis.com",
+  "top_n": 5,
+  "failed": []
+ },
+ "etfs": {
+  "SPY": [
+   "NVDA",
+   "AAPL",
+   "MSFT",
+   "AMZN",
+   "GOOGL"
+  ],
+  "QQQ": [
+   "NVDA",
+   "AAPL",
+   "MSFT",
+   "MU",
+   "AMZN"
+  ],
+  "DIA": [
+   "GS",
+   "CAT",
+   "MSFT",
+   "AMGN",
+   "V"
+  ],
+  "SMH": [
+   "NVDA",
+   "TSM",
+   "AMD",
+   "AVGO",
+   "TXN"
+  ],
+  "IGV": [
+   "PLTR",
+   "PANW",
+   "MSFT",
+   "CRWD",
+   "ORCL"
+  ],
+  "EWY": [
+   "005930.KS",
+   "000660.KS",
+   "009150.KS",
+   "402340.KS",
+   "105560.KS"
+  ]
+ }
+}

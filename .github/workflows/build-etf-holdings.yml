@@ -1,0 +1,39 @@
+name: Refresh ETF top-5 holdings
+
+# Rebuilds etf_holdings.json -- each screened ETF's top-5 holdings, which the screener uses
+# to leave an ETF out while one of those holdings reports earnings. Runs quarterly (the 2nd of
+# Jan/Apr/Jul/Oct, after the previous quarter's rebalances) and on demand: Actions ->
+# Refresh ETF top-5 holdings -> Run workflow. The run summary lists what changed and flags any
+# ETF whose refresh failed (its previous list is kept).
+on:
+  schedule:
+    - cron: "0 13 2 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Refresh holdings
+        env:
+          SCHWAB_CLIENT_ID: ${{ secrets.SCHWAB_CLIENT_ID }}
+          SCHWAB_CLIENT_SECRET: ${{ secrets.SCHWAB_CLIENT_SECRET }}
+          SCHWAB_REFRESH_TOKEN: ${{ secrets.SCHWAB_REFRESH_TOKEN }}
+        run: python build_etf_holdings.py
+      - name: Commit updated holdings
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add etf_holdings.json
+          git commit -m "Update ETF top-5 holdings" || echo "no changes to commit"
+          git pull --rebase
+          git push
