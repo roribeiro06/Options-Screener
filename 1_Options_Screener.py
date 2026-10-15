@@ -987,13 +987,12 @@ try:
 **What the columns mean** - OTM_% = how far the strike is out-of-the-money; POP_% = chance of keeping the premium (about 1 - delta).
 For puts, AnnYield = income on the cash you secure. For multi-leg: **Max Profit** = net credit received (the most you can make),
 MaxLoss = width - credit, **ROR** = Max Profit / MaxLoss, and **AnnROR** = ROR annualized.
-**AvgPremium** = the typical ANNUALIZED YIELD this ticker has carried at that OTM%/DTE over the past year (not a dollar amount),
-estimated from realized volatility (so it runs a touch low vs actual implied vol) - a "low%-high%" band, directly comparable to
-**AnnYield_%** (puts/calls) or **AnnROR_%** (spreads, built from each leg's yield band converted back to a credit at the live
-strikes/width). Where there's enough history at the ticker's CURRENT vol level, the band is also conditioned on live IV - "typical
-yield when vol was around what it is right now", not averaged across every vol regime the ticker saw all year - falling back to
-the OTM/DTE-only band otherwise. Live AnnYield_%/AnnROR_% above the band = richer than normal right now, below = cheaper.
-Refreshed weekly; "-" means no history yet.
+**AvgPremium** = what this ticker's options have **actually paid**, annualized (not a dollar amount), at about the same **OTM%, IV and DTE**
+as the row - the 25th-75th percentile of real option prices logged once a day (`premium_log/`, started 2026-10-15), shown as "low%-high%" and directly
+comparable to **AnnYield_%** (puts/calls) or **AnnROR_%** (spreads, built from each leg's observed yield converted back to a credit at the live
+strikes/width). Live AnnYield_%/AnnROR_% above the band = richer than this ticker has usually paid for that setup, below = cheaper.
+A leading **~** (e.g. "~18.0%-31.2%") means there are not yet enough logged days near that OTM/IV/DTE (needs 8+ distinct days), so it is the
+older *modeled* estimate (Black-Scholes on realized vol, refreshed weekly) instead - it gets replaced by real numbers as the log fills in. "-" = neither.
 
 **Capital:** **# of contracts** = whole contracts needed to reach at least \${getattr(ws, "CASH_TARGET", 40000):,} of collateral
 for puts (strike x 100), or \${getattr(sp, "SPREAD_CASH_TARGET", 25000):,} of max loss for

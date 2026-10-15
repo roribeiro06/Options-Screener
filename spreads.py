@@ -178,7 +178,9 @@ def _avg_credit_dollars(sym, dte, kind, short_strike, long_strike, spot, short_i
 
     credit_lo = max(0.0, _prem(s_yield[0], short_strike) - _prem(l_yield[0], long_strike))
     credit_hi = max(0.0, _prem(s_yield[1], short_strike) - _prem(l_yield[1], long_strike))
-    return (credit_lo, credit_hi)
+    out = ws.Band((credit_lo, credit_hi))
+    out.observed = bool(getattr(s_yield, "observed", False) and getattr(l_yield, "observed", False))
+    return out
 
 
 def _ann_ror_range(credit_range, width, dte):
@@ -193,7 +195,9 @@ def _ann_ror_range(credit_range, width, dte):
     if max_loss_lo <= 0 or max_loss_hi <= 0:
         return None
     ann = 365.0 / dte
-    return ((credit_lo / max_loss_lo) * ann, (credit_hi / max_loss_hi) * ann)
+    out = ws.Band(((credit_lo / max_loss_lo) * ann, (credit_hi / max_loss_hi) * ann))
+    out.observed = bool(getattr(credit_range, "observed", False))
+    return out
 
 
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
@@ -218,7 +222,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "MaxLoss": round(max_loss, 2),
             "ROR_%": ror, "AnnROR_%": ann, "POP_%": pop, "IV": iv,
             "Score": (round(score, 2) if score == score else float("nan")),
-            "AvgPremium": (f"{avg_credit[0]*100:.1f}%-{avg_credit[1]*100:.1f}%" if avg_credit else "-"),
+            "AvgPremium": ws.fmt_avg_band(avg_credit),
             "# of contracts": ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET),
             "OpenInt": int(oi), "EarningsDate": earn}
 
@@ -352,7 +356,8 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                 _ccd = _avg_credit_dollars(sym, dte, "call", cs["short"]["strike"], cs["long_strike"], spot,
                                            short_iv=cs["short"].get("iv"), long_iv=cs["long"].get("iv"))
                 if _pcd and _ccd:
-                    _combined_credit = (_pcd[0] + _ccd[0], _pcd[1] + _ccd[1])
+                    _combined_credit = ws.Band((_pcd[0] + _ccd[0], _pcd[1] + _ccd[1]))
+                    _combined_credit.observed = bool(getattr(_pcd, "observed", False) and getattr(_ccd, "observed", False))
                     acr = _ann_ror_range(_combined_credit, width, dte)
                 else:
                     acr = None

@@ -866,7 +866,41 @@ def _interp_band(table, key_lo, key_hi, lo, hi, value):
     return _lerp_band(table.get(key_lo), table.get(key_hi), frac)
 
 
+class Band(list):
+    """[low, high] annualized-yield fractions plus where they came from:
+    observed=True -> real logged option prices (premium_log.py); False -> the
+    Black-Scholes/realized-vol model in history_premiums.json."""
+    observed = False
+
+
+def fmt_avg_band(band):
+    """AvgPremium cell text: 'low%-high%' for observed data, '~low%-high%' when it's
+    only the modeled estimate, '-' when there's neither."""
+    if not band:
+        return "-"
+    return f"{'' if getattr(band, 'observed', False) else '~'}{band[0]*100:.1f}%-{band[1]*100:.1f}%"
+
+
 def avg_premium_range(symbol, otm, dte, kind="put", iv=None):
+    """The AvgPremium band: what this ticker's `kind` options have ACTUALLY paid,
+    annualized, at about this OTM%, IV and DTE -- from the daily snapshots in
+    premium_log/ (25th-75th percentile; needs premium_log.MIN_DAYS of data near
+    that point). Where there isn't enough logged data yet, falls back to the
+    modeled estimate (_modeled_avg_premium_range). Returns a Band (see above) or None."""
+    try:
+        import premium_log
+        obs = premium_log.observed_band(symbol, kind, otm, dte, iv)
+    except Exception:
+        obs = None
+    if obs:
+        b = Band(obs)
+        b.observed = True
+        return b
+    mod = _modeled_avg_premium_range(symbol, otm, dte, kind, iv)
+    return Band(mod) if mod else None
+
+
+def _modeled_avg_premium_range(symbol, otm, dte, kind="put", iv=None):
     """Historical typical ANNUALIZED YIELD [low, high] (fractions, e.g. 0.082 =
     8.2%) for this ticker at this OTM%/DTE, interpolated between the bracketing
     buckets in history_premiums.json (not snapped to whichever single bucket is
@@ -1432,7 +1466,7 @@ def screen_puts(symbol):
             _apr = avg_premium_range(symbol, (price - o["strike"]) / price, dte, iv=float(o["iv"] or 0))
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": o["strike"],
                    "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                   "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
+                   "AvgPremium": (fmt_avg_band(_apr)),
                    "MaxLoss": round(o["strike"] - premium, 2),
                    "# of contracts": contracts_for_target(o["strike"] * 100),
                    **_liq(o), **res}
@@ -1484,7 +1518,7 @@ def screen_calls(symbol, cost_basis):
             rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "CostBasis": cost_basis,
                    "Strike": o["strike"], "Expiration": exp, "DTE": dte,
                    "EarningsDate": earnings,
-                   "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
+                   "AvgPremium": (fmt_avg_band(_apr)),
                    "MaxLoss": (round(cost_basis - premium, 2) if cost_basis is not None else float("nan")),
                    "# of contracts": n_contracts,
                    **_liq(o), **res}
@@ -1547,7 +1581,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 _apr = avg_premium_range(symbol, (price - k) / price, dte, "put", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                       "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
+                       "AvgPremium": (fmt_avg_band(_apr)),
                        "MaxLoss": round(k - premium, 2),
                        "# of contracts": contracts_for_target(k * 100),
                        **_liq(o), **res}
@@ -1558,7 +1592,7 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 _apr = avg_premium_range(symbol, (k - price) / price, dte, "call", iv=float(o["iv"] or 0))
                 rec = {"Ticker": symbol, "CurrentPrice": round(price, 2), "Strike": k,
                        "Expiration": exp, "DTE": dte, "EarningsDate": earnings,
-                       "AvgPremium": (f"{_apr[0]*100:.1f}%-{_apr[1]*100:.1f}%" if _apr else "-"),
+                       "AvgPremium": (fmt_avg_band(_apr)),
                        "MaxLoss": float("nan"),  # no cost basis in Contract Lookup -- can't bound the loss
                        "# of contracts": contracts_for_target(price * 100),
                        **_liq(o), **res}
