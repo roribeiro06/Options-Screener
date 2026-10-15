@@ -52,3 +52,22 @@ settings = pd.DataFrame({
 ws.write_report([("Qualifying", df_pass), ("Near Misses", df_near)], settings,
                "qualifying_contracts_SAMPLE.xlsx")
 print("Wrote qualifying_contracts_SAMPLE.xlsx")
+
+# ---- ETF top-5 holdings earnings gate
+import datetime as _dt
+_orig_ged = ws.get_earnings_date
+_today = _dt.date(2026, 10, 15)
+_dates = {"NVDA": _dt.date(2026, 10, 28), "AAPL": _dt.date(2026, 11, 3), "MSFT": None}
+ws.get_earnings_date = lambda s: _dates.get(s)
+ws._ETF_EARN_CACHE.clear()
+assert ws.earnings_blocks("SPY", None, _today, _dt.date(2026, 11, 6)) is True          # NVDA 10/28 inside window
+assert ws.earnings_blocks("SPY", None, _today, _dt.date(2026, 10, 23)) is False         # expires before any report
+assert ws.etf_blocked_by("SPY", _today, _dt.date(2026, 11, 6)) == [("NVDA", _dt.date(2026, 10, 28)), ("AAPL", _dt.date(2026, 11, 3))]
+assert ws.etf_holding_earnings("SPY")["MSFT"] is None                                  # unknown date is visible, not blocking
+assert ws.earnings_blocks("SPY", None, _today, _dt.date(2026, 10, 20)) is False
+assert ws.earnings_blocks("MSFT", _dt.date(2026, 10, 28), _today, _dt.date(2026, 11, 6)) is True   # a stock: its own date still rules
+assert ws.earnings_blocks("MSFT", None, _today, _dt.date(2026, 11, 6)) is False
+assert ws.earnings_blocks("SPCX", None, _today, _dt.date(2026, 11, 6)) is False         # not an ETF in the list
+ws.get_earnings_date = _orig_ged
+ws._ETF_EARN_CACHE.clear()
+print("ETF holdings gate OK")

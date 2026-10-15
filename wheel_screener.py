@@ -429,6 +429,20 @@ HIGH_VOL_OTM_MIN    = 0.15
 HIGH_VOL_OTM_FLOOR  = 0.10
 HIGH_VOL_MIN_PREMIUM = 5000
 NO_EARNINGS_TICKERS = {"SPY", "QQQ", "DIA", "SMH", "IGV", "EWY"}   # ETFs: no earnings to span
+# ETFs (not index products) are also kept out of the screener while any of their TOP-5 HOLDINGS
+# reports earnings inside the contract's window -- those reports move the fund. Top-5 as of
+# ETF_TOP_HOLDINGS_ASOF (stockanalysis.com); holdings drift, so refresh roughly quarterly. EWY
+# holds Korean stocks, looked up by their Yahoo ".KS" codes (Samsung, SK hynix, Samsung
+# Electro-Mechanics, SK Square, KB Financial); an unknown date is shown, never silently treated as "none".
+ETF_TOP_HOLDINGS_ASOF = "2026-10-13"
+ETF_TOP_HOLDINGS = {
+    "SPY": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"],
+    "QQQ": ["NVDA", "AAPL", "MSFT", "MU", "AMZN"],
+    "DIA": ["GS", "CAT", "MSFT", "AMGN", "V"],
+    "SMH": ["NVDA", "TSM", "AMD", "AVGO", "TXN"],
+    "IGV": ["PLTR", "PANW", "MSFT", "CRWD", "ORCL"],
+    "EWY": ["005930.KS", "000660.KS", "009150.KS", "402340.KS", "105560.KS"],
+}
 EXCLUDE_IF_EARNINGS_UNKNOWN = False  # show stocks even if earnings date unconfirmed (use EARNINGS_DATES to be safe)
 ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans an earnings date. False: exclude them.
 # Manual earnings dates (YYYY-MM-DD). These OVERRIDE Yahoo and are the most reliable filter.
@@ -1152,11 +1166,41 @@ def _liq(o):
             "Volume": int(o.get("volume") or 0)}
 
 
+_ETF_EARN_CACHE = {}
+ETF_EARN_TTL_OK = 3 * 3600        # every holding's date found
+ETF_EARN_TTL_MISSING = 10 * 60    # some not found -> retry soon
+
+
+def etf_holding_earnings(etf):
+    """{holding: next earnings date, or None if it couldn't be found} for an ETF's top-5
+    holdings (ETF_TOP_HOLDINGS); {} for anything else. Cached so the per-expiration checks
+    in the screeners don't each re-query Yahoo."""
+    hit = _ETF_EARN_CACHE.get(etf)
+    if hit and _time.time() - hit[0] < (ETF_EARN_TTL_OK if all(v for v in hit[1].values()) else ETF_EARN_TTL_MISSING):
+        return hit[1]
+    out = {}
+    for h in ETF_TOP_HOLDINGS.get(etf, []):
+        try:
+            out[h] = get_earnings_date(h)
+        except Exception:
+            out[h] = None
+    _ETF_EARN_CACHE[etf] = (_time.time(), out)
+    return out
+
+
+def etf_blocked_by(etf, today, exp_date):
+    """Top-5 holdings of `etf` reporting between today and exp_date -> [(holding, date)]."""
+    return [(h, d) for h, d in etf_holding_earnings(etf).items() if d is not None and today <= d <= exp_date]
+
+
 def earnings_blocks(symbol, earnings, today, exp_date):
     """True if this expiration window must be excluded because of earnings.
-    Known date in window -> block. ETF (no earnings) -> never. Stock w/ unknown date -> block if strict."""
+    Known date in window -> block. ETF (no earnings of its own) -> blocked only if one of its
+    top-5 holdings reports in the window. Stock w/ unknown date -> block if strict."""
     if ALLOW_EARNINGS_IN_WINDOW:
         return False
+    if symbol in ETF_TOP_HOLDINGS:
+        return bool(etf_blocked_by(symbol, today, exp_date))
     if earnings is not None:
         return today <= earnings <= exp_date
     if symbol in NO_EARNINGS_TICKERS:

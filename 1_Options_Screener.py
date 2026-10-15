@@ -559,6 +559,21 @@ if vix is not None:
 else:
     st.info("VIX unavailable right now.")
 
+with st.expander("ETF earnings check (top-5 holdings)"):
+    _etf_rows = []
+    for _etf in ws.ETF_TOP_HOLDINGS:
+        _h = ws.etf_holding_earnings(_etf)
+        _next = sorted((d, h) for h, d in _h.items() if d)
+        _missing = [h for h, d in _h.items() if not d]
+        _etf_rows.append({"ETF": _etf,
+                          "Top-5 holdings": ", ".join(_h),
+                          "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
+                          "Date NOT FOUND for": ", ".join(_missing) or "-"})
+    st.caption(f"An ETF is left out of every screener while any of its top-5 holdings reports earnings inside the "
+               f"contract's window. Holdings as of {ws.ETF_TOP_HOLDINGS_ASOF}; a holding listed under NOT FOUND "
+               f"could not be checked.")
+    st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
+
 dp, ep = scan_puts(tuple(puts), CRITERIA)
 dc, ec = scan_calls(holds, CRITERIA)
 
