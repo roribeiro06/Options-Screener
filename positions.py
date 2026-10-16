@@ -274,7 +274,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
-                           "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh"]
+                           "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh", "UnrealizedGLDollars"]
 
 
 def _spread_group(dte, days_held):
@@ -572,7 +572,8 @@ def build_spread_actions_table(df):
             "RollNetLow": roll["net_low"] if roll else float("nan"),
             "RollNetHigh": roll["net_high"] if roll else float("nan"),
             "RollOpenLow": roll["open_low"] if roll else float("nan"),
-            "RollOpenHigh": roll["open_high"] if roll else float("nan")}))
+            "RollOpenHigh": roll["open_high"] if roll else float("nan"),
+            "UnrealizedGLDollars": r["UnrealizedGL_$"]}))
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))

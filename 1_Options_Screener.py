@@ -323,16 +323,28 @@ def _signed(x):
     return f"{'-' if x < 0 else '+'}${abs(x):.2f}"
 
 
-def _roll_net_line(lo, hi, n_int):
-    """Net gain/loss of the whole roll (the new spread's credit minus the
-    buy-back of the old one), worst to best case: signed per share with the
-    total across Contracts, e.g. "Net Gain/Loss: -$0.67 to -$0.15 (-$3,752 to
-    -$840)". A roll that costs money reads as a loss, one that pays as a gain."""
-    if pd.isna(lo) or pd.isna(hi):
+def _signed_total(x):
+    return f"{'-' if x < 0 else '+'}${abs(x):,.0f}"
+
+
+def _roll_net_line(open_lo, open_hi, unrealized, n_int):
+    """Net gain/loss of the roll: the new spread's credit (worst..best case, per
+    share) PLUS the position's current Unrealized G/L (a loss is negative) -- the loss
+    you lock in by closing, against the new premium you collect. The original credit
+    was already collected, so the buy-back cost is NOT subtracted again; it is already
+    inside Unrealized G/L. Signed per share with the total across Contracts, smaller
+    magnitude first like the other ranges (e.g. "-$0.54 to -$1.02 (-$3,024 to
+    -$5,712)"); a range that crosses zero reads loss-to-gain."""
+    if pd.isna(open_lo) or pd.isna(open_hi) or pd.isna(unrealized) or not n_int:
         return "Net Gain/Loss: -"
-    tot = (f" ({'-' if lo < 0 else '+'}${abs(lo) * 100 * n_int:,.0f} to "
-           f"{'-' if hi < 0 else '+'}${abs(hi) * 100 * n_int:,.0f})" if n_int else "")
-    return f"Net Gain/Loss: {_signed(lo)} to {_signed(hi)}{tot}"
+    per_loss = unrealized / (100.0 * n_int)
+    a, b = open_lo + per_loss, open_hi + per_loss
+    if (a < 0) != (b < 0) and a != 0 and b != 0:          # straddles zero: loss first
+        a, b = min(a, b), max(a, b)
+    elif abs(a) > abs(b):                                  # same sign: smaller magnitude first
+        a, b = b, a
+    return (f"Net Gain/Loss: {_signed(a)} to {_signed(b)} "
+            f"({_signed_total(a * 100 * n_int)} to {_signed_total(b * 100 * n_int)})")
 
 
 def _roll_position_summary(row):
@@ -367,7 +379,7 @@ def _spread_action_summary(row):
     open the new one. So when a roll was found (Kind == "roll"), this shows
     the Close order first and the Roll order second, joined by
     "--- THEN ---", in that execution order, with the roll's net gain/loss
-    at the very bottom. When no roll exists (Kind == "close" -- every
+    (new premium + the position's Unrealized G/L) at the very bottom. When no roll exists (Kind == "close" -- every
     non-roll action: STOP, TIME EXIT, TAKE PROFIT, PROFIT PULLBACK, CLOSE,
     DEAD TRADE, all a buy-back), there's only the Close order, so just that.
     Each side of an iron condor is its own row here (see
@@ -376,7 +388,7 @@ def _spread_action_summary(row):
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         return (f"{_close_position_summary(row)}\n\n--- THEN ---\n\n{_roll_position_summary(row)}\n\n"
-                + _roll_net_line(row.get("RollNetLow"), row.get("RollNetHigh"),
+                + _roll_net_line(row.get("RollOpenLow"), row.get("RollOpenHigh"), row.get("UnrealizedGLDollars"),
                                  int(n) if pd.notna(n) else None))
     return _close_position_summary(row)
 
@@ -834,7 +846,7 @@ try:
                    "count; the best-Score one is proposed with its net credit or debit. Click a row for an advisor-ready "
                    "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
                    "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
-                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom -- "
+                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom (the new premium plus the position's Unrealized G/L -- the buy-back isn't subtracted again, you already collected that credit) -- "
                    "in that execution order, not as alternatives; "
                    "when no roll exists, just the Close order. If nothing qualifies the action says CLOSE and why (e.g. a "
                    "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
