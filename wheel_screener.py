@@ -98,10 +98,6 @@ OPEN_POSITIONS = [
     # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
     {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
      "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28"},
-    # AAPL put credit spread: entry credit from the brokerage's cost basis on both
-    # legs -- short 315P $2,286.95 / 1,800 = 1.270528, long 300P $577.00 / 1,800 = 0.320556.
-    {"ticker": "AAPL", "type": "put_spread", "short_strike": 315, "long_strike": 300,
-     "expiration": "2026-10-23", "contracts": 18, "entry_credit": 0.949972, "entry_date": "2026-10-06"},
     # ORCL put credit spread: entry credit from the brokerage's cost basis on both
     # legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P $5,264.00 / 5,600 = 0.94.
     {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
@@ -123,6 +119,15 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # AAPL 315/300 put spread closed 10/16. Entry credit from the brokerage's cost basis
+    # on both legs -- short 315P $2,286.95 / 1,800 = 1.270528, long 300P $577.00 /
+    # 1,800 = 0.320556 -> 0.949972. Exit: short bought back for $263.00 (4 fills) and
+    # long sold for $82.96 (4 fills) -> exit_cost = (263.00 - 82.96) / 1,800 = 0.100022.
+    # Realized +$1,529.91 = short +$2,023.95 + long -$494.04 (the short leg's total
+    # matches the brokerage's exactly).
+    {"ticker": "AAPL", "type": "put_spread", "short_strike": 315, "long_strike": 300,
+     "expiration": "2026-10-23", "contracts": 18, "entry_credit": 0.949972, "entry_date": "2026-10-06",
+     "exit_cost": 0.100022, "exit_date": "2026-10-16"},
     # SPCX 170/180 call spread closed 10/13 (the 09/25 roll of the 160/170). Entry
     # credit from the 09/25 fills only (short 170C $2,838.93 / 2,700 = 1.051456,
     # long 180C $1,219.00 / 2,700 = 0.451481 -> 0.599974; the brokerage's 08/21
