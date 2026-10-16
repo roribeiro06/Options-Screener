@@ -107,10 +107,6 @@ OPEN_POSITIONS = [
     # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
      "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13"},
-    # UBER call credit spread: entry credit from the brokerage's cost basis on both
-    # legs -- short 76C $3,967.91 / 6,900 = 0.575059, long 80C $1,208.00 / 6,900 = 0.175072.
-    {"ticker": "UBER", "type": "call_spread", "short_strike": 76, "long_strike": 80,
-     "expiration": "2026-10-30", "contracts": 69, "entry_credit": 0.399987, "entry_date": "2026-10-13"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -119,6 +115,15 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # UBER 76/80 call spread closed 10/16 (opened 10/13). Entry credit from the brokerage's
+    # cost basis on both legs -- short 76C $3,967.91 / 6,900 = 0.575059, long 80C
+    # $1,208.00 / 6,900 = 0.175072 -> 0.399987. Exit: short bought back for $1,587.00
+    # (3 fills) and long sold for $413.97 (3 fills) -> exit_cost = (1,587.00 - 413.97) /
+    # 6,900 = 0.170004. Realized +$1,586.89 = short +$2,380.91 + long -$794.03 (the short
+    # leg's total matches the brokerage's +$2,380.92 to the cent).
+    {"ticker": "UBER", "type": "call_spread", "short_strike": 76, "long_strike": 80,
+     "expiration": "2026-10-30", "contracts": 69, "entry_credit": 0.399987, "entry_date": "2026-10-13",
+     "exit_cost": 0.170004, "exit_date": "2026-10-16"},
     # AAPL 315/300 put spread closed 10/16. Entry credit from the brokerage's cost basis
     # on both legs -- short 315P $2,286.95 / 1,800 = 1.270528, long 300P $577.00 /
     # 1,800 = 0.320556 -> 0.949972. Exit: short bought back for $263.00 (4 fills) and
