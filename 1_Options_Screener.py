@@ -360,7 +360,7 @@ def _long_leg_summary(row):
         if n_int:
             shares = 100 * n_int
             cash = float(short_k) * shares
-            lines.append(f"Purchase Power at Assignment: ${cash - (ec + hi_p) * shares:,.0f}-"
+            lines.append(f"Cash Needed: ${cash - (ec + hi_p) * shares:,.0f}-"
                          f"${cash - (ec + lo_p) * shares:,.0f} ({shares:,} shares x ${float(short_k):g} - Net Credit)")
     price = row.get("CurrentPrice")
     if pd.notna(price):
