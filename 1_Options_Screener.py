@@ -342,20 +342,19 @@ def _long_leg_summary(row):
              f"Expiration: {exp if pd.notna(exp) else '-'}",
              f"Sell ${float(long_k):g} Put (sell to close)",
              f"Premium: {_avg_max_range(lb, la, n_int)}"]
-    # The sale itself always brings money IN. The position's NET gain/loss with only the long leg
-    # sold = credit already collected on the spread + this sale - what it would cost to buy back
-    # the SHORT put (bid..halfway, same convention as the Close text above). The long leg is NOT
-    # also netted inside a spread-wide cost-to-close: it is sold here, so counting it in both
-    # places would overstate the result by the long leg's bid.
+    # Only the long leg is sold; the short put STAYS OPEN (left to be assigned if the stock gets
+    # there), so nothing is bought back. The net credit is therefore the credit already collected
+    # on the spread plus this sale -- that's the total premium now riding on the short put, and
+    # it is also what lowers the cost of the stock if assigned.
     lo_p, hi_p = ((lb + la) / 2, la) if la >= lb else (la, la)
-    ec, sb, sa = row.get("EntryCredit"), row.get("ShortBid"), row.get("ShortAsk")
-    if all(x is not None and pd.notna(x) for x in (ec, sb, sa)):
-        cost_lo, cost_hi = (sb, (sb + sa) / 2) if sa >= sb else (sa, sa)
-        lines.append(_signed_range_line("Net Gain/Loss", float(ec) + lo_p - cost_hi, float(ec) + hi_p - cost_lo, n_int)
-                     + f" (credit already collected + this sale - buying back the ${float(short_k):g} put)")
-        lines.append(f"If assigned at ${float(short_k):g}: effective cost ${float(short_k) - (float(ec) + hi_p):.2f}-"
-                     f"${float(short_k) - (float(ec) + lo_p):.2f}/share (strike minus the ${float(ec):.2f} already "
-                     f"collected and this sale)")
+    ec = row.get("EntryCredit")
+    if ec is not None and pd.notna(ec):
+        ec = float(ec)
+        tot = (f" (+${(ec + lo_p) * 100 * n_int:,.0f} to +${(ec + hi_p) * 100 * n_int:,.0f})" if n_int else "")
+        lines.append(f"Net Credit: +${ec + lo_p:.2f} to +${ec + hi_p:.2f}{tot} (credit already collected "
+                     f"+ this sale; the ${float(short_k):g} put stays open)")
+        lines.append(f"If assigned at ${float(short_k):g}: effective cost ${float(short_k) - (ec + hi_p):.2f}-"
+                     f"${float(short_k) - (ec + lo_p):.2f}/share (strike minus that net credit)")
     price = row.get("CurrentPrice")
     if pd.notna(price):
         lines += ["", f"Current Price: ${price:.2f}"]
