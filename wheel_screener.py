@@ -70,7 +70,10 @@ HOLDINGS_SHARES = {
 # spreads) -- tracked at the bottom of the app: entry price, current cost to
 # close, day $/%, and unrealized G/L. All assumed short (you collected a
 # credit); G/L = entry_credit - current cost to buy back. "type" is one of
-# "put", "call", "put_spread", "call_spread". Single-leg entries need "strike";
+# "put", "call", "put_spread", "call_spread". Put spreads may also carry "long_cost" -- what was
+# paid per share for the long (protective) leg, from the brokerage's cost basis -- used by the
+# click-to-copy "sell only the long put" option to show that leg's realized gain/loss.
+# Single-leg entries need "strike";
 # spreads need "short_strike" and "long_strike" instead. See positions.py.
 OPEN_POSITIONS = [
     {"ticker": "MSFT", "type": "call", "strike": 500, "expiration": "2026-08-28",
@@ -93,20 +96,24 @@ OPEN_POSITIONS = [
     # QQQ put credit spread: entry credit from the brokerage's cost basis on both
     # legs -- short 675P $4,271.91 / 800 = 5.3398875, long 640P $2,352.00 / 800 = 2.94.
     {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
-     "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25"},
+     "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25",
+     "long_cost": 2.94},
     # NVDA put credit spread: entry credit from the brokerage's cost basis on both
     # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
     {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
-     "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28"},
+     "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28",
+     "long_cost": 0.842593},
     # ORCL put credit spread: entry credit from the brokerage's cost basis on both
     # legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P $5,264.00 / 5,600 = 0.94.
     {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
-     "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08"},
+     "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08",
+     "long_cost": 0.94},
     # AVGO put credit spread (opened 10/13 after the 10/05 close of the 10/16 320/300):
     # entry credit from the brokerage's cost basis on both legs -- short 320P
     # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
-     "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13"},
+     "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13",
+     "long_cost": 1.628},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid

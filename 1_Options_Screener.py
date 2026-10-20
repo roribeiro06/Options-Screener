@@ -347,6 +347,10 @@ def _long_leg_summary(row):
     # on the spread plus this sale -- that's the total premium now riding on the short put, and
     # it is also what lowers the cost of the stock if assigned.
     lo_p, hi_p = ((lb + la) / 2, la) if la >= lb else (la, la)
+    lc = row.get("LongCost")          # what was paid for this leg (brokerage cost basis), when recorded
+    if lc is not None and pd.notna(lc):
+        lines.append(_signed_range_line("Gain/Loss on this leg", lo_p - float(lc), hi_p - float(lc), n_int)
+                     + f" (sale vs the ${float(lc):.2f} you paid)")
     ec = row.get("EntryCredit")
     if ec is not None and pd.notna(ec):
         ec = float(ec)
