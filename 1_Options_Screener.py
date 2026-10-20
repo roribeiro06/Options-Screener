@@ -319,6 +319,44 @@ def _close_position_summary(row):
     return "\n".join(lines)
 
 
+def _long_leg_summary(row):
+    """Copy-paste summary for SELLING ONLY the long (protective) leg of a PUT credit
+    spread, which leaves the short put in place as a plain cash-secured put -- e.g.
+    NVDA 205/195: sell the $195 put and keep the $205 put, so you still collect its
+    premium and are simply assigned the stock at $205 if it falls there. The premium
+    range is halfway-between-bid-and-ask up to the ask, same convention as any other
+    sell order (_avg_max_range). None for anything but a put spread, or when the
+    long leg's quote is unavailable. Call spreads are deliberately excluded: selling
+    the long call would leave a naked short call."""
+    if row.get("Type") != "Put Credit Spread" or "/" not in str(row.get("Strike", "")):
+        return None
+    lb, la = row.get("LongBid"), row.get("LongAsk")
+    if lb is None or la is None or pd.isna(lb) or pd.isna(la):
+        return None
+    short_k, long_k = str(row["Strike"]).split("/")[:2]
+    n = row.get("Contracts")
+    n_int = int(n) if pd.notna(n) else None
+    exp = row.get("Expiration")
+    lines = [f"Close {row['Ticker']}",
+             f"{n_int if n_int is not None else '-'} Contracts",
+             f"Expiration: {exp if pd.notna(exp) else '-'}",
+             f"Sell ${float(long_k):g} Put",
+             f"Premium: {_avg_max_range(lb, la, n_int)}"]
+    price = row.get("CurrentPrice")
+    if pd.notna(price):
+        lines += ["", f"Current Price: ${price:.2f}"]
+    return (f"--- OR: sell only the long ${float(long_k):g} put and keep the ${float(short_k):g} put ---\n\n"
+            + "\n".join(lines))
+
+
+def _close_position_summary_with_leg(row):
+    """Open Positions click-to-copy: the full close, plus (put spreads only) the
+    sell-just-the-long-leg alternative below it."""
+    text = _close_position_summary(row)
+    leg = _long_leg_summary(row)
+    return f"{text}\n\n{leg}" if leg else text
+
+
 def _signed(x):
     return f"{'-' if x < 0 else '+'}${abs(x):.2f}"
 
@@ -385,12 +423,14 @@ def _spread_action_summary(row):
     Each side of an iron condor is its own row here (see
     positions.build_spread_actions_table), so there's no combined-condor case
     to special-case."""
+    leg = _long_leg_summary(row)
+    tail = f"\n\n{leg}" if leg else ""
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         return (f"{_close_position_summary(row)}\n\n--- THEN ---\n\n{_roll_position_summary(row)}\n\n"
                 + _roll_net_line(row.get("RollOpenLow"), row.get("RollOpenHigh"), row.get("UnrealizedGLDollars"),
-                                 int(n) if pd.notna(n) else None))
-    return _close_position_summary(row)
+                                 int(n) if pd.notna(n) else None) + tail)
+    return _close_position_summary(row) + tail
 
 
 @st.fragment
@@ -809,12 +849,14 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
            "stock-to-zero assumption needed). Same refresh cadence as the rest of the app. Click any row "
            "for a copy-paste closing instruction to send your advisor (shown as a positive target price, "
-           "bid-to-halfway).")
+           "bid-to-halfway). For a **put spread** the pop-up also gives a second option underneath: sell only the "
+           "long (protective) put and keep the short put, so you keep collecting its premium and are simply "
+           "assigned the stock at that strike if it falls there (premium shown halfway-to-ask).")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
         _selectable_table(_dpos, positions._fmt(_dpos), "open_pos_tbl",
-                          summary_fn=_close_position_summary)
+                          summary_fn=_close_position_summary_with_leg)
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")
