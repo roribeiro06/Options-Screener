@@ -886,8 +886,9 @@ try:
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")
-        st.caption("Only credit spreads that currently trip a management rule, so anything listed needs a "
-                   "decision. Rule group is set by the DTE the trade was entered at: **1** = under 21, **2** = 21-45 (core), **3** = over 45 "
+        st.caption("Credit spreads that currently trip a management rule, plus **any spread with a negative "
+                   "Unrealized G/L** even when no rule has fired (listed last as **LOSING**): those show a roll when "
+                   "one passes the screener, otherwise HOLD with the reason -- never a close order you didn't ask for. Rule group is set by the DTE the trade was entered at: **1** = under 21, **2** = 21-45 (core), **3** = over 45 "
                    "(a Group 3 trade switches to Group 2 rules at 21 DTE). "
                    "**TargetBTC** = the buy-back price that captures the group's profit target (50% of the credit in "
                    "Groups 1 and 3, 70% in Group 2, so 50% / 30% of the credit), **StopBTC** = 2x the credit, both per share; "

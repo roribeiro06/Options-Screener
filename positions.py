@@ -274,6 +274,10 @@ ROLL_CHECK_TEXT = "21 DTE CHECK: short strike tested"
 PULLBACK_MIN_PEAK = 0.60
 PULLBACK_DRAWDOWN = 0.10
 PULLBACK_PREFIX = "PROFIT PULLBACK:"
+# Any credit spread with a negative unrealized G/L that no rule above already flagged is still
+# listed in Credit Spread Actions, ranked after all rule-driven rows, with a roll if one exists.
+LOSING_RANK = 5
+LOSING_TEXT = "LOSING: negative G/L"
 PEAKS_FILE = "position_peaks.json"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
@@ -543,6 +547,10 @@ def build_spread_actions_table(df):
                       else stored_peak)
         hit = spread_action(kind, float(str(r["Strike"]).split("/")[0]), r["CurrentPrice"],
                             r["DTE"], r["DaysHeld"], credit, cost, peak_gl_pct=peak_gl_pct)
+        if not hit and credit and credit > 0 and cost == cost and cost > credit:
+            # No management rule fired, but the spread is under water: list it anyway (last,
+            # after every rule-driven row) so a roll opportunity is visible whenever one exists.
+            hit = (LOSING_RANK, LOSING_TEXT)
         if not hit:
             continue
         rank, action = hit
@@ -558,6 +566,10 @@ def build_spread_actions_table(df):
                 or action.startswith(PULLBACK_PREFIX)):
             action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
                                      r["CostToCloseBid"], n, action)
+        elif rank == LOSING_RANK:
+            # a plain loser is not told to close -- only offered a roll if one exists, else HOLD
+            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
+                                     r["CostToCloseBid"], n, action, closing="HOLD")
         group = _spread_group(r["DTE"], r["DaysHeld"])
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
