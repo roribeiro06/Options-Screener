@@ -340,8 +340,20 @@ def _long_leg_summary(row):
     lines = [f"Close {row['Ticker']}",
              f"{n_int if n_int is not None else '-'} Contracts",
              f"Expiration: {exp if pd.notna(exp) else '-'}",
-             f"Sell ${float(long_k):g} Put",
+             f"Sell ${float(long_k):g} Put (sell to close)",
              f"Premium: {_avg_max_range(lb, la, n_int)}"]
+    # Selling the long leg only ever brings money IN (a credit), unlike buying back the whole
+    # spread -- and, added to the credit already collected, lowers the effective cost of the
+    # stock if the short put is assigned.
+    lo_p, hi_p = ((lb + la) / 2, la) if la >= lb else (la, la)
+    lines.append(f"Net Credit/Debit: CREDIT +${lo_p:.2f} to +${hi_p:.2f}"
+                 + (f" (+${lo_p * 100 * n_int:,.0f} to +${hi_p * 100 * n_int:,.0f})" if n_int else "")
+                 + " -- you receive this, you pay nothing")
+    ec = row.get("EntryCredit")
+    if ec is not None and pd.notna(ec):
+        lines.append(f"If assigned at ${float(short_k):g}: effective cost ${float(short_k) - (float(ec) + hi_p):.2f}-"
+                     f"${float(short_k) - (float(ec) + lo_p):.2f}/share (strike minus the ${float(ec):.2f} already "
+                     f"collected and this sale)")
     price = row.get("CurrentPrice")
     if pd.notna(price):
         lines += ["", f"Current Price: ${price:.2f}"]
