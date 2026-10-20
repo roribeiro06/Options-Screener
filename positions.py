@@ -71,7 +71,7 @@ def _sort_grouped(df, primary):
 
 POSITIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "Expiration", "DTE", "DaysHeld", "Opened",
                   "Contracts", "EntryCredit", "CostToCloseBid", "CostToClose", "UnrealizedGL_$",
-                  "UnrealizedGL_%", "MaxLoss", "LongBid", "LongAsk"]
+                  "UnrealizedGL_%", "MaxLoss", "LongBid", "LongAsk", "ShortBid", "ShortAsk"]
 CLOSED_COLS = ["Ticker", "Type", "Strike", "Expiration", "Opened", "Closed", "DaysHeld",
               "Contracts", "EntryCredit", "ExitCost", "RealizedGL_$", "RealizedGL_%", "MaxLoss"]
 PCT_COLS = {"UnrealizedGL_%", "RealizedGL_%"}
@@ -176,7 +176,7 @@ def evaluate_position(pos, today):
     if not chain:
         raise RuntimeError(f"no option chain for {ticker} {exp} (expired or invalid expiration?)")
 
-    long_bid = long_ask = float("nan")      # the spread's long leg's own quote (put spreads: see the click-to-copy
+    long_bid = long_ask = short_bid = short_ask = float("nan")      # the spread's long leg's own quote (put spreads: see the click-to-copy
     if kind in ("put", "call"):             # "close only the long leg" option in the app)
         strike = pos["strike"]
         leg = _leg_prices(chain, kind, strike)
@@ -195,7 +195,7 @@ def evaluate_position(pos, today):
         s_bid, s_ask, _s_prev = short_leg
         l_bid, l_ask, _l_prev = long_leg
         if kind == "put_spread":
-            long_bid, long_ask = l_bid, l_ask
+            long_bid, long_ask, short_bid, short_ask = l_bid, l_ask, s_bid, s_ask
         cost_to_close = s_ask - l_bid                        # worst case: buy back short at ask, sell long at bid
         cost_to_close_bid = s_bid - l_ask                    # best case: buy back short at bid, sell long at ask
 
@@ -222,7 +222,7 @@ def evaluate_position(pos, today):
             "CostToCloseBid": round(cost_to_close_bid, 2), "CostToClose": round(cost_to_close, 2),
             "UnrealizedGL_$": round(unrealized_pl * 100 * contracts, 2),
             "UnrealizedGL_%": unrealized_pl_pct, "MaxLoss": round(max_loss, 2),
-            "LongBid": long_bid, "LongAsk": long_ask}
+            "LongBid": long_bid, "LongAsk": long_ask, "ShortBid": short_bid, "ShortAsk": short_ask}
 
 
 def build_positions_table():
@@ -279,7 +279,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
                            "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh", "UnrealizedGLDollars", "EntryCredit",
-                           "LongBid", "LongAsk"]
+                           "LongBid", "LongAsk", "ShortBid", "ShortAsk"]
 
 
 def _spread_group(dte, days_held):
@@ -579,7 +579,8 @@ def build_spread_actions_table(df):
             "RollOpenLow": roll["open_low"] if roll else float("nan"),
             "RollOpenHigh": roll["open_high"] if roll else float("nan"),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
-            "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan"))}))
+            "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),
+            "ShortBid": r.get("ShortBid", float("nan")), "ShortAsk": r.get("ShortAsk", float("nan"))}))
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
     rows.sort(key=lambda t: (t[0], t[1]))
@@ -649,7 +650,7 @@ def build_closed_positions_table(window_days=30):
 
 
 def _fmt(df):
-    d = df.copy().drop(columns=["LongBid", "LongAsk"], errors="ignore")   # raw quotes for the click-to-copy leg text only
+    d = df.copy().drop(columns=["LongBid", "LongAsk", "ShortBid", "ShortAsk"], errors="ignore")   # raw quotes for the click-to-copy leg text only
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if v == v else "-")

@@ -342,15 +342,17 @@ def _long_leg_summary(row):
              f"Expiration: {exp if pd.notna(exp) else '-'}",
              f"Sell ${float(long_k):g} Put (sell to close)",
              f"Premium: {_avg_max_range(lb, la, n_int)}"]
-    # Selling the long leg only ever brings money IN (a credit), unlike buying back the whole
-    # spread -- and, added to the credit already collected, lowers the effective cost of the
-    # stock if the short put is assigned.
+    # The sale itself always brings money IN. The position's NET gain/loss with only the long leg
+    # sold = credit already collected on the spread + this sale - what it would cost to buy back
+    # the SHORT put (bid..halfway, same convention as the Close text above). The long leg is NOT
+    # also netted inside a spread-wide cost-to-close: it is sold here, so counting it in both
+    # places would overstate the result by the long leg's bid.
     lo_p, hi_p = ((lb + la) / 2, la) if la >= lb else (la, la)
-    lines.append(f"Net Credit/Debit: CREDIT +${lo_p:.2f} to +${hi_p:.2f}"
-                 + (f" (+${lo_p * 100 * n_int:,.0f} to +${hi_p * 100 * n_int:,.0f})" if n_int else "")
-                 + " -- you receive this, you pay nothing")
-    ec = row.get("EntryCredit")
-    if ec is not None and pd.notna(ec):
+    ec, sb, sa = row.get("EntryCredit"), row.get("ShortBid"), row.get("ShortAsk")
+    if all(x is not None and pd.notna(x) for x in (ec, sb, sa)):
+        cost_lo, cost_hi = (sb, (sb + sa) / 2) if sa >= sb else (sa, sa)
+        lines.append(_signed_range_line("Net Gain/Loss", float(ec) + lo_p - cost_hi, float(ec) + hi_p - cost_lo, n_int)
+                     + f" (credit already collected + this sale - buying back the ${float(short_k):g} put)")
         lines.append(f"If assigned at ${float(short_k):g}: effective cost ${float(short_k) - (float(ec) + hi_p):.2f}-"
                      f"${float(short_k) - (float(ec) + lo_p):.2f}/share (strike minus the ${float(ec):.2f} already "
                      f"collected and this sale)")
@@ -388,13 +390,19 @@ def _roll_net_line(open_lo, open_hi, unrealized, n_int):
     if pd.isna(open_lo) or pd.isna(open_hi) or pd.isna(unrealized) or not n_int:
         return "Net Gain/Loss: -"
     per_loss = unrealized / (100.0 * n_int)
-    a, b = open_lo + per_loss, open_hi + per_loss
+    return _signed_range_line("Net Gain/Loss", open_lo + per_loss, open_hi + per_loss, n_int)
+
+
+def _signed_range_line(label, a, b, n_int):
+    """'label: -$0.07 to -$0.12 (-$189 to -$324)': signed per share, with the total across
+    Contracts, smaller magnitude first like the other ranges; a range that crosses zero
+    reads loss-to-gain."""
     if (a < 0) != (b < 0) and a != 0 and b != 0:          # straddles zero: loss first
         a, b = min(a, b), max(a, b)
     elif abs(a) > abs(b):                                  # same sign: smaller magnitude first
         a, b = b, a
-    return (f"Net Gain/Loss: {_signed(a)} to {_signed(b)} "
-            f"({_signed_total(a * 100 * n_int)} to {_signed_total(b * 100 * n_int)})")
+    tot = (f" ({_signed_total(a * 100 * n_int)} to {_signed_total(b * 100 * n_int)})" if n_int else "")
+    return f"{label}: {_signed(a)} to {_signed(b)}{tot}"
 
 
 def _roll_position_summary(row):
