@@ -356,14 +356,12 @@ def _long_leg_summary(row):
         ec = float(ec)
         tot = (f" (+${(ec + lo_p) * 100 * n_int:,.0f} to +${(ec + hi_p) * 100 * n_int:,.0f})" if n_int else "")
         lines.append(f"Net Credit: +${ec + lo_p:.2f} to +${ec + hi_p:.2f}{tot} (credit already collected "
-                     f"+ this sale; the ${float(short_k):g} put stays open)")
-        lines.append(f"If assigned at ${float(short_k):g}: effective cost ${float(short_k) - (ec + hi_p):.2f}-"
-                     f"${float(short_k) - (ec + lo_p):.2f}/share (strike minus that net credit)")
+                     f"+ this sale)")
         if n_int:
             shares = 100 * n_int
             cash = float(short_k) * shares
-            lines.append(f"Cash needed to buy the shares if assigned: ${cash:,.0f} ({shares:,} shares x ${float(short_k):g}); "
-                         f"${cash - (ec + hi_p) * shares:,.0f}-${cash - (ec + lo_p) * shares:,.0f} after the net credit")
+            lines.append(f"Purchase Power at Assignment: ${cash - (ec + hi_p) * shares:,.0f}-"
+                         f"${cash - (ec + lo_p) * shares:,.0f} ({shares:,} shares x ${float(short_k):g} - Net Credit)")
     price = row.get("CurrentPrice")
     if pd.notna(price):
         lines += ["", f"Current Price: ${price:.2f}"]
