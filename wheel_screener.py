@@ -114,6 +114,11 @@ OPEN_POSITIONS = [
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
      "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13",
      "long_cost": 1.628},
+    # TSM put credit spread (opened 10/20): entry credit from the brokerage's cost basis on both
+    # legs -- short 380P $3,720.91 / 1,400 = 2.657793, long 360P $1,761.00 / 1,400 = 1.257857.
+    {"ticker": "TSM", "type": "put_spread", "short_strike": 380, "long_strike": 360,
+     "expiration": "2026-11-20", "contracts": 14, "entry_credit": 1.399936, "entry_date": "2026-10-20",
+     "long_cost": 1.257857},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
