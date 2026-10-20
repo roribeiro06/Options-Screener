@@ -392,6 +392,11 @@ MIN_TOTAL_PREMIUM = 1000
 # The course's net-credit-only rule for the roll itself can't be checked
 # here, so it stays a manual check.
 ROLL_SHORT_DELTA = 0.30
+# False: an open position ALWAYS blocks its side on the screener, even a deep loser -- e.g. an open
+# AVGO put spread keeps AVGO off the put/put-spread screeners (call spreads still show). Rolls are
+# proposed by the Credit Spread Actions table instead. True restores the old behaviour in which a
+# loser meeting the rule above stopped blocking so it reappeared on the screener as a roll candidate.
+RELEASE_LOSING_POSITIONS = False
 
 # --- Cash-secured-put-only filters (do NOT apply to covered calls or spreads) ---
 PUT_MIN_PREMIUM      = 0.0    # absolute $/share premium floor. OFF (using % of strike below instead).
@@ -1098,7 +1103,7 @@ def open_position_sides(symbol):
     for p in OPEN_POSITIONS:
         if p["ticker"] != symbol:
             continue
-        if _position_roll_eligible(p):
+        if RELEASE_LOSING_POSITIONS and _position_roll_eligible(p):
             continue
         if p["type"] in ("put", "put_spread"):
             sides.add("put")
