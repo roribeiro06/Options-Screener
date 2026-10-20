@@ -2,5 +2,22 @@
 "_meta": {
 "note": "peak unrealized G/L % per open credit spread, refreshed on notify_email.py's own schedule"
 },
-"positions": {}
+"positions": {
+"AVGO|Put Credit Spread|320/300|2026-11-20|2026-10-13": {
+"peak_gl_pct": -1.298698,
+"as_of": "2026-10-20T13:35:25Z"
+},
+"NVDA|Put Credit Spread|205/195|2026-10-30|2026-09-28": {
+"peak_gl_pct": -0.805272,
+"as_of": "2026-10-20T13:35:25Z"
+},
+"ORCL|Put Credit Spread|125/120|2026-10-30|2026-10-08": {
+"peak_gl_pct": -1.736972,
+"as_of": "2026-10-20T13:35:25Z"
+},
+"QQQ|Put Credit Spread|675/640|2026-11-20|2026-09-25": {
+"peak_gl_pct": -0.595908,
+"as_of": "2026-10-20T13:35:25Z"
+}
+}
 }
