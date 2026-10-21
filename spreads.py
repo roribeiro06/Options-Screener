@@ -886,6 +886,82 @@ def lookup_iron_condor(symbol, put_strike_min=None, put_strike_max=None,
     return rows
 
 
+LOOKUP_STRADDLE_WINDOW = 0.10    # straddle lookup with no strike range: strikes within +-10% of the price
+LOOKUP_STRANGLE_WINDOW = 0.15    # strangle lookup with no range: each leg at most 15% out of the money
+LOOKUP_MAX_ROWS = 5000           # a strangle pairs every put with every call -- stop before it gets silly
+
+
+def lookup_long(symbol, kind="straddle", put_strike_min=None, put_strike_max=None,
+                call_strike_min=None, call_strike_max=None, exp_start=None, exp_end=None):
+    """Manual lookup of long straddles / long strangles (BUYING one put and one call),
+    shown regardless of the screener's POP / AnnROR / premium-floor / open-interest
+    criteria or any earnings requirement -- same "show everything, you decide" ethos
+    as lookup_spreads / lookup_iron_condor. Rows have the screener's own long-strategy
+    shape (_long_row): the debit is MaxLoss, Breakeven is the two prices the stock
+    must clear, and ROR/Score come from the IV-implied expected move. Only legs that
+    can actually be bought (an ask) are listed.
+
+      straddle -- a put and call at the SAME strike. put_strike_min/max bound that
+                  strike (default: within LOOKUP_STRADDLE_WINDOW of the price).
+      strangle -- an OTM put (strike below the price) paired with an OTM call (above
+                  it): put_strike_min/max bound the put, call_strike_min/max the call
+                  (default: each within LOOKUP_STRANGLE_WINDOW of the price). Every
+                  put pairs with every call, so the count is the PRODUCT of the two
+                  ranges -- narrow them; results stop at LOOKUP_MAX_ROWS."""
+    price = ws.td_quote(symbol)
+    if not price:
+        raise RuntimeError("no quote")
+    price = float(price)
+    earnings = ws.get_earnings_date(symbol)
+    today = dt.date.today()
+
+    def _buyable(leg):
+        return bool(leg) and (leg.get("ask") or 0) > 0
+
+    def _make(chain, p, c, exp, dte):
+        debit = (p["ask"] or 0) + (c["ask"] or 0)
+        s = {"put": p, "call": c, "debit": debit, "debit_best": (p.get("bid") or 0) + (c.get("bid") or 0)}
+        pop = abs(p.get("delta") or 0) + abs(c.get("delta") or 0)
+        return _long_row(symbol, price, exp, dte, earnings, s, pop)
+
+    rows = []
+    for exp, exp_date, dte in _all_expirations(symbol, today):
+        if exp_start and exp_date < exp_start:
+            continue
+        if exp_end and exp_date > exp_end:
+            continue
+        chain = ws.td_chain(symbol, exp)
+        if kind == "straddle":
+            lo = put_strike_min if put_strike_min is not None else price * (1 - LOOKUP_STRADDLE_WINDOW) - 1e-9
+            hi = put_strike_max if put_strike_max is not None else price * (1 + LOOKUP_STRADDLE_WINDOW) + 1e-9
+            common = ({o["strike"] for o in chain if o["type"] == "put"}
+                      & {o["strike"] for o in chain if o["type"] == "call"})
+            for k in sorted(common):
+                if k < lo or k > hi:
+                    continue
+                p, c = _leg_at(chain, "put", k), _leg_at(chain, "call", k)
+                if _buyable(p) and _buyable(c):
+                    rows.append(_make(chain, p, c, exp, dte))
+        else:   # strangle
+            plo = put_strike_min if put_strike_min is not None else price * (1 - LOOKUP_STRANGLE_WINDOW) - 1e-9
+            phi = put_strike_max if put_strike_max is not None else price
+            clo = call_strike_min if call_strike_min is not None else price
+            chi = call_strike_max if call_strike_max is not None else price * (1 + LOOKUP_STRANGLE_WINDOW) + 1e-9
+            puts = [o["strike"] for o in chain if o["type"] == "put" and plo <= o["strike"] <= phi and o["strike"] < price]
+            calls = [o["strike"] for o in chain if o["type"] == "call" and clo <= o["strike"] <= chi and o["strike"] > price]
+            for pk in sorted(set(puts)):
+                p = _leg_at(chain, "put", pk)
+                if not _buyable(p):
+                    continue
+                for ck in sorted(set(calls)):
+                    c = _leg_at(chain, "call", ck)
+                    if _buyable(c):
+                        rows.append(_make(chain, p, c, exp, dte))
+                if len(rows) >= LOOKUP_MAX_ROWS:
+                    return rows
+    return rows
+
+
 def _df(rows):
     if not rows:
         return pd.DataFrame(columns=SPREAD_COLS)

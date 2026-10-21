@@ -271,7 +271,8 @@ def _contract_summary(row):
         # Long straddle/strangle: MaxLoss IS the debit paid, a single
         # number, not a worst/best range -- nothing to average.
         per_share = row.get("MaxLoss")
-        prem_txt = f"${per_share:.2f}" if pd.notna(per_share) else "-"
+        prem_txt = (f"${per_share:.2f}" + (f" (${per_share * 100 * n_int:,.0f})" if n_int else "")
+                    if pd.notna(per_share) else "-")
     return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
 
 
@@ -530,6 +531,11 @@ def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None, csmin=No
     if kind in ("put", "call"):
         rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
         return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
+    if kind in ("straddle", "strangle"):
+        # long (bought) put + call: straddle = same strike (smin/smax bound it); strangle = smin/smax bound
+        # the PUT strike, csmin/csmax the CALL strike (see spreads.lookup_long)
+        rows = sp.lookup_long(ticker, kind, smin, smax, csmin, csmax, estart, eend)
+        return sp._df(rows)
     if kind == "iron_condor":
         # smin/smax bound the PUT short strike, csmin/csmax the CALL short strike --
         # two independent ranges, since a condor pairs one of each (see lookup_iron_condor).
@@ -679,28 +685,36 @@ st.markdown("---")
 st.header("Contract Lookup")
 st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
            "(cash-secured puts), calls (covered calls, as if you held the shares), put/call credit "
-           "spreads, or iron condors - even ones that don't pass the criteria above. Puts/put spreads "
+           "spreads, iron condors, or long straddles/strangles (bought, not sold) - even ones that don't pass the criteria above. Puts/put spreads "
            "show strikes below the price, calls/call spreads above it. For spreads, Strike min/max "
            "filters the SHORT leg; the long leg is auto-picked at the Spread width % set below "
            "(independent of the sidebar's own Spread width %, which only affects Multi-Leg Strategies). "
            "**For an iron condor**, Strike min/max filters the PUT side's short strike and Call strike "
            "min/max filters the CALL side's -- two independent ranges, since a condor pairs one of each; "
            "the result count is the PRODUCT of how many strikes qualify on each side, not the sum, so "
-           "narrow both ranges more than you would for a single-sided spread search. Same stats (Score, "
-           "yields, IV, liquidity) as everywhere else.")
+           "narrow both ranges more than you would for a single-sided spread search. "
+           "**Straddle / Strangle** (long -- you BUY the put and call): a straddle is the put and call at the "
+           "same strike -- Strike min/max bound that strike (blank = within 10% of the price); a strangle pairs "
+           "an out-of-the-money put with an out-of-the-money call -- Strike min/max bound the PUT strike and "
+           "Call strike min/max the CALL strike (blank = each within 15% of the price), and like a condor the "
+           "result count is the product of the two ranges. Shown with the screener's own long-strategy columns "
+           "(MaxLoss = the debit paid, Breakeven, ROR from the IV-implied move) and no earnings requirement. "
+           "Same stats (Score, yields, IV, liquidity) as everywhere else.")
 with st.form("lookup_form"):
     _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
     lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
-    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread", "iron_condor"], horizontal=True,
+    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread", "iron_condor", "straddle", "strangle"],
+                        horizontal=True,
                         format_func=lambda k: {"put": "Put", "call": "Call",
                                                "put_spread": "Put Spread",
                                                "call_spread": "Call Spread",
-                                               "iron_condor": "Iron Condor"}[k])
+                                               "iron_condor": "Iron Condor",
+                                               "straddle": "Straddle", "strangle": "Strangle"}[k])
     lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
     lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
     _e1, _e2 = st.columns(2)
-    lk_csmin = _e1.number_input("Call strike min (iron condor only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
-    lk_csmax = _e2.number_input("Call strike max (iron condor only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_csmin = _e1.number_input("Call strike min (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_csmax = _e2.number_input("Call strike max (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
     _d1, _d2, _d3 = st.columns(3)
     _today = datetime.now().date()
     lk_start = _d1.date_input("Expiration from", _today)
@@ -729,7 +743,8 @@ if _lq:
         if len(_res):
             _label = {"put": "cash-secured put", "call": "covered call",
                       "put_spread": "put credit spread", "call_spread": "call credit spread",
-                      "iron_condor": "iron condor"}[_q_kind]
+                      "iron_condor": "iron condor",
+                      "straddle": "long straddle", "strangle": "long strangle"}[_q_kind]
             _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread", "iron_condor") else ""
             st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker}{_width_note} ({_q_start} to {_q_end}).")
             if _q_kind in ("put", "call"):
@@ -737,6 +752,9 @@ if _lq:
             else:
                 _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
                                               "Call Max Profit", "Call Max Profit (Best)"])
+                for _lk_mc in ("Max Profit", "Max Profit (Best)"):    # long straddle/strangle: no real max profit
+                    if _lk_mc in _lk_disp.columns and _lk_disp[_lk_mc].isna().all():
+                        _lk_disp = _lk_disp.drop(columns=[_lk_mc])
                 for _lk_lc in ("Put Legs", "Call Legs"):     # drop the always-empty side
                     if _lk_lc in _lk_disp.columns and (_lk_disp[_lk_lc].fillna("") == "").all():
                         _lk_disp = _lk_disp.drop(columns=[_lk_lc])
