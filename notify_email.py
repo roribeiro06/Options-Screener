@@ -169,6 +169,20 @@ def build_monthly():
     return df
 
 
+def vix_html():
+    """VIX banner shared by every email this repo sends (screener + early trend):
+    same ws.get_vix()/ws.vix_regime() the app's top banner uses. Never raises --
+    a failed quote just says unavailable rather than killing the email."""
+    try:
+        v = ws.get_vix()
+    except Exception:
+        v = None
+    if v is None:
+        return "<p><b>VIX unavailable right now.</b></p>"
+    return (f"<p style='background:#eef3fb;border-left:4px solid #1F3864;padding:6px 10px'>"
+            f"<b>VIX {v}</b> - {ws.vix_regime(v)}</p>")
+
+
 def _table(df, fmt):
     return fmt(df).to_html(index=False, border=0)
 
@@ -251,7 +265,7 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
     return (f"<html><head>{style}</head><body>"
             f"<h1>Options Screener</h1>"
             f"<p>{now_et:%A %b %d, %Y  %I:%M %p ET}. Educational only, not financial advice. "
-            f"Prices via Schwab (real-time).</p>{delay_banner}"
+            f"Prices via Schwab (real-time).</p>{vix_html()}{delay_banner}"
             f"{section('Cash-Secured Puts', puts, ws._fmt)}"
             f"{section('Covered Calls', calls, ws._fmt)}"
             f"<h2>Multi-Leg Strategies</h2>{spreads_body}"

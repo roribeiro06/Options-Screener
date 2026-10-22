@@ -34,7 +34,7 @@ import datetime as dt
 import pandas as pd
 
 import early_trend as et
-from notify_email import _now_et, send
+from notify_email import _now_et, send, vix_html
 
 TARGET_HOUR_ET = 10          # 10:00 AM ET
 TIME_TOLERANCE_MIN = 20      # accept a tick up to this many minutes after the target,
@@ -79,6 +79,7 @@ def html_email(df, total_qualifying, now_et):
             f"it runs. Chance of Boom % is a historical base rate for tickers whose Score "
             f"landed in the same range, not a probability for this specific ticker. See "
             f"backtest_early_trend.py for how these exact rules performed historically.</p>"
+            f"{vix_html()}"
             f"{body}"
             "</body></html>")
 
