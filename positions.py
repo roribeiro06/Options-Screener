@@ -44,6 +44,7 @@ ITM/assigned instead, add the real CLOSED_POSITIONS entry with its true
 exit_cost -- an explicit entry always overrides this assumption.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -281,7 +282,7 @@ LOSING_TEXT = "LOSING: negative G/L"
 PEAKS_FILE = "position_peaks.json"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
-                       "Recommendation", "Technical Read"]
+                       "Recommendation", "Forward Outlook", "Trend Context (lagging)"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "Recommendation", "Roll1Exp", "Roll1Sell", "Roll1Buy",
                            "Roll1NetLow", "Roll1NetHigh", "Roll1OpenLow", "Roll1OpenHigh",
@@ -389,14 +390,21 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     cur = dt.date.fromisoformat(exp)
     rows = sp.lookup_spreads(ticker, spread_kind, exp_start=cur + dt.timedelta(days=1),
                              exp_end=today + dt.timedelta(days=sp.SPREAD_DTE_MAX))
+    try:
+        earnings = ws.get_earnings_date(ticker)
+    except Exception:
+        earnings = None
+    # Never roll across earnings: an expiration on/after a KNOWN earnings date is skipped, so the
+    # roll lands in the closest expiration(s) before it instead.
     cands = [r for r in rows
-             if sp.SPREAD_DTE_MIN <= r["DTE"] <= sp.SPREAD_DTE_MAX
+             if not (earnings and today <= earnings <= dt.date.fromisoformat(r["Expiration"]))
+             and sp.SPREAD_DTE_MIN <= r["DTE"] <= sp.SPREAD_DTE_MAX
              and r["OpenInt"] >= ws.MIN_OPEN_INTEREST
              and r["Max Profit"] > 0
              and r["Score"] == r["Score"]]
     if not cands:
-        return (f"no spread in a later expiration has {ws.MIN_OPEN_INTEREST:,}+ open interest "
-                f"on both legs with a scoreable credit"), None
+        return (f"no spread in a later expiration{f' before earnings on {earnings}' if earnings else ''} has "
+                f"{ws.MIN_OPEN_INTEREST:,}+ open interest on both legs with a scoreable credit"), None
     r = max(cands, key=lambda c: c["Score"])
     net = r["Max Profit"] - cost
     legs = r["Put Legs"] or r["Call Legs"]
@@ -488,6 +496,12 @@ def _try_roll(ticker, exp, kind, strikes, cost, cost_bid, n, action, closing="CL
             parts.append(f"ROLL 2 (best Score, 1,000+ open interest only) {r2_text}")
     else:
         parts.append(f"ROLL 2 (best Score, 1,000+ open interest only): none -- {r2_text}")
+    try:
+        earn = ws.get_earnings_date(ticker)
+    except Exception:
+        earn = None
+    if earn and dt.date.today() <= earn <= dt.date.today() + dt.timedelta(days=sp.SPREAD_DTE_MAX):
+        parts.append(f"[expirations on/after earnings {earn} excluded]")
     return f"{action} -> " + " || ".join(parts), {"r1": r1, "r2": r2}
 
 
@@ -512,12 +526,20 @@ def _tech_snapshot(ticker):
         closes = df["Close"].dropna() if df is not None and not df.empty else None
         if closes is not None and len(closes) >= 60:
             delta = closes.diff()
-            up = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
-            dn = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
+            up_s = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+            dn_s = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+            rsi_s = (100 - 100 / (1 + up_s / dn_s.replace(0, float("nan")))).fillna(100.0)
+            macd = closes.ewm(span=12, adjust=False).mean() - closes.ewm(span=26, adjust=False).mean()
+            hist = macd - macd.ewm(span=9, adjust=False).mean()
             snap = {"sma50": float(closes.tail(50).mean()),
                     "sma200": float(closes.tail(200).mean()) if len(closes) >= 200 else None,
                     "ret20": float(closes.iloc[-1] / closes.iloc[-21] - 1) if len(closes) >= 21 else None,
-                    "rsi": float(100 - 100 / (1 + up / dn)) if dn else 100.0}
+                    "rsi": float(rsi_s.iloc[-1]),
+                    # short-horizon / turning-point inputs for the forward outlook
+                    "rsi_prev": float(rsi_s.iloc[-4]),
+                    "macd_hist": float(hist.iloc[-1]), "macd_prev": float(hist.iloc[-4]),
+                    "ret5": float(closes.iloc[-1] / closes.iloc[-6] - 1),
+                    "rv20": float(closes.pct_change().tail(20).std() * math.sqrt(252))}
     except Exception as e:
         print(f"TECH {ticker}: ERROR {e}", file=sys.stderr)
     _TECH_CACHE[key] = snap
@@ -553,6 +575,139 @@ def _put_call_oi(ticker):
     ratio = (puts / calls) if calls else None
     _PC_CACHE[key] = ratio
     return ratio
+
+
+# --- Forward outlook: leading / market-implied inputs only (no 50/200-day, no 20-day) ---
+FWD_CLOSE_SCORE = -2       # forward score at or below this -> CLOSE
+FWD_MACD_MIN = 0.0003      # MACD-histogram change over 3 days, as a fraction of price, to count
+FWD_RSI_MIN = 2.0          # RSI points of change over 3 days to count
+FWD_RET5_MIN = 0.005       # 5-day move to count
+FWD_Z_FAR, FWD_Z_NEAR = 0.75, 0.30     # short-strike cushion in expected moves: comfortable / thin
+FWD_TERM_UP, FWD_TERM_INV = 0.01, -0.02   # IV(60d) - IV(30d): normal / inverted (near-term stress)
+FWD_IVRV_RICH, FWD_IVRV_THIN = 1.15, 0.90  # ATM IV (30d) / 20-day realized vol
+_FWD_OPT_CACHE = {}
+
+
+def _atm_iv_near(ticker, target_dte):
+    """ATM (50-delta call) implied vol of the expiration closest to `target_dte`
+    (at least 14 DTE, within 20 days of the target), or None."""
+    best = None
+    for e in ws.td_expirations(ticker):
+        dte = (dt.date.fromisoformat(e) - dt.date.today()).days
+        if dte < 14:
+            continue
+        gap = abs(dte - target_dte)
+        if best is None or gap < best[0]:
+            best = (gap, e)
+    if not best or best[0] > 20:
+        return None
+    ch = ws.td_chain(ticker, best[1]) or []
+    atm = min((o for o in ch if o["type"] == "call" and o.get("delta") is not None and o.get("iv")),
+              key=lambda o: abs(o["delta"] - 0.5), default=None)
+    return atm["iv"] if atm else None
+
+
+def _option_forward(ticker, kind, price, exp, short_strike):
+    """What the OPTIONS market is pricing for this spread: z = how many one-standard-
+    deviation expected moves (from the short leg's own IV) the short strike sits from
+    the price (negative = in the money), the short leg's POP, the ATM IV term structure
+    (IV 60d minus IV 30d) and the 30-day ATM IV. Any piece may be None. Cached per day."""
+    key = (ticker, kind, exp, short_strike, dt.date.today())
+    if key in _FWD_OPT_CACHE:
+        return _FWD_OPT_CACHE[key]
+    out = {"z": None, "pop": None, "term": None, "iv30": None}
+    try:
+        dte = (dt.date.fromisoformat(exp) - dt.date.today()).days
+        leg = sp._leg_at(ws.td_chain(ticker, exp) or [], kind, short_strike)
+        if leg and leg.get("iv") and dte > 0:
+            dist = (price - short_strike) if kind == "put" else (short_strike - price)
+            out["z"] = dist / (price * leg["iv"] * math.sqrt(dte / 365))
+            if leg.get("delta") is not None:
+                out["pop"] = 1 - abs(leg["delta"])
+        iv30, iv60 = _atm_iv_near(ticker, 30), _atm_iv_near(ticker, 60)
+        out["iv30"] = iv30
+        if iv30 and iv60:
+            out["term"] = iv60 - iv30
+    except Exception as e:
+        print(f"FWD OPT {ticker}: ERROR {e}", file=sys.stderr)
+    _FWD_OPT_CACHE[key] = out
+    return out
+
+
+def _forward_outlook(ticker, kind, price, exp, strike_str):
+    """-> (score, signals). Each signal is {"name", "v" (+1 for the spread, -1 against,
+    0 neutral), "label" (short, with numbers), "phrase" (plain English, for the sentence)}.
+    Only leading / forward-looking inputs -- the 50/200-day averages and the 20-day move
+    are deliberately NOT here (they just restate the recent drop):
+      momentum turning: MACD histogram now vs 3 days ago, RSI now vs 3 days ago, 5-day move
+      (a put spread is bullish, so "for" = turning UP; a call spread is the reverse);
+      what options price: short-strike cushion in expected moves, IV term structure
+      (inverted = near-term stress), 30-day IV vs 20-day realized vol (rich/thin premium);
+      catalyst: earnings before this spread expires.
+    score = signals for minus signals against; a missing input is simply skipped."""
+    sign = 1 if kind == "put" else -1
+    short = float(str(strike_str).split("/")[0])
+    sigs = []
+
+    def add(name, v, label, phrase):
+        sigs.append({"name": name, "v": v, "label": label, "phrase": phrase})
+
+    snap = _tech_snapshot(ticker)
+    if snap and price and price == price:
+        d = (snap["macd_hist"] - snap["macd_prev"]) / price * sign
+        arrow = f"{snap['macd_prev']:.2f}->{snap['macd_hist']:.2f}"
+        add("MACD", 1 if d > FWD_MACD_MIN else -1 if d < -FWD_MACD_MIN else 0, f"MACD hist {arrow}",
+            f"MACD momentum is turning in its favor ({snap['macd_prev']:.2f} to {snap['macd_hist']:.2f} over 3 days)"
+            if d > FWD_MACD_MIN else
+            f"MACD momentum keeps moving against it ({snap['macd_prev']:.2f} to {snap['macd_hist']:.2f} over 3 days)")
+        r = (snap["rsi"] - snap["rsi_prev"]) * sign
+        add("RSI", 1 if r > FWD_RSI_MIN else -1 if r < -FWD_RSI_MIN else 0,
+            f"RSI {snap['rsi_prev']:.0f}->{snap['rsi']:.0f}",
+            f"RSI is moving its way ({snap['rsi_prev']:.0f} to {snap['rsi']:.0f} over 3 days)" if r > FWD_RSI_MIN else
+            f"RSI is moving against it ({snap['rsi_prev']:.0f} to {snap['rsi']:.0f} over 3 days)")
+        m = snap["ret5"] * sign
+        add("5d", 1 if m > FWD_RET5_MIN else -1 if m < -FWD_RET5_MIN else 0, f"5d {snap['ret5']:+.1%}",
+            f"the stock is {'up' if snap['ret5'] > 0 else 'down'} {abs(snap['ret5']):.1%} over the last 5 days")
+    opt = _option_forward(ticker, kind, price, exp, short) if price and price == price else None
+    if opt:
+        z = opt["z"]
+        if z is not None:
+            pop_txt = f" ({opt['pop']:.0%} POP)" if opt["pop"] is not None else ""
+            if z < 0:
+                phrase = f"the short strike is already {abs(z):.2f} expected moves in the money{pop_txt}"
+            else:
+                phrase = f"the short strike is only {z:.2f} expected moves from the price{pop_txt}" \
+                    if z <= FWD_Z_NEAR else f"the short strike is {z:.2f} expected moves from the price{pop_txt}"
+            add("Cushion", 1 if z >= FWD_Z_FAR else -1 if z <= FWD_Z_NEAR else 0, f"strike {z:.2f} SD out", phrase)
+        t = opt["term"]
+        if t is not None:
+            add("Term", 1 if t >= FWD_TERM_UP else -1 if t <= FWD_TERM_INV else 0, f"IV term {t * 100:+.1f} pts",
+                (f"near-term implied volatility is {abs(t) * 100:.1f} pts above longer-dated (the market is pricing short-term stress)"
+                 if t <= FWD_TERM_INV else
+                 f"the implied-volatility term structure is normal (longer-dated {t * 100:+.1f} pts)"))
+        if opt["iv30"] and snap and snap.get("rv20"):
+            ratio = opt["iv30"] / snap["rv20"]
+            add("IV/RV", 1 if ratio >= FWD_IVRV_RICH else -1 if ratio <= FWD_IVRV_THIN else 0, f"IV/RV {ratio:.2f}",
+                (f"options price only {ratio:.2f}x the stock's recent realized volatility (thin premium)"
+                 if ratio <= FWD_IVRV_THIN else
+                 f"options price {ratio:.2f}x the stock's recent realized volatility (rich premium)"))
+    try:
+        earn = ws.get_earnings_date(ticker)
+    except Exception:
+        earn = None
+    if earn and dt.date.today() <= earn <= dt.date.fromisoformat(exp):
+        add("Earnings", -1, f"earnings {earn}", f"earnings on {earn} fall before this spread expires")
+    return sum(x["v"] for x in sigs), sigs
+
+
+def _forward_text(score, sigs):
+    """The 'Forward Outlook' cell."""
+    if not sigs:
+        return "forward data unavailable"
+    groups = [("FOR", [x for x in sigs if x["v"] > 0]), ("AGAINST", [x for x in sigs if x["v"] < 0]),
+              ("neutral", [x for x in sigs if x["v"] == 0])]
+    return f"Forward score {score:+d}: " + " | ".join(
+        f"{g}: " + "; ".join(x["label"] for x in xs) for g, xs in groups if xs)
 
 
 def _trend_state(kind, snap, price):
@@ -622,30 +777,31 @@ def _technical_read(ticker, kind, strike_str, price):
     return " | ".join(parts)
 
 
-def _join_and(items):
-    """'a', 'a and b', 'a, b and c'."""
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+def _join_and(items, sep=", "):
+    """'a', 'a and b', 'a, b and c' (or with `sep` between the leading items)."""
+    return items[0] if len(items) == 1 else sep.join(items[:-1]) + " and " + items[-1]
 
 
-def _recommendation(ticker, kind, price, rolls):
-    """One sentence: CLOSE, ROLL 1 or ROLL 2, and why. Mechanical, from the data in the row:
-      * trend ADVERSE (>= TECH_ADVERSE_MIN of the signals against the spread) -> CLOSE,
-        since rolling just re-risks the same direction;
-      * otherwise a roll is viable only with POP >= TECH_POP_FLOOR on its new short
-        strike and no earnings date before its expiration; among viable rolls the one that
-        nets a credit wins, then the higher POP, then Roll 1 (it passes every screener
-        criterion);
+def _recommendation(ticker, kind, price, rolls, exp, strike_str, forward=None):
+    """One sentence: CLOSE, ROLL 1 or ROLL 2, and why -- decided from the FORWARD outlook
+    (_forward_outlook: momentum turning, what options price, catalysts), not from the lagging
+    averages:
+      * forward score <= FWD_CLOSE_SCORE -> CLOSE, naming what is against the spread;
+      * otherwise a roll is viable only with POP >= TECH_POP_FLOOR on its new short strike
+        (the searches already exclude every expiration on/after earnings); among viable rolls
+        the one that nets a credit wins, then the higher POP, then Roll 1 (it passes every
+        screener criterion);
       * no viable roll -> CLOSE.
     Not personalized advice."""
     side = "put" if kind == "put" else "call"
-    snap = _tech_snapshot(ticker)
-    state = against = total = None
-    details = []
-    if snap and price and price == price:
-        state, against, total, _, details = _trend_state(kind, snap, price)
-    if state == "ADVERSE":
-        return (f"CLOSE: {ticker} is {_join_and(details)}, all working against this {side} credit spread, "
-                f"so rolling would just re-risk the same direction.")
+    score, sigs = forward if forward is not None else _forward_outlook(ticker, kind, price, exp, strike_str)
+    against = [x["phrase"] for x in sigs if x["v"] < 0]
+    favor = [x["phrase"] for x in sigs if x["v"] > 0]
+    if sigs and score <= FWD_CLOSE_SCORE:
+        favor_txt = (f"; the only forward positive is that {favor[0]}" if len(favor) == 1 else
+                     f"; the forward positives are that {' and that '.join(favor)}" if favor else "")
+        return (f"CLOSE: the forward outlook is against this {side} credit spread because "
+                f"{_join_and(against)}{favor_txt}, so rolling would just re-risk it.")
     earnings = None
     try:
         earnings = ws.get_earnings_date(ticker)
@@ -670,13 +826,13 @@ def _recommendation(ticker, kind, price, rolls):
     what = ("it passes every screener criterion" if label == "ROLL 1"
             else "it is the best-scoring liquid spread")
     money = f"nets a ${net:.2f}/sh credit" if net > 0 else f"costs a ${-net:.2f}/sh net debit"
-    if not state:
-        trend = "trend data is unavailable"
-    elif against == 0:
-        trend = "no trend signals are against the spread"
+    if not sigs:
+        outlook = "forward data is unavailable"
+    elif against:
+        outlook = f"the forward outlook is {'favorable' if score >= 2 else 'mixed'} (against it: {_join_and(against)})"
     else:
-        trend = f"the only negatives in the trend are that {ticker} is {_join_and(details)}"
-    return f"{label}: {what} with {pop:.0%} POP and {money}, and {trend}{', so the lean is modest' if state == 'MIXED' else ''}."
+        outlook = "no forward signals are against the spread"
+    return f"{label}: {what} with {pop:.0%} POP and {money}, and {outlook}{', so the lean is modest' if -2 < score < 2 else ''}."
 
 
 def _roll_cols(prefix, roll):
@@ -834,6 +990,9 @@ def build_spread_actions_table(df):
                                      r["CostToCloseBid"], n, action, closing="HOLD")
             searched = True
         group = _spread_group(r["DTE"], r["DaysHeld"])
+        fwd = _forward_outlook(r["Ticker"], kind, r["CurrentPrice"], r["Expiration"], r["Strike"])
+        rec_text = (_recommendation(r["Ticker"], kind, r["CurrentPrice"], roll, r["Expiration"], r["Strike"], fwd)
+                    if searched else "-")
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
             "CurrentPrice": f"${r['CurrentPrice']:.2f}", "DTE": int(r["DTE"]),
@@ -844,13 +1003,13 @@ def build_spread_actions_table(df):
             "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
             "Action": action,
-            "Recommendation": (_recommendation(r["Ticker"], kind, r["CurrentPrice"], roll)
-                               if searched else "-"),
-            "Technical Read": _technical_read(r["Ticker"], kind, r["Strike"], r["CurrentPrice"])}, {
+            "Recommendation": rec_text,
+            "Forward Outlook": _forward_text(*fwd),
+            "Trend Context (lagging)": _technical_read(r["Ticker"], kind, r["Strike"], r["CurrentPrice"])}, {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
             "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["r1"] or roll["r2"]) else "close",
-            "Recommendation": (_recommendation(r["Ticker"], kind, r["CurrentPrice"], roll) if searched else "-"),
+            "Recommendation": rec_text,
             **_roll_cols("Roll1", roll["r1"]), **_roll_cols("Roll2", roll["r2"]),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
             "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),
