@@ -273,7 +273,7 @@ def html_email(puts, calls, spreads, discover_puts, discover_spreads, open_pos, 
             f"{empty_section('Open Positions', open_pos, positions._fmt, 'No open positions tracked.')}"
             f"<h3>Credit Spread Actions</h3>"
             f"<p class='empty'>Only credit spreads that trip a management rule (stop 2x credit, profit target "
-            f"50% / 70% in Group 2, time exit, 21 DTE check with priced roll, dead trade). Group is set by DTE at entry. Recommendation is a one-sentence close-vs-roll call decided from the Forward Outlook (momentum turning, what options price, earnings) -- rolls never cross earnings, and a roll needs POP 65%+; Trend Context (lagging) is context only. Roll 1 = best Score passing all screener criteria; Roll 2 = best Score with only 1,000+ open interest. Not personalized advice.</p>"
+            f"50% / 70% in Group 2, time exit, 21 DTE check with priced roll, dead trade). Group is set by DTE at entry. Recommendation is a one-sentence close-vs-roll call decided from the Forward Outlook (momentum turning, what options price, earnings) -- rolls never cross earnings, and a roll needs POP 65%+; Trend Context (lagging) is context only. Roll 1 = best Score passing all screener criteria; Roll 2 = best Score with 1,000+ open interest and the screener's POP. Not personalized advice.</p>"
             f"{'<p class=empty>No credit spreads need action right now.</p>' if spread_actions is None or not len(spread_actions) else spread_actions.to_html(index=False, border=0)}"
             f"{financials_html('Financials (unrealized)', open_fin)}"
             f"{financials_html('Concentration of Positions -- 1D All-Time High &amp; Average (Max Loss)', concentration_history)}"

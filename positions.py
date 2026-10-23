@@ -364,20 +364,21 @@ def _apply_rules(dte, days_held, credit, cost, itm, tested, peak_gl_pct=None):
 
 
 def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
-    """ROLL 2: the best-Score roll with ONLY an open-interest filter -> (text, roll), where roll is a dict for
+    """ROLL 2: the best-Score roll that has 1,000+ open interest AND the screener's POP -> (text, roll), where roll is a dict for
     the chosen roll or None if there isn't one (text then says why).
     A roll = buy the current spread back at the ASK (`cost`, conservative, same
     basis as the rest of the table) and open a NEW spread on the same side in a
     LATER expiration (new credit at the worst-case bid/ask, same basis the
     screener uses), same contract count as the position.
-    Liquidity is the one hard requirement: every leg of the new spread must have
-    at least ws.MIN_OPEN_INTEREST (1,000) open interest. Beyond that, the
-    screener's own POP / OTM / AnnROR / premium-floor / earnings criteria are
-    deliberately NOT applied -- candidates come from spreads.lookup_spreads (the
-    "show everything" generator behind Contract Lookup), within the screener's
-    DTE window (SPREAD_DTE_MIN..MAX), and the single highest composite Score
-    wins, net credit or net DEBIT. POP and OTM are spelled out in the text so the
-    risk is visible. Deliberately NOT gated by open_position_sides -- the spread
+    Two hard requirements: every leg of the new spread must have at least
+    ws.MIN_OPEN_INTEREST (1,000) open interest, and the short leg's POP must be
+    inside the screener's own band (sp.SPREAD_POP_MIN..SPREAD_POP_MAX, 70%+ by
+    default). The rest of the screener's criteria (OTM, AnnROR, premium floor)
+    are deliberately NOT applied -- candidates come from spreads.lookup_spreads
+    (the "show everything" generator behind Contract Lookup), within the
+    screener's DTE window (SPREAD_DTE_MIN..MAX), earnings expirations excluded,
+    and the single highest composite Score wins, net credit or net DEBIT. OTM is
+    spelled out in the text so the risk is visible. Deliberately NOT gated by open_position_sides -- the spread
     being rolled is itself what would block it. The rules-based, net-credit-only
     counterpart is _find_screener_roll (Roll 1).
     roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
@@ -400,11 +401,12 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
              if not (earnings and today <= earnings <= dt.date.fromisoformat(r["Expiration"]))
              and sp.SPREAD_DTE_MIN <= r["DTE"] <= sp.SPREAD_DTE_MAX
              and r["OpenInt"] >= ws.MIN_OPEN_INTEREST
+             and sp.SPREAD_POP_MIN <= r["POP_%"] <= sp.SPREAD_POP_MAX
              and r["Max Profit"] > 0
              and r["Score"] == r["Score"]]
     if not cands:
         return (f"no spread in a later expiration{f' before earnings on {earnings}' if earnings else ''} has "
-                f"{ws.MIN_OPEN_INTEREST:,}+ open interest on both legs with a scoreable credit"), None
+                f"{ws.MIN_OPEN_INTEREST:,}+ open interest on both legs and {sp.SPREAD_POP_MIN:.0%}+ POP"), None
     r = max(cands, key=lambda c: c["Score"])
     net = r["Max Profit"] - cost
     legs = r["Put Legs"] or r["Call Legs"]
@@ -469,8 +471,8 @@ def _try_roll(ticker, exp, kind, strikes, cost, cost_bid, n, action, closing="CL
     TWO suggestions and returns (new action text, {"r1": roll or None, "r2": roll or None}):
       ROLL 1 = best Score among spreads passing every regular-screener criterion
                (_find_screener_roll) -- left out entirely when nothing passes;
-      ROLL 2 = best Score with only the 1,000+ open-interest filter (_find_roll) --
-               liquidity is the only thing that matters there, so it almost always exists.
+      ROLL 2 = best Score with 1,000+ open interest and the screener's POP (_find_roll) --
+               it only needs liquidity and the POP floor, so it exists more often than Roll 1.
     Falls back to `closing` (with the reason) when neither exists; one search failing
     never hides the other."""
     r1 = r2 = None
@@ -491,11 +493,11 @@ def _try_roll(ticker, exp, kind, strikes, cost, cost_bid, n, action, closing="CL
         parts.append(f"ROLL 1 (best Score passing all screener criteria) {r1_text}")
     if r2:
         if r1 and (r1["exp"], r1["sell"], r1["buy"]) == (r2["exp"], r2["sell"], r2["buy"]):
-            parts.append("ROLL 2 (best Score, 1,000+ open interest only): same spread as Roll 1")
+            parts.append("ROLL 2 (best Score, 1,000+ open interest and screener POP): same spread as Roll 1")
         else:
-            parts.append(f"ROLL 2 (best Score, 1,000+ open interest only) {r2_text}")
+            parts.append(f"ROLL 2 (best Score, 1,000+ open interest and screener POP) {r2_text}")
     else:
-        parts.append(f"ROLL 2 (best Score, 1,000+ open interest only): none -- {r2_text}")
+        parts.append(f"ROLL 2 (best Score, 1,000+ open interest and screener POP): none -- {r2_text}")
     try:
         earn = ws.get_earnings_date(ticker)
     except Exception:
@@ -837,7 +839,7 @@ def _recommendation(ticker, kind, price, rolls, exp, strike_str, forward=None):
 
 def _roll_cols(prefix, roll):
     """Raw columns for one roll suggestion (prefix "Roll1" = best Score passing all
-    screener criteria, "Roll2" = best Score with only the open-interest filter); all NaN/None when that suggestion doesn't exist."""
+    screener criteria, "Roll2" = best Score with open interest and screener POP); all NaN/None when that suggestion doesn't exist."""
     nan = float("nan")
     return {f"{prefix}Exp": roll["exp"] if roll else None,
             f"{prefix}Sell": roll["sell"] if roll else nan,

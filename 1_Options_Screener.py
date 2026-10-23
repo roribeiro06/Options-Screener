@@ -463,11 +463,11 @@ def _spread_action_summary(row):
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         n_int = int(n) if pd.notna(n) else None
-        # Roll 1 = best Score passing every screener criterion; Roll 2 = best Score, open interest only.
+        # Roll 1 = best Score passing every screener criterion; Roll 2 = best Score, open interest and screener POP.
         # Either can be missing; if both exist they are ALTERNATIVES (open one, not both).
         opts = [(label, prefix) for label, prefix in
                 (("ROLL 1 -- best Score passing all screener criteria", "Roll1"),
-                 ("ROLL 2 -- best Score, 1,000+ open interest only", "Roll2"))
+                 ("ROLL 2 -- best Score, 1,000+ open interest and screener POP", "Roll2"))
                 if pd.notna(row.get(prefix + "Exp")) and row.get(prefix + "Exp")]
         if len(opts) == 2 and (row["Roll1Exp"], row["Roll1Sell"], row["Roll1Buy"]) == \
                 (row["Roll2Exp"], row["Roll2Sell"], row["Roll2Buy"]):
@@ -953,10 +953,10 @@ try:
                    "expiration -- and offers up to **two suggestions**: **ROLL 1** is the **best-Score spread that passes "
                    "every regular Multi-Leg screener criterion** (POP, OTM incl. the volatility-tier rule, AnnROR, "
                    "$1,000 premium floor, open interest, earnings exclusion) -- left out entirely when nothing "
-                   "passes; **ROLL 2** is the **best-Score spread with only the open-interest filter** (7-60 DTE, "
-                   "both legs 1,000+ open interest) -- liquidity is the only criterion, so it almost always exists, "
-                   "and its POP/OTM are shown in the text so you can judge the risk (a high Score can mean strikes "
-                   "close to the money). Either can be a net debit -- the net credit or debit is spelled out so the "
+                   "passes; **ROLL 2** is the **best-Score spread with 1,000+ open interest on both legs and the "
+                   "screener's POP floor (70%+)** (7-60 DTE) -- it skips the other screener criteria (OTM, AnnROR, "
+                   "premium floor), so it exists more often than Roll 1, and its OTM is shown in the text so you can "
+                   "judge how close to the money it is. Either can be a net debit -- the net credit or debit is spelled out so the "
                    "call is yours. Same contract count either way. If neither exists, it says CLOSE. Click a row for an advisor-ready "
                    "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
                    "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
