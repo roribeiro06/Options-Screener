@@ -276,7 +276,7 @@ PULLBACK_MIN_PEAK = 0.60
 PULLBACK_DRAWDOWN = 0.10
 PULLBACK_PREFIX = "PROFIT PULLBACK:"
 # Any credit spread with a negative unrealized G/L that no rule above already flagged is still
-# listed in Credit Spread Actions, ranked after all rule-driven rows, with a roll if one exists.
+# listed in Credit Spread Actions too (the table is ordered by DTE, then ticker), with a roll if one exists.
 LOSING_RANK = 5
 LOSING_TEXT = "LOSING: negative G/L"
 PEAKS_FILE = "position_peaks.json"
@@ -1018,7 +1018,9 @@ def build_spread_actions_table(df):
             "LongCost": r.get("LongCost", float("nan"))}))
     if not rows:
         return pd.DataFrame(columns=SPREAD_ACTIONS_COLS), pd.DataFrame(columns=SPREAD_ACTIONS_RAW_COLS)
-    rows.sort(key=lambda t: (t[0], t[1]))
+    # Closest DTE first, then alphabetical by ticker (then expiration / type, same tiebreak as
+    # Open Positions) -- NOT by action priority.
+    rows.sort(key=lambda t: (t[1], t[2]["Ticker"], t[3]["Expiration"], _TYPE_ORDER.get(t[2]["Type"], 9)))
     return (pd.DataFrame([t[2] for t in rows])[SPREAD_ACTIONS_COLS],
             pd.DataFrame([t[3] for t in rows])[SPREAD_ACTIONS_RAW_COLS])
 

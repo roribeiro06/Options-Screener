@@ -902,7 +902,7 @@ st.header("Open Positions")
 st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
            "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
            "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
-           "first). **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
+           "first), then alphabetically by ticker. **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
            "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live bid-to-ask range "
            "to buy the position back right now, shown NEGATIVE (what you'd lose to close) as "
            "\\$bid-\\$ask/share with the total across Contracts in parentheses, same range convention as "
@@ -928,8 +928,9 @@ try:
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")
-        st.caption("Credit spreads that currently trip a management rule, plus **any spread with a negative "
-                   "Unrealized G/L** even when no rule has fired (listed last as **LOSING**): those show a roll when "
+        st.caption("Sorted by DTE (soonest expiration first), then alphabetically by ticker. "
+                   "Credit spreads that currently trip a management rule, plus **any spread with a negative "
+                   "Unrealized G/L** even when no rule has fired (labeled **LOSING**): those show a roll when "
                    "one passes the screener, otherwise HOLD with the reason -- never a close order you didn't ask for. Rule group is set by the DTE the trade was entered at: **1** = under 21, **2** = 21-45 (core), **3** = over 45 "
                    "(a Group 3 trade switches to Group 2 rules at 21 DTE). "
                    "**TargetBTC** = the buy-back price that captures the group's profit target (50% of the credit in "
