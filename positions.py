@@ -362,50 +362,42 @@ def _apply_rules(dte, days_held, credit, cost, itm, tested, peak_gl_pct=None):
 
 
 def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
-    """Best roll for a losing credit spread -> (text, roll), where roll is a dict
-    for the chosen roll or None if there isn't one (text then says why).
+    """The HIGHEST-SCORE roll (Roll 2) -> (text, roll), where roll is a dict for
+    the chosen roll or None if there isn't one (text then says why).
     A roll = buy the current spread back at the ASK (`cost`, conservative, same
-    basis as the rest of the table) and sell a NEW spread on the same side, in a
+    basis as the rest of the table) and open a NEW spread on the same side in a
     LATER expiration (new credit at the worst-case bid/ask, same basis the
-    screener uses). This is the HIGHEST-SCORE suggestion (Roll 2): it is shown
-    even when it comes out a NET DEBIT -- any spread that passes the screener
-    counts, and the net (credit or debit) is spelled out so the call is yours.
-    The rules-based, net-credit-only counterpart is _find_rule_roll. The new spread must be one the
-    screener itself would show: candidates come from spreads._for_expiration,
-    the exact function behind the Multi-Leg tab, so every screener criterion
-    already applies (POP, OTM incl. the tech 15%/10%+$5k gate, AnnROR, OTM vs
-    IV, the $1,000 premium floor, open interest, earnings-window exclusion,
-    SPREAD_DTE_MIN..MAX). Deliberately NOT gated by open_position_sides -- the
-    spread being rolled is itself what would block it. Same contract count as
-    the position. The highest screener Score among ALL candidates wins,
-    whether it nets a credit or a debit.
+    screener uses), same contract count as the position.
+    Liquidity is the one hard requirement: every leg of the new spread must have
+    at least ws.MIN_OPEN_INTEREST (1,000) open interest. Beyond that, the
+    screener's own POP / OTM / AnnROR / premium-floor / earnings criteria are
+    deliberately NOT applied -- candidates come from spreads.lookup_spreads (the
+    "show everything" generator behind Contract Lookup), within the screener's
+    DTE window (SPREAD_DTE_MIN..MAX), and the single highest composite Score
+    wins, net credit or net DEBIT. POP and OTM are spelled out in the text so the
+    risk is visible. Deliberately NOT gated by open_position_sides -- the spread
+    being rolled is itself what would block it. The rules-based, net-credit-only
+    counterpart is _find_rule_roll.
     roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
     the bid/ask minus buy-back at the ask), net_high (best case: new credit at
     the ask/bid minus buy-back at the bid), open_low/open_high (the new
     spread's own credit, worst/best case)}, all per share; a negative net is
     a debit."""
-    strat = "Put credit spread" if kind == "put" else "Call credit spread"
+    spread_kind = "put_spread" if kind == "put" else "call_spread"
     today = dt.date.today()
     cur = dt.date.fromisoformat(exp)
-    price = ws.td_quote(ticker)
-    if not price:
-        raise RuntimeError("no quote")
-    price = float(price)
-    earnings = ws.get_earnings_date(ticker)
-    cands = []
-    for e, d, dte in sp._all_expirations(ticker, today):
-        if d <= cur or not (sp.SPREAD_DTE_MIN <= dte <= sp.SPREAD_DTE_MAX):
-            continue
-        if ws.earnings_blocks(ticker, earnings, today, d):
-            continue
-        chain = ws.td_chain(ticker, e)
-        if chain:
-            cands += [r for r in sp._for_expiration(ticker, price, e, dte, earnings, chain)
-                      if r["Strategy"] == strat]
+    rows = sp.lookup_spreads(ticker, spread_kind, exp_start=cur + dt.timedelta(days=1),
+                             exp_end=today + dt.timedelta(days=sp.SPREAD_DTE_MAX))
+    cands = [r for r in rows
+             if sp.SPREAD_DTE_MIN <= r["DTE"] <= sp.SPREAD_DTE_MAX
+             and r["OpenInt"] >= ws.MIN_OPEN_INTEREST
+             and r["Max Profit"] > 0
+             and r["Score"] == r["Score"]]
     if not cands:
-        return "no spread in a later expiration passes the screener criteria", None
-    scored = [(r["Max Profit"] - cost, r) for r in cands]
-    net, r = max(scored, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
+        return (f"no spread in a later expiration has {ws.MIN_OPEN_INTEREST:,}+ open interest "
+                f"on both legs with a scoreable credit"), None
+    r = max(cands, key=lambda c: c["Score"])
+    net = r["Max Profit"] - cost
     legs = r["Put Legs"] or r["Call Legs"]
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
@@ -414,8 +406,8 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
-            f"-> {net_txt}, OTM {r['OTM_%']:.1%}, "
-            f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), roll
+            f"-> {net_txt}, OTM {r['OTM_%']:.1%}, POP {r['POP_%']:.0%}, "
+            f"AnnROR {r['AnnROR_%']:.0%}, Score {r['Score']:.2f}, OI {r['OpenInt']:,}"), roll
 
 
 def _next_monthly(ticker, exp):
