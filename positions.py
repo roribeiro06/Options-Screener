@@ -280,7 +280,8 @@ LOSING_RANK = 5
 LOSING_TEXT = "LOSING: negative G/L"
 PEAKS_FILE = "position_peaks.json"
 SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group", "Contracts",
-                       "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
+                       "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
+                       "Technical Read"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
                            "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh",
@@ -402,7 +403,7 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
             "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid,
-            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"]}
+            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"], "pop": r["POP_%"]}
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
@@ -442,8 +443,12 @@ def _find_rule_roll(ticker, exp, kind, short_strike, long_strike, cost, cost_bid
         return (f"same strikes on {exp2} would be a ${abs(net_low):.2f}/sh net "
                 f"{'debit' if net_low < 0 else 'credit of zero'}, not a credit"), None
     dte = (dt.date.fromisoformat(exp2) - dt.date.today()).days
+    short_full = sp._leg_at(chain, kind, short_strike)
+    delta = short_full.get("delta") if short_full else None
+    pop = (1 - abs(delta)) if delta is not None else float("nan")
     return "", {"exp": exp2, "dte": dte, "sell": float(short_strike), "buy": float(long_strike),
-                "net_low": net_low, "net_high": net_high, "open_low": open_low, "open_high": open_high}
+                "net_low": net_low, "net_high": net_high, "open_low": open_low, "open_high": open_high,
+                "pop": pop}
 
 
 def _roll_text(roll, n):
@@ -489,6 +494,124 @@ def _try_roll(ticker, exp, kind, strikes, cost, cost_bid, n, action, closing="CL
     else:
         r2 = f"ROLL 2 (highest Score): {score_why}"
     return f"{action} -> {r1} || {r2}", {"rule": rule, "score": score}
+
+
+# --- Technical read for the Credit Spread Actions table (mechanical, rule-based) ---
+TECH_POP_FLOOR = 0.65      # a roll whose new short strike has less POP than this isn't viable
+TECH_ADVERSE_MIN = 3       # trend is ADVERSE when this many of the (up to 4) signals are against the spread
+TECH_MOVE_PCT = 0.03       # a 20-day move of this size against the spread counts as a signal
+TECH_RSI_LO, TECH_RSI_HI = 40, 60   # RSI under 40 hurts a put spread, over 60 hurts a call spread
+_TECH_CACHE = {}
+
+
+def _tech_snapshot(ticker):
+    """Daily-close technicals for the underlying (1y of yfinance history, same
+    source early_trend.py uses): last close, 50/200-day averages, 20-day return,
+    RSI(14, Wilder). None if there isn't enough history. Cached per ticker per day."""
+    key = (ticker, dt.date.today())
+    if key in _TECH_CACHE:
+        return _TECH_CACHE[key]
+    snap = None
+    try:
+        df = ws._ticker(ticker).history(period="1y")
+        closes = df["Close"].dropna() if df is not None and not df.empty else None
+        if closes is not None and len(closes) >= 60:
+            delta = closes.diff()
+            up = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
+            dn = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
+            snap = {"sma50": float(closes.tail(50).mean()),
+                    "sma200": float(closes.tail(200).mean()) if len(closes) >= 200 else None,
+                    "ret20": float(closes.iloc[-1] / closes.iloc[-21] - 1) if len(closes) >= 21 else None,
+                    "rsi": float(100 - 100 / (1 + up / dn)) if dn else 100.0}
+    except Exception as e:
+        print(f"TECH {ticker}: ERROR {e}", file=sys.stderr)
+    _TECH_CACHE[key] = snap
+    return snap
+
+
+def _trend_state(kind, snap, price):
+    """(state, against, total, notes): how many of up to 4 trend signals work
+    AGAINST this spread. A put credit spread is bullish (hurt by a downtrend); a
+    call credit spread is bearish (hurt by an uptrend). Signals: price vs the 50-day,
+    50-day vs 200-day, the 20-day move (>= TECH_MOVE_PCT against), and RSI
+    (< 40 hurts a put spread, > 60 hurts a call spread)."""
+    sign = 1 if kind == "put" else -1
+    against, total, notes = 0, 1, []
+    if (price - snap["sma50"]) * sign < 0:
+        against += 1
+        notes.append(f"{'below' if price < snap['sma50'] else 'above'} 50d")
+    if snap["sma200"] is not None:
+        total += 1
+        if (snap["sma50"] - snap["sma200"]) * sign < 0:
+            against += 1
+            notes.append("50d<200d" if snap["sma50"] < snap["sma200"] else "50d>200d")
+    if snap["ret20"] is not None:
+        total += 1
+        if snap["ret20"] * sign <= -TECH_MOVE_PCT:
+            against += 1
+            notes.append(f"20d {snap['ret20']:+.1%}")
+    total += 1
+    if (snap["rsi"] < TECH_RSI_LO) if kind == "put" else (snap["rsi"] > TECH_RSI_HI):
+        against += 1
+        notes.append(f"RSI {snap['rsi']:.0f}")
+    state = "ADVERSE" if against >= TECH_ADVERSE_MIN else "FAVORABLE" if against == 0 else "MIXED"
+    return state, against, total, notes
+
+
+def _technical_read(ticker, kind, strike_str, price, rolls=None, contracts=None):
+    """The 'Technical Read' cell: what the trend is doing relative to this spread
+    (always), plus -- when a roll search ran (`rolls` = {"rule":..., "score":...}) --
+    a mechanical LEAN between CLOSE / ROLL 1 / ROLL 2:
+      * trend ADVERSE (>= TECH_ADVERSE_MIN of the signals against the spread) -> CLOSE:
+        rolling just re-risks the same direction;
+      * otherwise a roll is viable only if its new short strike has POP >= TECH_POP_FLOOR
+        and no earnings date falls before its expiration (same exclusion the screener
+        uses); the viable roll that nets a credit and has the higher POP is the lean;
+      * no viable roll -> CLOSE.
+    A rules-based read of the data shown, not personalized advice."""
+    snap = _tech_snapshot(ticker)
+    if not snap or not price or price != price:
+        return "technicals unavailable (no price history)"
+    short = float(str(strike_str).split("/")[0])
+    state, against, total, notes = _trend_state(kind, snap, price)
+    dist = (price - short) / price if kind == "put" else (short - price) / price
+    where = (f"{dist:.1%} {'below' if kind == 'put' else 'above'} price" if dist >= 0 else
+             f"{-dist:.1%} {'ABOVE' if kind == 'put' else 'BELOW'} price (ITM)")
+    parts = [f"Trend {state} ({against}/{total} against" + (f": {', '.join(notes)}" if notes else "") + ")",
+             f"price {price / snap['sma50'] - 1:+.1%} vs 50d" +
+             (f", {price / snap['sma200'] - 1:+.1%} vs 200d" if snap["sma200"] else "") +
+             (f", 20d {snap['ret20']:+.1%}" if snap["ret20"] is not None else "") + f", RSI {snap['rsi']:.0f}",
+             f"short strike {where}"]
+    if rolls is None:
+        return " | ".join(parts)
+    if state == "ADVERSE":
+        lean = "CLOSE -- trend is against this spread, so a roll re-risks the same direction"
+    else:
+        earnings = None
+        try:
+            earnings = ws.get_earnings_date(ticker)
+        except Exception:
+            pass
+        viable, why = [], []
+        for label, key in (("ROLL 1", "rule"), ("ROLL 2", "score")):
+            rl = rolls.get(key)
+            if not rl:
+                continue
+            exp_d = dt.date.fromisoformat(rl["exp"])
+            if earnings and dt.date.today() <= earnings <= exp_d:
+                why.append(f"{label} spans earnings {earnings}")
+            elif not (rl["pop"] == rl["pop"] and rl["pop"] >= TECH_POP_FLOOR):
+                pop_txt = f"{rl['pop']:.0%}" if rl["pop"] == rl["pop"] else "unknown"
+                why.append(f"{label} POP {pop_txt} < {TECH_POP_FLOOR:.0%}")
+            else:
+                viable.append((rl["net_low"] > 0, rl["pop"], label, rl))
+        if viable:
+            _, pop, label, rl = max(viable, key=lambda t: (t[0], t[1]))
+            lean = (f"{label} -- POP {pop:.0%}, nets {'a credit' if rl['net_low'] > 0 else 'a DEBIT'}, "
+                    f"trend {state.lower()}" + (" (weak lean: trend mixed)" if state == "MIXED" else ""))
+        else:
+            lean = "CLOSE -- " + ("; ".join(why) if why else "no roll available")
+    return " | ".join(parts) + f" | LEAN: {lean}"
 
 
 def _roll_cols(prefix, roll):
@@ -634,14 +757,17 @@ def build_spread_actions_table(df):
         # passes the screener first (_find_roll); only if there is none is it
         # a CLOSE. TAKE PROFIT and DEAD TRADE never roll.
         roll = {"rule": None, "score": None}
+        searched = False
         if ((cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT))
                 or action.startswith(PULLBACK_PREFIX)):
             action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, r["Strike"], cost,
                                      r["CostToCloseBid"], n, action)
+            searched = True
         elif rank == LOSING_RANK:
             # a plain loser is not told to close -- only offered a roll if one exists, else HOLD
             action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, r["Strike"], cost,
                                      r["CostToCloseBid"], n, action, closing="HOLD")
+            searched = True
         group = _spread_group(r["DTE"], r["DaysHeld"])
         rows.append((rank, r["DTE"], {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"],
@@ -652,7 +778,9 @@ def build_spread_actions_table(df):
             "TargetBTC": f"${credit * (1 - SPREAD_PROFIT_TARGET[group]):.2f}",
             "StopBTC": f"${credit * SPREAD_STOP_MULT:.2f}",
             "UnrealizedGL": f"{_fmt_dollar_signed(r['UnrealizedGL_$'])} ({_fmt_pct_signed(r['UnrealizedGL_%'])})",
-            "Action": action}, {
+            "Action": action,
+            "Technical Read": _technical_read(r["Ticker"], kind, r["Strike"], r["CurrentPrice"],
+                                              roll if searched else None, n)}, {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
             "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["rule"] or roll["score"]) else "close",
