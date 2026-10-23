@@ -412,7 +412,7 @@ def _signed_range_line(label, a, b, n_int):
     return f"{label}: {_signed(a)} to {_signed(b)}{tot}"
 
 
-def _roll_position_summary(row, prefix="Roll"):
+def _roll_position_summary(row, prefix="Roll2"):
     """Copy-paste summary for a financial advisor to ROLL a losing credit
     spread (from the Credit Spread Actions table): the spread being rolled,
     the NEW expiration, the new short/long strikes, and the price to OPEN the
@@ -455,14 +455,14 @@ def _spread_action_summary(row):
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         n_int = int(n) if pd.notna(n) else None
-        # Roll 1 = the rules (same strikes, next monthly, net credit); Roll 2 = highest Score.
+        # Roll 1 = best Score passing every screener criterion; Roll 2 = best Score, open interest only.
         # Either can be missing; if both exist they are ALTERNATIVES (open one, not both).
         opts = [(label, prefix) for label, prefix in
-                (("ROLL 1 -- rules: next monthly, same strikes, net credit", "Rule"),
-                 ("ROLL 2 -- highest Score", "Roll"))
+                (("ROLL 1 -- best Score passing all screener criteria", "Roll1"),
+                 ("ROLL 2 -- best Score, 1,000+ open interest only", "Roll2"))
                 if pd.notna(row.get(prefix + "Exp")) and row.get(prefix + "Exp")]
-        if len(opts) == 2 and (row["RuleExp"], row["RuleSell"], row["RuleBuy"]) == \
-                (row["RollExp"], row["RollSell"], row["RollBuy"]):
+        if len(opts) == 2 and (row["Roll1Exp"], row["Roll1Sell"], row["Roll1Buy"]) == \
+                (row["Roll2Exp"], row["Roll2Sell"], row["Roll2Buy"]):
             opts = opts[:1]            # same spread either way -- show it once
         blocks = [f"{label}\n{_roll_position_summary(row, prefix)}\n\n"
                   + _roll_net_line(row.get(prefix + "OpenLow"), row.get(prefix + "OpenHigh"),
@@ -941,31 +941,31 @@ try:
                    "on its safe counterpart. **Rolling takes priority over closing:** when STOP, TIME EXIT, the "
                    "Group 1 ITM close, the 21 DTE check, or PROFIT PULLBACK fires, the app first searches for a "
                    "roll -- buy the spread back at the ask and open a new spread on the same side in a LATER "
-                   "expiration -- and offers **two suggestions**: **ROLL 1 (rules)** follows the playbook: the "
-                   "**same strikes in the next monthly (3rd Friday), and only for a net credit**; **ROLL 2 "
-                   "(highest Score)** is simply the highest-Score spread available in any later expiration "
-                   "(7-60 DTE) whose legs both have **1,000+ open interest** -- liquidity is the only filter, so "
-                   "POP/OTM/AnnROR/earnings screener criteria are NOT applied (they're shown in the text so you can "
-                   "judge the risk; a high Score can mean strikes close to the money), **even when it's a net debit** "
-                   "-- the net credit or debit is spelled out so the call is yours. Same contract count either way. "
-                   "If one doesn't exist the "
-                   "action says why; if neither does, it says CLOSE. Click a row for an advisor-ready "
+                   "expiration -- and offers up to **two suggestions**: **ROLL 1** is the **best-Score spread that passes "
+                   "every regular Multi-Leg screener criterion** (POP, OTM incl. the volatility-tier rule, AnnROR, "
+                   "$1,000 premium floor, open interest, earnings exclusion) -- left out entirely when nothing "
+                   "passes; **ROLL 2** is the **best-Score spread with only the open-interest filter** (7-60 DTE, "
+                   "both legs 1,000+ open interest) -- liquidity is the only criterion, so it almost always exists, "
+                   "and its POP/OTM are shown in the text so you can judge the risk (a high Score can mean strikes "
+                   "close to the money). Either can be a net debit -- the net credit or debit is spelled out so the "
+                   "call is yours. Same contract count either way. If neither exists, it says CLOSE. Click a row for an advisor-ready "
                    "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
                    "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
                    "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom (the new premium plus the position's Unrealized G/L -- the buy-back isn't subtracted again, you already collected that credit). "
                    "When both suggestions exist they are shown as alternatives (EITHER / OR) -- open one, not both; "
                    "when no roll exists, just the Close order. If nothing qualifies the action says CLOSE and why (e.g. a "
                    "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
-                   "**Technical Read** (last column) is a mechanical read of the stock's daily trend relative to the spread "
+                   "**Recommendation** is one sentence -- CLOSE, ROLL 1 or ROLL 2, and why -- from the rules below: "
+                   "**CLOSE** if 3+ of the trend signals are against the spread (a roll just re-risks the same "
+                   "direction) or no roll is viable; otherwise the viable roll that nets a credit, then the higher "
+                   "POP, then Roll 1. A roll is viable only with **POP of 65%+** on its new short strike and no "
+                   "earnings date before its expiration. **Technical Read** (last column) is a mechanical read of the stock's daily trend relative to the spread "
                    "(a put spread is bullish, so a downtrend is against it; a call spread is the reverse): up to four "
                    "signals -- price vs the 50-day, 50-day vs 200-day, the 20-day move (3%+ against), and RSI "
                    "(under 40 hurts a put spread, over 60 hurts a call spread) -- plus how far the short strike sits "
                    "from price, and that stock's own **put/call open interest** across its 30-60 DTE expirations (above 1.0 = "
-                   "more puts than calls open; context only, not used in the lean). When a roll was searched it adds a **LEAN**: **CLOSE** if 3+ signals are against the "
-                   "spread (a roll just re-risks the same direction) or no roll is viable; otherwise the viable roll "
-                   "that nets a credit with the higher POP. A roll is viable only with **POP of 65%+** on its new "
-                   "short strike and no earnings date before its expiration. It's a rules-based read of the data "
-                   "shown, not personalized advice -- do your own research. "
+                   "more puts than calls open; context only, not used in the recommendation). Both columns are a "
+                   "rules-based read of the data shown, not personalized advice -- do your own research. "
                    "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "
                    "`position_peaks.json`, refreshed only on the scheduled email script's own ~30-min cadence during "
                    "market hours (not live on every page load) -- a spread opened since the last refresh has no peak "
