@@ -452,6 +452,9 @@ def _spread_action_summary(row):
     to special-case."""
     leg = _long_leg_summary(row)
     tail = f"\n\n{leg}" if leg else ""
+    recommendation = row.get("Recommendation")
+    rec = (f"RECOMMENDATION: {recommendation}\n\n"
+           if isinstance(recommendation, str) and recommendation not in ("", "-") else "")
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         n_int = int(n) if pd.notna(n) else None
@@ -472,8 +475,8 @@ def _spread_action_summary(row):
             joined = "--- THEN, EITHER ---\n\n" + blocks[0] + "\n\n--- OR ---\n\n" + blocks[1]
         else:
             joined = "--- THEN ---\n\n" + blocks[0]
-        return f"{_close_position_summary(row)}\n\n{joined}" + tail
-    return _close_position_summary(row) + tail
+        return rec + f"{_close_position_summary(row)}\n\n{joined}" + tail
+    return rec + _close_position_summary(row) + tail
 
 
 @st.fragment

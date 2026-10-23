@@ -283,7 +283,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
                        "Recommendation", "Technical Read"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
-                           "CostToClose", "CurrentPrice", "Kind", "Roll1Exp", "Roll1Sell", "Roll1Buy",
+                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "Roll1Exp", "Roll1Sell", "Roll1Buy",
                            "Roll1NetLow", "Roll1NetHigh", "Roll1OpenLow", "Roll1OpenHigh",
                            "Roll2Exp", "Roll2Sell", "Roll2Buy", "Roll2NetLow", "Roll2NetHigh", "Roll2OpenLow",
                            "Roll2OpenHigh", "UnrealizedGLDollars", "EntryCredit",
@@ -556,32 +556,46 @@ def _put_call_oi(ticker):
 
 
 def _trend_state(kind, snap, price):
-    """(state, against, total, notes): how many of up to 4 trend signals work
+    """(state, against, total, notes, details): how many of up to 4 trend signals work
     AGAINST this spread. A put credit spread is bullish (hurt by a downtrend); a
     call credit spread is bearish (hurt by an uptrend). Signals: price vs the 50-day,
     50-day vs 200-day, the 20-day move (>= TECH_MOVE_PCT against), and RSI
-    (< 40 hurts a put spread, > 60 hurts a call spread)."""
+    (< 40 hurts a put spread, > 60 hurts a call spread). `notes` are the short tags for
+    the Technical Read cell; `details` are plain-English phrases (with the numbers) for the
+    recommendation sentence, one per adverse signal."""
     sign = 1 if kind == "put" else -1
-    against, total, notes = 0, 1, []
+    against, total, notes, details = 0, 1, [], []
     if (price - snap["sma50"]) * sign < 0:
         against += 1
+        gap = price / snap["sma50"] - 1
         notes.append(f"{'below' if price < snap['sma50'] else 'above'} 50d")
+        details.append(f"{ticker_word(gap)} its 50-day average")
     if snap["sma200"] is not None:
         total += 1
         if (snap["sma50"] - snap["sma200"]) * sign < 0:
             against += 1
-            notes.append("50d<200d" if snap["sma50"] < snap["sma200"] else "50d>200d")
+            below = snap["sma50"] < snap["sma200"]
+            notes.append("50d<200d" if below else "50d>200d")
+            details.append(f"its 50-day average is {'below' if below else 'above'} its 200-day "
+                           f"({'a longer-term downtrend' if below else 'a longer-term uptrend'})")
     if snap["ret20"] is not None:
         total += 1
         if snap["ret20"] * sign <= -TECH_MOVE_PCT:
             against += 1
             notes.append(f"20d {snap['ret20']:+.1%}")
+            details.append(f"it is {'down' if snap['ret20'] < 0 else 'up'} {abs(snap['ret20']):.1%} over the last 20 days")
     total += 1
     if (snap["rsi"] < TECH_RSI_LO) if kind == "put" else (snap["rsi"] > TECH_RSI_HI):
         against += 1
         notes.append(f"RSI {snap['rsi']:.0f}")
+        details.append(f"RSI is {snap['rsi']:.0f} ({'weak momentum' if kind == 'put' else 'overbought, strong upward momentum'})")
     state = "ADVERSE" if against >= TECH_ADVERSE_MIN else "FAVORABLE" if against == 0 else "MIXED"
-    return state, against, total, notes
+    return state, against, total, notes, details
+
+
+def ticker_word(gap):
+    """'trading 11.8% below' / 'trading 4.2% above' for a price-vs-average gap."""
+    return f"trading {abs(gap):.1%} {'below' if gap < 0 else 'above'}"
 
 
 def _technical_read(ticker, kind, strike_str, price):
@@ -593,7 +607,7 @@ def _technical_read(ticker, kind, strike_str, price):
     if not snap or not price or price != price:
         return "technicals unavailable (no price history)"
     short = float(str(strike_str).split("/")[0])
-    state, against, total, notes = _trend_state(kind, snap, price)
+    state, against, total, notes, _ = _trend_state(kind, snap, price)
     dist = (price - short) / price if kind == "put" else (short - price) / price
     where = (f"{dist:.1%} {'below' if kind == 'put' else 'above'} price" if dist >= 0 else
              f"{-dist:.1%} {'ABOVE' if kind == 'put' else 'BELOW'} price (ITM)")
@@ -606,6 +620,11 @@ def _technical_read(ticker, kind, strike_str, price):
     if pc is not None:
         parts.append(f"P/C OI {pc:.2f} (30-60 DTE)")
     return " | ".join(parts)
+
+
+def _join_and(items):
+    """'a', 'a and b', 'a, b and c'."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def _recommendation(ticker, kind, price, rolls):
@@ -621,11 +640,12 @@ def _recommendation(ticker, kind, price, rolls):
     side = "put" if kind == "put" else "call"
     snap = _tech_snapshot(ticker)
     state = against = total = None
+    details = []
     if snap and price and price == price:
-        state, against, total, _ = _trend_state(kind, snap, price)
+        state, against, total, _, details = _trend_state(kind, snap, price)
     if state == "ADVERSE":
-        return (f"CLOSE: the trend is against this {side} credit spread ({against} of {total} trend "
-                f"signals), so rolling would just re-risk the same direction.")
+        return (f"CLOSE: {ticker} is {_join_and(details)}, all working against this {side} credit spread, "
+                f"so rolling would just re-risk the same direction.")
     earnings = None
     try:
         earnings = ws.get_earnings_date(ticker)
@@ -650,8 +670,12 @@ def _recommendation(ticker, kind, price, rolls):
     what = ("it passes every screener criterion" if label == "ROLL 1"
             else "it is the best-scoring liquid spread")
     money = f"nets a ${net:.2f}/sh credit" if net > 0 else f"costs a ${-net:.2f}/sh net debit"
-    trend = (f"the trend is {state.lower()} ({against} of {total} signals against)" if state
-             else "trend data is unavailable")
+    if not state:
+        trend = "trend data is unavailable"
+    elif against == 0:
+        trend = "no trend signals are against the spread"
+    else:
+        trend = f"the only negatives in the trend are that {ticker} is {_join_and(details)}"
     return f"{label}: {what} with {pop:.0%} POP and {money}, and {trend}{', so the lean is modest' if state == 'MIXED' else ''}."
 
 
@@ -826,6 +850,7 @@ def build_spread_actions_table(df):
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
             "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["r1"] or roll["r2"]) else "close",
+            "Recommendation": (_recommendation(r["Ticker"], kind, r["CurrentPrice"], roll) if searched else "-"),
             **_roll_cols("Roll1", roll["r1"]), **_roll_cols("Roll2", roll["r2"]),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
             "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),
