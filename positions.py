@@ -284,7 +284,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
                        "Recommendation", "Forward Outlook", "Trend Context (lagging)"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
-                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "Roll1Exp", "Roll1Sell", "Roll1Buy",
+                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "PutCallOI", "Roll1Exp", "Roll1Sell", "Roll1Buy",
                            "Roll1NetLow", "Roll1NetHigh", "Roll1OpenLow", "Roll1OpenHigh",
                            "Roll2Exp", "Roll2Sell", "Roll2Buy", "Roll2NetLow", "Roll2NetHigh", "Roll2OpenLow",
                            "Roll2OpenHigh", "UnrealizedGLDollars", "EntryCredit",
@@ -1010,6 +1010,7 @@ def build_spread_actions_table(df):
             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
             "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["r1"] or roll["r2"]) else "close",
             "Recommendation": rec_text,
+            "PutCallOI": (lambda v: float("nan") if v is None else v)(_put_call_oi(r["Ticker"])),
             **_roll_cols("Roll1", roll["r1"]), **_roll_cols("Roll2", roll["r2"]),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
             "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),

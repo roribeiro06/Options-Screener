@@ -453,8 +453,13 @@ def _spread_action_summary(row):
     leg = _long_leg_summary(row)
     tail = f"\n\n{leg}" if leg else ""
     recommendation = row.get("Recommendation")
-    rec = (f"RECOMMENDATION: {recommendation}\n\n"
-           if isinstance(recommendation, str) and recommendation not in ("", "-") else "")
+    pc = row.get("PutCallOI")
+    pc_line = ("Put/Call open interest (30-60 DTE): "
+               + (f"{pc:.2f} ({'more puts than calls open' if pc > 1 else 'more calls than puts open' if pc < 1 else 'even'})"
+                  if pd.notna(pc) else "unavailable"))
+    # Recommendation first (when there is one -- rows like TAKE PROFIT have none), put/call line directly under it
+    rec = ((f"RECOMMENDATION: {recommendation}\n"
+            if isinstance(recommendation, str) and recommendation not in ("", "-") else "") + pc_line + "\n\n")
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
         n_int = int(n) if pd.notna(n) else None
