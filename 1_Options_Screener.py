@@ -412,7 +412,7 @@ def _signed_range_line(label, a, b, n_int):
     return f"{label}: {_signed(a)} to {_signed(b)}{tot}"
 
 
-def _roll_position_summary(row):
+def _roll_position_summary(row, prefix="Roll"):
     """Copy-paste summary for a financial advisor to ROLL a losing credit
     spread (from the Credit Spread Actions table): the spread being rolled,
     the NEW expiration, the new short/long strikes, and the price to OPEN the
@@ -427,10 +427,10 @@ def _roll_position_summary(row):
     n_int = int(n) if pd.notna(n) else None
     lines = [f"Roll {row['Ticker']} {type_label} {strike_disp}",
              f"{n_int if n_int is not None else '-'} Contracts",
-             f"Expiration: {row['RollExp']}",
-             f"Sell ${row['RollSell']:g} {opt}",
-             f"Buy ${row['RollBuy']:g} {opt}",
-             f"Premium: {_raw_range(row.get('RollOpenLow'), row.get('RollOpenHigh'), n_int)}"]
+             f"Expiration: {row[prefix + 'Exp']}",
+             f"Sell ${row[prefix + 'Sell']:g} {opt}",
+             f"Buy ${row[prefix + 'Buy']:g} {opt}",
+             f"Premium: {_raw_range(row.get(prefix + 'OpenLow'), row.get(prefix + 'OpenHigh'), n_int)}"]
     current_price = row.get("CurrentPrice")
     if pd.notna(current_price):
         lines += ["", f"Current Price: ${current_price:.2f}"]
@@ -454,9 +454,25 @@ def _spread_action_summary(row):
     tail = f"\n\n{leg}" if leg else ""
     if row.get("Kind") == "roll":
         n = row.get("Contracts")
-        return (f"{_close_position_summary(row)}\n\n--- THEN ---\n\n{_roll_position_summary(row)}\n\n"
-                + _roll_net_line(row.get("RollOpenLow"), row.get("RollOpenHigh"), row.get("UnrealizedGLDollars"),
-                                 int(n) if pd.notna(n) else None) + tail)
+        n_int = int(n) if pd.notna(n) else None
+        # Roll 1 = the rules (same strikes, next monthly, net credit); Roll 2 = highest Score.
+        # Either can be missing; if both exist they are ALTERNATIVES (open one, not both).
+        opts = [(label, prefix) for label, prefix in
+                (("ROLL 1 -- rules: next monthly, same strikes, net credit", "Rule"),
+                 ("ROLL 2 -- highest Score", "Roll"))
+                if pd.notna(row.get(prefix + "Exp")) and row.get(prefix + "Exp")]
+        if len(opts) == 2 and (row["RuleExp"], row["RuleSell"], row["RuleBuy"]) == \
+                (row["RollExp"], row["RollSell"], row["RollBuy"]):
+            opts = opts[:1]            # same spread either way -- show it once
+        blocks = [f"{label}\n{_roll_position_summary(row, prefix)}\n\n"
+                  + _roll_net_line(row.get(prefix + "OpenLow"), row.get(prefix + "OpenHigh"),
+                                   row.get("UnrealizedGLDollars"), n_int)
+                  for label, prefix in opts]
+        if len(blocks) == 2:
+            joined = "--- THEN, EITHER ---\n\n" + blocks[0] + "\n\n--- OR ---\n\n" + blocks[1]
+        else:
+            joined = "--- THEN ---\n\n" + blocks[0]
+        return f"{_close_position_summary(row)}\n\n{joined}" + tail
     return _close_position_summary(row) + tail
 
 
@@ -924,17 +940,18 @@ try:
                    "own row and their own action, so a tested/losing side can be flagged without forcing a decision "
                    "on its safe counterpart. **Rolling takes priority over closing:** when STOP, TIME EXIT, the "
                    "Group 1 ITM close, the 21 DTE check, or PROFIT PULLBACK fires, the app first searches for a "
-                   "roll -- buy the spread back at the ask and sell a new spread on the same side in a LATER "
-                   "expiration, at strikes further from the money. It's shown **even when it's a net debit** -- "
-                   "any roll that passes the screener counts, with the net credit or debit spelled out so the "
-                   "call is yours (a net-credit roll is preferred when one exists). The new "
-                   "spread must be one the Multi-Leg screener itself would show (same POP, OTM incl. the volatility-"
-                   "tier rule, AnnROR, $1,000 premium floor, open interest and earnings exclusion), same contract "
-                   "count; the best-Score one is proposed with its net credit or debit. Click a row for an advisor-ready "
+                   "roll -- buy the spread back at the ask and open a new spread on the same side in a LATER "
+                   "expiration -- and offers **two suggestions**: **ROLL 1 (rules)** follows the playbook: the "
+                   "**same strikes in the next monthly (3rd Friday), and only for a net credit**; **ROLL 2 "
+                   "(highest Score)** is the best-Score spread the Multi-Leg screener itself would show in any "
+                   "later expiration (same POP, OTM incl. the volatility-tier rule, AnnROR, $1,000 premium floor, "
+                   "open interest and earnings exclusion), **even when it's a net debit** -- the net credit or debit "
+                   "is spelled out so the call is yours. Same contract count either way. If one doesn't exist the "
+                   "action says why; if neither does, it says CLOSE. Click a row for an advisor-ready "
                    "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
                    "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
-                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom (the new premium plus the position's Unrealized G/L -- the buy-back isn't subtracted again, you already collected that credit) -- "
-                   "in that execution order, not as alternatives; "
+                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom (the new premium plus the position's Unrealized G/L -- the buy-back isn't subtracted again, you already collected that credit). "
+                   "When both suggestions exist they are shown as alternatives (EITHER / OR) -- open one, not both; "
                    "when no roll exists, just the Close order. If nothing qualifies the action says CLOSE and why (e.g. a "
                    "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
                    "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "

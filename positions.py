@@ -283,7 +283,9 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
                            "CostToClose", "CurrentPrice", "Kind", "RollExp", "RollSell", "RollBuy",
-                           "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh", "UnrealizedGLDollars", "EntryCredit",
+                           "RollNetLow", "RollNetHigh", "RollOpenLow", "RollOpenHigh",
+                           "RuleExp", "RuleSell", "RuleBuy", "RuleNetLow", "RuleNetHigh", "RuleOpenLow",
+                           "RuleOpenHigh", "UnrealizedGLDollars", "EntryCredit",
                            "LongBid", "LongAsk", "ShortBid", "ShortAsk", "LongCost"]
 
 
@@ -365,18 +367,18 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     A roll = buy the current spread back at the ASK (`cost`, conservative, same
     basis as the rest of the table) and sell a NEW spread on the same side, in a
     LATER expiration (new credit at the worst-case bid/ask, same basis the
-    screener uses). The roll is shown even when it comes out a NET DEBIT -- any
-    spread that passes the screener counts, and the net (credit or debit) is
-    spelled out so the call is yours; a net-credit roll is preferred when one
-    exists. The new spread must be one the
+    screener uses). This is the HIGHEST-SCORE suggestion (Roll 2): it is shown
+    even when it comes out a NET DEBIT -- any spread that passes the screener
+    counts, and the net (credit or debit) is spelled out so the call is yours.
+    The rules-based, net-credit-only counterpart is _find_rule_roll. The new spread must be one the
     screener itself would show: candidates come from spreads._for_expiration,
     the exact function behind the Multi-Leg tab, so every screener criterion
     already applies (POP, OTM incl. the tech 15%/10%+$5k gate, AnnROR, OTM vs
     IV, the $1,000 premium floor, open interest, earnings-window exclusion,
     SPREAD_DTE_MIN..MAX). Deliberately NOT gated by open_position_sides -- the
     spread being rolled is itself what would block it. Same contract count as
-    the position. Among net-credit rolls (or, if none, among all of them) the
-    highest screener Score wins.
+    the position. The highest screener Score among ALL candidates wins,
+    whether it nets a credit or a debit.
     roll = {exp, dte, sell, buy (strikes), net_low (worst case: new credit at
     the bid/ask minus buy-back at the ask), net_high (best case: new credit at
     the ask/bid minus buy-back at the bid), open_low/open_high (the new
@@ -403,9 +405,7 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     if not cands:
         return "no spread in a later expiration passes the screener criteria", None
     scored = [(r["Max Profit"] - cost, r) for r in cands]
-    credits = [(net, r) for net, r in scored if net > 0]
-    pool = credits or scored      # prefer a net-credit roll; otherwise the best-scoring debit one
-    net, r = max(pool, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
+    net, r = max(scored, key=lambda t: t[1]["Score"] if t[1]["Score"] == t[1]["Score"] else float("-inf"))
     legs = r["Put Legs"] or r["Call Legs"]
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
@@ -413,23 +413,103 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
             "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"]}
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
-    return (f"ROLL to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
+    return (f"to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
             f"-> {net_txt}, OTM {r['OTM_%']:.1%}, "
             f"POP {r['POP_%']:.0%}, AnnROR {r['AnnROR_%']:.0%}"), roll
 
 
-def _try_roll(ticker, exp, kind, cost, cost_bid, n, action, label="", closing="CLOSE"):
-    """Roll-before-close for a LOSING position whose rule says to get out:
-    -> (new action text, roll dict or None). Falls back to `closing` (with the
-    reason) when there is no qualifying roll, or the search itself fails."""
+def _next_monthly(ticker, exp):
+    """Earliest 3rd-Friday expiration strictly after `exp`, or None."""
+    cur = dt.date.fromisoformat(exp)
+    for e in sorted(ws.td_expirations(ticker)):
+        d = dt.date.fromisoformat(e)
+        if d > cur and d.weekday() == 4 and 15 <= d.day <= 21:
+            return e
+    return None
+
+
+def _find_rule_roll(ticker, exp, kind, short_strike, long_strike, cost, cost_bid):
+    """The RULES-BASED roll (Roll 1) -> (why, roll or None): the playbook's own
+    21-DTE roll -- the SAME strikes, in the next monthly (3rd Friday), and only
+    for a NET CREDIT. Same conservative basis as the rest of the table: buy the
+    current spread back at the ASK (`cost`), sell the new one at the bid on the
+    short leg / ask on the long leg. No screener criteria apply (it's the same
+    strikes you already hold); it simply either nets a credit or doesn't.
+    Returns the same roll dict shape as _find_roll."""
+    exp2 = _next_monthly(ticker, exp)
+    if not exp2:
+        return "no later monthly expiration", None
+    chain = ws.td_chain(ticker, exp2)
+    s_leg = _leg_prices(chain, kind, short_strike) if chain else None
+    l_leg = _leg_prices(chain, kind, long_strike) if chain else None
+    if not (s_leg and l_leg):
+        return f"{short_strike:g}/{long_strike:g} isn't listed on {exp2}", None
+    open_low, open_high = s_leg[0] - l_leg[1], s_leg[1] - l_leg[0]
+    net_low, net_high = open_low - cost, open_high - cost_bid
+    if net_low <= 0:
+        return (f"same strikes on {exp2} would be a ${abs(net_low):.2f}/sh net "
+                f"{'debit' if net_low < 0 else 'credit of zero'}, not a credit"), None
+    dte = (dt.date.fromisoformat(exp2) - dt.date.today()).days
+    return "", {"exp": exp2, "dte": dte, "sell": float(short_strike), "buy": float(long_strike),
+                "net_low": net_low, "net_high": net_high, "open_low": open_low, "open_high": open_high}
+
+
+def _roll_text(roll, n):
+    net = roll["net_low"]
+    net_txt = (f"net +${net:.2f}/sh (+${net * 100 * n:,.0f})" if net > 0 else
+               f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * n:,.0f})")
+    return (f"to {roll['exp']} ({roll['dte']} DTE): sell {roll['sell']:g} / buy {roll['buy']:g} "
+            f"for ${roll['open_low']:.2f} credit -> {net_txt}")
+
+
+def _try_roll(ticker, exp, kind, strikes, cost, cost_bid, n, action, closing="CLOSE"):
+    """Roll-before-close for a LOSING position whose rule says to get out. Offers
+    TWO suggestions side by side -- Roll 1 (the rules: same strikes, next monthly,
+    net credit only) and Roll 2 (highest screener Score among spreads the Multi-Leg
+    screener would show, credit or debit) -- and returns
+    (new action text, {"rule": roll or None, "score": roll or None}). Falls back to
+    `closing` (with the reasons) when neither exists; one search failing never
+    hides the other."""
+    short_strike, long_strike = (float(x) for x in str(strikes).split("/"))
+    rule = score = None
+    rule_why = score_why = ""
     try:
-        text, roll = _find_roll(ticker, exp, kind, cost, cost_bid, n)
+        rule_why, rule = _find_rule_roll(ticker, exp, kind, short_strike, long_strike, cost, cost_bid)
+    except Exception as e:
+        print(f"RULE ROLL {ticker}: ERROR {e}", file=sys.stderr)
+        rule_why = f"search failed: {e}"
+    try:
+        score_why, score = _find_roll(ticker, exp, kind, cost, cost_bid, n)
     except Exception as e:
         print(f"ROLL SEARCH {ticker}: ERROR {e}", file=sys.stderr)
-        return f"{action} -> {closing} (roll search failed: {e})", None
-    if roll:
-        return f"{action} -> {label}{text}", roll
-    return f"{action} -> {closing} (no roll: {text})", None
+        score_why = f"search failed: {e}"
+    if not rule and not score:
+        return (f"{action} -> {closing} (no roll: rules: {rule_why}; screener: {score_why})",
+                {"rule": None, "score": None})
+    if rule:
+        r1 = f"ROLL 1 (rules: next monthly, same strikes, net credit): {_roll_text(rule, n)}"
+    else:
+        r1 = f"ROLL 1 (rules: next monthly, same strikes, net credit): none -- {rule_why}"
+    if not score:
+        r2 = f"ROLL 2 (highest Score): none -- {score_why}"
+    elif rule and (score["exp"], score["sell"], score["buy"]) == (rule["exp"], rule["sell"], rule["buy"]):
+        r2 = "ROLL 2 (highest Score): same spread as Roll 1"
+    else:
+        r2 = f"ROLL 2 (highest Score): {score_why}"
+    return f"{action} -> {r1} || {r2}", {"rule": rule, "score": score}
+
+
+def _roll_cols(prefix, roll):
+    """Raw columns for one roll suggestion (prefix "Roll" = highest Score, "Rule" =
+    rules-based); all NaN/None when that suggestion doesn't exist."""
+    nan = float("nan")
+    return {f"{prefix}Exp": roll["exp"] if roll else None,
+            f"{prefix}Sell": roll["sell"] if roll else nan,
+            f"{prefix}Buy": roll["buy"] if roll else nan,
+            f"{prefix}NetLow": roll["net_low"] if roll else nan,
+            f"{prefix}NetHigh": roll["net_high"] if roll else nan,
+            f"{prefix}OpenLow": roll["open_low"] if roll else nan,
+            f"{prefix}OpenHigh": roll["open_high"] if roll else nan}
 
 
 def _row_key(r):
@@ -561,14 +641,14 @@ def build_spread_actions_table(df):
         # peak, not necessarily a loss): look for a net-credit roll that
         # passes the screener first (_find_roll); only if there is none is it
         # a CLOSE. TAKE PROFIT and DEAD TRADE never roll.
-        roll = None
+        roll = {"rule": None, "score": None}
         if ((cost > credit and (rank in (0, 1) or action == ROLL_CHECK_TEXT))
                 or action.startswith(PULLBACK_PREFIX)):
-            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
+            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, r["Strike"], cost,
                                      r["CostToCloseBid"], n, action)
         elif rank == LOSING_RANK:
             # a plain loser is not told to close -- only offered a roll if one exists, else HOLD
-            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, cost,
+            action, roll = _try_roll(r["Ticker"], r["Expiration"], kind, r["Strike"], cost,
                                      r["CostToCloseBid"], n, action, closing="HOLD")
         group = _spread_group(r["DTE"], r["DaysHeld"])
         rows.append((rank, r["DTE"], {
@@ -583,14 +663,8 @@ def build_spread_actions_table(df):
             "Action": action}, {
             "Ticker": r["Ticker"], "Type": r["Type"], "Strike": r["Strike"], "Contracts": n,
             "Expiration": r["Expiration"], "CostToCloseBid": r["CostToCloseBid"],
-            "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if roll else "close",
-            "RollExp": roll["exp"] if roll else None,
-            "RollSell": roll["sell"] if roll else float("nan"),
-            "RollBuy": roll["buy"] if roll else float("nan"),
-            "RollNetLow": roll["net_low"] if roll else float("nan"),
-            "RollNetHigh": roll["net_high"] if roll else float("nan"),
-            "RollOpenLow": roll["open_low"] if roll else float("nan"),
-            "RollOpenHigh": roll["open_high"] if roll else float("nan"),
+            "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["rule"] or roll["score"]) else "close",
+            **_roll_cols("Roll", roll["score"]), **_roll_cols("Rule", roll["rule"]),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
             "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),
             "ShortBid": r.get("ShortBid", float("nan")), "ShortAsk": r.get("ShortAsk", float("nan")),
