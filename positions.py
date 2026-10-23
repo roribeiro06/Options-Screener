@@ -529,6 +529,37 @@ def _tech_snapshot(ticker):
     return snap
 
 
+_PC_CACHE = {}
+
+
+def _put_call_oi(ticker):
+    """Put/call OPEN INTEREST ratio for this one stock across its 30-60 DTE
+    expirations (all strikes), or None if there's no data. Above 1.0 = more put
+    contracts open than calls. Positioning context only -- it mixes hedging,
+    covered calls and cash-secured puts, so it's displayed, not used in the lean.
+    Cached per ticker per day."""
+    key = (ticker, dt.date.today())
+    if key in _PC_CACHE:
+        return _PC_CACHE[key]
+    puts = calls = 0
+    try:
+        for e in ws.td_expirations(ticker):
+            dte = (dt.date.fromisoformat(e) - dt.date.today()).days
+            if not 30 <= dte <= 60:
+                continue
+            for o in ws.td_chain(ticker, e) or []:
+                oi = int(o.get("oi") or 0)
+                if o["type"] == "put":
+                    puts += oi
+                else:
+                    calls += oi
+    except Exception as ex:
+        print(f"P/C OI {ticker}: ERROR {ex}", file=sys.stderr)
+    ratio = (puts / calls) if calls else None
+    _PC_CACHE[key] = ratio
+    return ratio
+
+
 def _trend_state(kind, snap, price):
     """(state, against, total, notes): how many of up to 4 trend signals work
     AGAINST this spread. A put credit spread is bullish (hurt by a downtrend); a
@@ -582,6 +613,9 @@ def _technical_read(ticker, kind, strike_str, price, rolls=None, contracts=None)
              (f", {price / snap['sma200'] - 1:+.1%} vs 200d" if snap["sma200"] else "") +
              (f", 20d {snap['ret20']:+.1%}" if snap["ret20"] is not None else "") + f", RSI {snap['rsi']:.0f}",
              f"short strike {where}"]
+    pc = _put_call_oi(ticker)
+    if pc is not None:
+        parts.append(f"P/C OI {pc:.2f} (30-60 DTE)")
     if rolls is None:
         return " | ".join(parts)
     if state == "ADVERSE":
