@@ -177,6 +177,22 @@ def chain(symbol, expiration):
     return list(hit[2].get(exp_date.isoformat(), []))
 
 
+def window_open_interest(symbol):
+    """(put OI, call OI) summed over every expiration in the cached bulk chain (today through
+    CHAIN_DAYS out), or None if that chain isn't cached. Call after chain() has loaded it."""
+    hit = _chain_cache.get(symbol.upper())
+    if not hit:
+        return None
+    put_oi = call_oi = 0
+    for lst in hit[2].values():
+        for o in lst:
+            if o["type"] == "put":
+                put_oi += o["oi"]
+            else:
+                call_oi += o["oi"]
+    return put_oi, call_oi
+
+
 def history(symbol, start, end):
     """Daily candles as Tradier's /markets/history shape: {"history": {"day": [{"date","open","high","low","close","volume"}]}}."""
     to_ms = lambda d: int(dt.datetime.combine(d, dt.time()).replace(tzinfo=dt.timezone.utc).timestamp() * 1000)

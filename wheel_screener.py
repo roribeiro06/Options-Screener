@@ -651,28 +651,49 @@ def td_expirations(symbol):
 
 
 _PC_RATIO = {}   # (symbol, expiration) -> put OI / call OI across that expiration's full chain
+_PC_ALL = {}     # symbol -> put OI / call OI across every expiration fetched (~next 100 days)
+_PC_OI = {}      # Tradier fallback accumulator: symbol -> {expiration: (put OI, call OI)}
+
+
+def _oi_split(chain):
+    put_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("p"))
+    call_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("c"))
+    return put_oi, call_oi
+
+
+def _ratio(put_oi, call_oi):
+    return put_oi / call_oi if put_oi and call_oi else float("nan")
 
 
 def put_call_ratio(chain):
     """Open-interest put/call ratio of one expiration's chain (puts OI / calls OI): >1 means
     more put positioning (market leaning defensive), <1 more call positioning. NaN when
     either side has no open interest."""
-    put_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("p"))
-    call_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("c"))
-    return put_oi / call_oi if put_oi and call_oi else float("nan")
+    return _ratio(*_oi_split(chain))
 
 
 def td_chain(symbol, expiration):
     out = _td_chain_raw(symbol, expiration)
     _PC_RATIO[(symbol, str(expiration))] = put_call_ratio(out)
+    wide = None
+    if use_schwab():
+        import schwab_data
+        wide = schwab_data.window_open_interest(symbol)       # whole bulk chain, not just what the screen touched
+    if wide is None:
+        _PC_OI.setdefault(symbol, {})[str(expiration)] = _oi_split(out)
+        pairs = _PC_OI[symbol].values()
+        wide = (sum(p for p, _ in pairs), sum(c for _, c in pairs))
+    _PC_ALL[symbol] = _ratio(*wide)
     return out
 
 
 def add_put_call(df):
-    """Fill a PutCall column (that row's expiration's OI put/call ratio, from the chains the
-    screen just fetched). Run on the raw frame, before the column selection and _fmt."""
+    """Fill PutCall_Exp (that row's expiration's OI put/call ratio) and PutCall_All (the ticker's
+    across all expirations), from the chains the screen just fetched. Run on the raw frame,
+    before the column selection and _fmt."""
     d = df.copy()
-    d["PutCall"] = [_PC_RATIO.get((t, str(e)), float("nan")) for t, e in zip(d["Ticker"], d["Expiration"])]
+    d["PutCall_Exp"] = [_PC_RATIO.get((t, str(e)), float("nan")) for t, e in zip(d["Ticker"], d["Expiration"])]
+    d["PutCall_All"] = [_PC_ALL.get(t, float("nan")) for t in d["Ticker"]]
     return d
 
 
@@ -1711,15 +1732,15 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
 LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
                "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-               "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
+               "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
             "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-            "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
+            "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "Ask", "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-             "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
+             "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -1769,8 +1790,9 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
-    if "PutCall" in d.columns:
-        d["PutCall"] = d["PutCall"].apply(fmt_put_call)
+    for c in ("PutCall_Exp", "PutCall_All"):
+        if c in d.columns:
+            d[c] = d[c].apply(fmt_put_call)
     # Premium: "$bid-$ask (total range across the # of contracts that reach the cash target)".
     # Showing the live bid-ask spread here folds in what the old separate Spread_$
     # liquidity column used to convey, so that column is gone.
