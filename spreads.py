@@ -68,7 +68,7 @@ SPREAD_CASH_TARGET = 25000  # capital target for "# of contracts" -- lower than 
 SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "Expiration", "DTE",
                "OTM_%", "Width", "Width_%", "Max Profit", "Max Profit (Best)", "Breakeven",
                "AvgPremium", "AnnROR_%", "ROR_%", "POP_%", "IV", "Score", "# of contracts", "MaxLoss",
-               "OpenInt", "EarningsDate",
+               "OpenInt", "PutCall", "EarningsDate",
                # Iron condor only -- each side's own worst/best-case credit, NaN everywhere
                # else. Not for display (always dropped from the visible table in
                # 1_Options_Screener.py): exists purely so the click-to-copy summary can
@@ -973,7 +973,7 @@ def _df(rows):
     # indexing raises KeyError for a column missing from every row, reindex
     # creates it filled with NaN instead, same as when the column IS present
     # on some rows but NaN on others.
-    return (pd.DataFrame(rows).sort_values(["Ticker", "Score"], ascending=[True, False])
+    return (ws.add_put_call(pd.DataFrame(rows)).sort_values(["Ticker", "Score"], ascending=[True, False])
            .reindex(columns=SPREAD_COLS))
 
 
@@ -982,6 +982,8 @@ def _fmt(df):
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
+    if "PutCall" in d.columns:
+        d["PutCall"] = d["PutCall"].apply(ws.fmt_put_call)
     # Max Profit: "$worst-$best (total credit range across the # of contracts that reach the
     # cash target)". worst = sell short at bid / buy long at ask; best = sell short at ask /
     # buy long at bid -- this range folds in what the old separate Spread_$ liquidity column

@@ -1166,6 +1166,9 @@ case if assigned and the stock goes to zero); cost basis - premium for covered c
 one, e.g. Contract Lookup); width - credit for spreads.
 **Liquidity:** OpenInt = open interest (contracts outstanding); Volume = contracts traded today. Higher OpenInt/Volume mean
 easier fills and less slippage. Contracts (and every spread leg) must have **open interest >= {getattr(ws, "MIN_OPEN_INTEREST", 0):,}** to appear.
+**PutCall** = open-interest put/call ratio of that row's whole expiration (all puts' OI / all calls' OI, every strike), a read on what the
+market is positioned for: above 1 = more put positioning (hedging / bearish lean), below 1 = more call positioning (bullish lean), near 1 = balanced.
+It describes the expiration, so every contract on the same ticker and expiration shows the same value. "-" if either side has no open interest.
 **Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
 yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
 Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.

@@ -650,7 +650,33 @@ def td_expirations(symbol):
     return _as_list((j.get("expirations") or {}).get("date"))
 
 
+_PC_RATIO = {}   # (symbol, expiration) -> put OI / call OI across that expiration's full chain
+
+
+def put_call_ratio(chain):
+    """Open-interest put/call ratio of one expiration's chain (puts OI / calls OI): >1 means
+    more put positioning (market leaning defensive), <1 more call positioning. NaN when
+    either side has no open interest."""
+    put_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("p"))
+    call_oi = sum(int(o.get("oi") or 0) for o in chain if str(o.get("type")).lower().startswith("c"))
+    return put_oi / call_oi if put_oi and call_oi else float("nan")
+
+
 def td_chain(symbol, expiration):
+    out = _td_chain_raw(symbol, expiration)
+    _PC_RATIO[(symbol, str(expiration))] = put_call_ratio(out)
+    return out
+
+
+def add_put_call(df):
+    """Fill a PutCall column (that row's expiration's OI put/call ratio, from the chains the
+    screen just fetched). Run on the raw frame, before the column selection and _fmt."""
+    d = df.copy()
+    d["PutCall"] = [_PC_RATIO.get((t, str(e)), float("nan")) for t, e in zip(d["Ticker"], d["Expiration"])]
+    return d
+
+
+def _td_chain_raw(symbol, expiration):
     if use_schwab():
         import schwab_data
         return schwab_data.chain(symbol, expiration)
@@ -1685,15 +1711,15 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
 LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
                "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-               "# of contracts", "MaxLoss", "OpenInt", "Volume", "EarningsDate"]
+               "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
             "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-            "# of contracts", "MaxLoss", "OpenInt", "Volume", "EarningsDate"]
+            "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "Ask", "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-             "# of contracts", "MaxLoss", "OpenInt", "Volume", "EarningsDate"]
+             "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -1703,8 +1729,8 @@ def _df(rows, cols, sort_by=("Ticker", "Strike"), asc=(True, False)):
         return pd.DataFrame(columns=cols)
     # default: ticker A->Z, then strike high->low. Puts pass ("Ticker","Delta_%")
     # with asc=(True, False) to rank each ticker safest-first (highest POP).
-    return pd.DataFrame(rows).sort_values(list(sort_by),
-                                          ascending=list(asc))[cols]
+    return add_put_call(pd.DataFrame(rows)).sort_values(list(sort_by),
+                                                        ascending=list(asc))[cols]
 
 
 def write_report(sheets, settings, path=OUTPUT_FILE):
@@ -1734,11 +1760,17 @@ def write_report(sheets, settings, path=OUTPUT_FILE):
                         sh.cell(row=ri, column=ci).fill = green
 
 
+def fmt_put_call(v):
+    return f"{v:.2f}" if pd.notna(v) else "-"
+
+
 def _fmt(df):
     d = df.copy()
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = (d[c] * 100).round(1).astype(str) + "%"
+    if "PutCall" in d.columns:
+        d["PutCall"] = d["PutCall"].apply(fmt_put_call)
     # Premium: "$bid-$ask (total range across the # of contracts that reach the cash target)".
     # Showing the live bid-ask spread here folds in what the old separate Spread_$
     # liquidity column used to convey, so that column is gone.
