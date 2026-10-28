@@ -370,12 +370,34 @@ def _long_leg_summary(row):
             + "\n".join(lines))
 
 
-def _close_position_summary_with_leg(row):
-    """Open Positions click-to-copy: the full close, plus (put spreads only) the
-    sell-just-the-long-leg alternative below it."""
-    text = _close_position_summary(row)
-    leg = _long_leg_summary(row)
-    return f"{text}\n\n{leg}" if leg else text
+def _close_position_legs_summary(row):
+    """Open Positions click-to-copy: one order block per leg to close, in the same shape as
+    the screener's own order text -- "Buy to Close $205 Put" for the short leg and "Sell to
+    Close $195 Put" for the long leg of a spread (a single-leg position is one block), each
+    with ticker, contracts, expiration and the target price. Buy legs quote bid-to-halfway
+    (_bid_avg_range), sell legs halfway-to-ask (_avg_max_range). Falls back to the combined
+    _close_position_summary if a spread's leg quotes are missing."""
+    strike_str = str(row.get("Strike", "-"))
+    n = row.get("Contracts")
+    n_int = int(n) if pd.notna(n) else None
+    exp = row.get("Expiration")
+    side = "Call" if "Call" in str(row.get("Type", "")) else "Put"
+    if "/" in strike_str:
+        sb, sa, lb, la = (row.get(k) for k in ("ShortBid", "ShortAsk", "LongBid", "LongAsk"))
+        if any(v is None or pd.isna(v) for v in (sb, sa, lb, la)):
+            return _close_position_summary(row)
+        short_k, long_k = strike_str.split("/")[:2]
+        legs = [(f"Buy to Close ${float(short_k):g} {side}", _bid_avg_range(sb, sa, n_int)),
+                (f"Sell to Close ${float(long_k):g} {side}", _avg_max_range(lb, la, n_int))]
+    else:
+        legs = [(f"Buy to Close ${float(strike_str):g} {side}",
+                 _bid_avg_range(row.get("CostToCloseBid"), row.get("CostToClose"), n_int))]
+    blocks = ["\n".join([head, str(row["Ticker"]), f"{n_int if n_int is not None else '-'} Contracts",
+                         f"Expiration: {exp if pd.notna(exp) else '-'}", f"Cost to Close: {cost}"])
+              for head, cost in legs]
+    text = "\n\n".join(blocks)
+    price = row.get("CurrentPrice")
+    return text + (f"\n\nCurrent Price: ${price:.2f}" if pd.notna(price) else "")
 
 
 def _signed(x):
@@ -936,14 +958,14 @@ st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit s
            "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
            "stock-to-zero assumption needed). Same refresh cadence as the rest of the app. Click any row "
            "for a copy-paste closing instruction to send your advisor (shown as a positive target price, "
-           "bid-to-halfway). For a **put spread** the pop-up also gives a second option underneath: sell only the "
-           "long (protective) put and keep the short put, so you keep collecting its premium and are simply "
-           "assigned the stock at that strike if it falls there (premium shown halfway-to-ask).")
+           "bid-to-halfway). A spread's pop-up lists each leg as its own order "
+           "(Buy to Close the short, Sell to Close the long). The sell-only-the-long-leg alternative is in "
+           "Credit Spread Actions below.")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
         _selectable_table(_dpos, positions._fmt(_dpos), "open_pos_tbl",
-                          summary_fn=_close_position_summary_with_leg)
+                          summary_fn=_close_position_legs_summary)
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")

@@ -177,7 +177,7 @@ def evaluate_position(pos, today):
     if not chain:
         raise RuntimeError(f"no option chain for {ticker} {exp} (expired or invalid expiration?)")
 
-    long_bid = long_ask = short_bid = short_ask = float("nan")      # the spread's long leg's own quote (put spreads: see the click-to-copy
+    long_bid = long_ask = short_bid = short_ask = float("nan")      # each spread leg's own quote (see the click-to-copy
     if kind in ("put", "call"):             # "close only the long leg" option in the app)
         strike = pos["strike"]
         leg = _leg_prices(chain, kind, strike)
@@ -195,8 +195,7 @@ def evaluate_position(pos, today):
             raise RuntimeError(f"leg(s) not found: {ticker} {short_strike:g}/{long_strike:g}{opt_type[0].upper()} {exp}")
         s_bid, s_ask, _s_prev = short_leg
         l_bid, l_ask, _l_prev = long_leg
-        if kind == "put_spread":
-            long_bid, long_ask, short_bid, short_ask = l_bid, l_ask, s_bid, s_ask
+        long_bid, long_ask, short_bid, short_ask = l_bid, l_ask, s_bid, s_ask
         cost_to_close = s_ask - l_bid                        # worst case: buy back short at ask, sell long at bid
         cost_to_close_bid = s_bid - l_ask                    # best case: buy back short at bid, sell long at ask
 
