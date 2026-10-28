@@ -66,8 +66,11 @@ assert ws.etf_blocked_by("SPY", _today, _dt.date(2026, 11, 6)) == [("NVDA", _dt.
 assert ws.etf_holding_earnings("SPY")["MSFT"] is None                                  # unknown date is visible, not blocking
 assert ws.earnings_blocks("SPY", None, _today, _dt.date(2026, 10, 20)) is False
 assert ws.earnings_blocks("MSFT", _dt.date(2026, 10, 28), _today, _dt.date(2026, 11, 6)) is True   # a stock: its own date still rules
-assert ws.earnings_blocks("MSFT", None, _today, _dt.date(2026, 11, 6)) is False
+ws._PEER_EARN_CACHE.clear()
+assert ws.earnings_blocks("MSFT", None, _today, _dt.date(2026, 11, 6)) is True    # peer AAPL reports 11/03 inside the window
+assert ws.earnings_blocks("MSFT", None, _today, _dt.date(2026, 10, 30)) is False  # expires before any peer report
 assert ws.earnings_blocks("SPCX", None, _today, _dt.date(2026, 11, 6)) is False         # not an ETF in the list
 ws.get_earnings_date = _orig_ged
 ws._ETF_EARN_CACHE.clear()
+ws._PEER_EARN_CACHE.clear()
 print("ETF holdings gate OK")

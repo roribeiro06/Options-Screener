@@ -682,6 +682,25 @@ with st.expander("ETF earnings check (top-5 holdings)"):
                f"could not be checked.")
     st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
 
+with st.expander("Peer earnings check (competitors / related tickers)"):
+    _peer_rows = []
+    for _t in sorted({*puts, *(h[0] for h in holds)} & set(ws.PEER_TICKERS)):
+        _pe = ws.peer_earnings(_t)
+        _own = ws.get_earnings_date(_t)
+        _next = sorted((d, p) for p, d in _pe.items() if d)
+        _peer_rows.append({"Ticker": _t,
+                           "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
+                           "Peers": ", ".join(_pe),
+                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
+                           "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
+    st.caption("A ticker is left out of the puts / calls / spreads screens for any expiration that spans its OWN earnings "
+               "or any listed peer's earnings (PEER_TICKERS in wheel_screener.py). Long straddles/strangles use the same "
+               "dates as catalysts instead. A peer listed under NOT FOUND couldn't be checked.")
+    if _peer_rows:
+        st.dataframe(pd.DataFrame(_peer_rows), hide_index=True, use_container_width=True)
+    else:
+        st.write("None of your tickers have peers configured.")
+
 dp, ep = scan_puts(tuple(puts), CRITERIA)
 dc, ec = scan_calls(holds, CRITERIA)
 
@@ -1180,7 +1199,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - **Volatility tiers** (every strategy): each ticker is tiered by its historical volatility -- the HIGHER of its 30-day and 1-year figure, so a quiet month can't hide a volatile name -- **Low** below {ws.VOL_LOW:.0%}, **Medium** {ws.VOL_LOW:.0%}-{ws.VOL_HIGH:.0%}, **High** {ws.VOL_HIGH:.0%}+. A ticker with under {ws.VOL_MIN_DAYS} trading days of history, or no fresh volatility data, is treated as High (strictest). Refreshed daily (`vol_tiers.json`); tickers outside it (e.g. Discover) are computed live
 - Minimum annualized yield: {ws.MIN_ANN_YIELD:.0%}, but {ws.MIN_ANN_YIELD_LOW_VOL:.0%} for **Low**-volatility tickers (which also skip the per-share premium floors since they're lower risk)
 - OTM floor: {ws.OTM_MIN_LOW_VOL:.0%} for **Low**-volatility tickers, {ws.OTM_MIN_OTHER:.0%} for all others  (OTM max {ws.OTM_MAX:.0%})
-- Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report
+- Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report (its own or any listed competitor/peer's -- see PEER_TICKERS)
 - **Puts only** extra filters: {("premium >= \$%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
 - **Covered calls** extra filter: OTM >= {getattr(ws, "CALL_MIN_OTM_OVER_IV", 0):.0%} of IV (same volatility-scaled cushion as puts)
 - **Score** (all strategies) = (AnnYield / IV^{getattr(ws, "SCORE_IV_EXP", 1.0):g}) x POP^{getattr(ws, "SCORE_POP_EXP", 1.0):g} x (365/DTE)^{getattr(ws, "SCORE_DTE_EXP", 0.5):g}. For spreads, annualized ROR replaces AnnYield. Dividing by IV stops high-volatility names from dominating on richer premium; higher POP and shorter DTE break ties. Every table is ranked by Score (highest first) within each ticker.
@@ -1218,7 +1237,7 @@ this cheap relative to what IV implies" -- and AnnROR can still look large on a 
 ratio would.
 - Straddle strike (put = call): whichever listed strike is closest to the current price, not the closest-to-0.50-delta strike (those can diverge meaningfully in a high-IV name)
 - Strangle strikes: symmetric % away from the current price on each side (not matched by delta independently per leg, which produces lopsided strangles -- see the straddle note above, same root cause). % scanned: {", ".join(f"{p:.0%}" for p in sp.LONG_STRANGLE_OTM_PCTS)}, filtered afterward to combined POP {sp.SPREAD_POP_MIN:.0%} to {sp.SPREAD_POP_MAX:.0%}, same floor as above
-- **Requires a CONFIRMED catalyst date** (unlike every other strategy here, which never spans one) -- either this ticker's own earnings, or a **related ticker's** (see `PEER_TICKERS` in wheel_screener.py -- e.g. MU has no earnings on the calendar but AMAT/SK Hynix/SanDisk reporting can still move it), checked live via the same earnings lookup either way. No known catalyst at all -> no candidate, regardless of how the rest of the math looks. EarningsDate shows "(via TICKER)" when a peer's date is what qualified it, not the ticker's own
+- **Requires a CONFIRMED catalyst date** (unlike every other strategy here, which never spans one) -- either this ticker's own earnings, or a **related ticker's** (see `PEER_TICKERS` in wheel_screener.py -- e.g. MU has no earnings on the calendar but SK Hynix/SanDisk/Samsung reporting can still move it), checked live via the same earnings lookup either way. No known catalyst at all -> no candidate, regardless of how the rest of the math looks. EarningsDate shows "(via TICKER)" when a peer's date is what qualified it, not the ticker's own
 - **Only the single expiration closest to (on or after) that catalyst date** is used -- every known catalyst (own + every peer) is tried, whichever gives the closest expiration wins -- not every later one that also happens to span it, since a catalyst trade should concentrate exposure around the event, not scatter near-duplicate rows across every weekly that comes after it. **Not bounded by the {sp.SPREAD_DTE_MIN}-{sp.SPREAD_DTE_MAX} DTE window above** -- a catalyst falling further out than {sp.SPREAD_DTE_MAX} days still gets a candidate at the nearest expiration after it, even though credit spreads/iron condor stay capped at {sp.SPREAD_DTE_MAX} -- but capped at **{sp.LONG_DTE_MAX} days**: a catalyst further out than that isn't worth tying up capital waiting for
 - **No OTM floor / OTM-over-IV cushion** (unlike credit spreads/iron condor above) -- those exist to
   keep a SHORT leg meaningfully far from the money, and are nearly impossible for a long strangle to

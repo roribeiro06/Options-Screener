@@ -493,90 +493,41 @@ EARNINGS_DATES = {
     # "LLY":  "2026-08-06",
 }
 
-# Related tickers whose OWN earnings can be a real catalyst for this one, even
-# with nothing on this ticker's own calendar (e.g. a chip equipment maker's
-# earnings moving a memory maker via demand read-through, or a direct
-# competitor's results). Used only by the long strangle/straddle screener
-# (spreads.py) -- see _catalyst_dates -- everything else here is unaffected.
-# Fully automatic (checked live via get_earnings_date, same as your own
-# earnings), no manual date entry needed; edit the peer LIST itself if a
-# relationship changes.
-#
-# Each entry is either evidence-backed (a real, sourced example of one
-# actually moving the other around earnings -- same direction or, for direct
-# competitors, opposite/divergent moves that still create real volatility)
-# or a genuine head-to-head competitor even without a specific correlation
-# example on record. Entries considered and dropped for lacking either:
-# V/MA's cross-list to AXP/PYPL ("earnings announcements and stock movements
-# don't necessarily correlate strongly with each other" -- explicit evidence
-# against it), AAPL's old TSM/AVGO guess (no evidence either way), LLY's old
-# PFE/MRK (not direct GLP-1 competitors the way NVO is), EIX's old SO/DUK/SRE
-# (regulated utilities don't compete for customers, and no correlation
-# evidence was found -- only PCG had real supporting evidence, via shared
-# California wildfire liability dynamics).
+# Related tickers (competitors, suppliers, read-through names) whose OWN earnings move this one.
+# Two uses, both fully automatic (dates come live from get_earnings_date, same as your own earnings):
+#   1. Puts / calls / credit spreads / iron condors (earnings_blocks): a contract is left out when
+#      this ticker's OWN earnings OR any peer's earnings fall between today and its expiration --
+#      the peer's report can gap this stock just like its own.
+#   2. Long straddle/strangle (spreads.py _catalyst_dates): a peer's report counts as a catalyst
+#      date, so a ticker with nothing on its own calendar can still qualify ("(via PEER)").
+# A peer whose date can't be found is simply not checked -- the app's "Peer earnings check"
+# expander lists every peer date and which ones are NOT FOUND.
+# Edit the LIST itself if a relationship changes. Not mutual: each ticker lists what moves IT.
+# Non-US peers use Yahoo symbols (005930.KS Samsung, 1810.HK Xiaomi, 285A.T Kioxia, 2408.TW Nanya,
+# ADYEN.AS Adyen). Samsung also appears as SSNLF (OTC) for MU/INTC -- same company, either may resolve.
+# Dropped from the previous list: TSM from NVDA/MRVL, the chip-equipment makers (AMAT/ASML/LRCX/KLAC)
+# from MU, MDLZ from KHC.
 PEER_TICKERS = {
-    "MSFT": ["GOOG", "AMZN", "META", "AAPL"],   # "move together in virtually all cases" -- mega-cap
-    "GOOG": ["MSFT", "AMZN", "META", "AAPL"],   # tech correlation, sourced; all four (+AAPL) also
-    "AMZN": ["MSFT", "GOOG", "META", "AAPL"],   # trace back to the same Samsung/SK Hynix/Micron
-    "META": ["MSFT", "GOOG", "AMZN", "AAPL"],   # HBM memory bottleneck -- ties this cluster to MU/NVDA too
-    "AAPL": ["MSFT", "GOOG", "AMZN", "META"],
-    "NVDA": ["AMD", "AVGO", "TSM"],   # TSM: "NVIDIA is the single most Taiwan Semiconductor-
-                                      # dependent name" (supply read-through, sourced); AMD: direct
-                                      # AI-chip competitor, but only a moderate/mixed 0.53 stock
-                                      # correlation, sometimes opposite-direction on earnings --
-                                      # kept for the direct competition, not the correlation; AVGO:
-                                      # direct competitor. (MU removed -- not a competitor, different
-                                      # products; despite a real commercial link -- Micron supplies
-                                      # HBM memory for NVDA's GPUs -- the stock evidence actually
-                                      # shows divergence, not correlation: "Since earnings, Micron
-                                      # surged 128% while NVDA fell 10%")
-    "AVGO": ["NVDA", "MRVL", "QCOM"],   # AVGO/MRVL: "intense rivals" in AI networking chips, sourced
-    "MRVL": ["AVGO", "NVDA", "AMD", "TSM"],
-    "MU":   ["AMAT", "ASML", "LRCX", "KLAC",   # equipment makers: sourced, all 4 jumped 4-6%+
-             "SKHY", "SSNLF", "SNDK"],         # specifically on MU's earnings. SK Hynix/Samsung/
-                                               # SanDisk: strongly sourced -- "SK Hynix fell 6%...
-                                               # Micron also declined 6%" (near-identical synchronized
-                                               # moves) with SanDisk down 9% in the same DRAM-pricing
-                                               # selloff; explicitly because the three renegotiate
-                                               # DRAM/NAND pricing off shared supply-demand dynamics.
-                                               # (TSM removed -- confirmed NOT a competitor, "they do
-                                               # not compete because they are making different types
-                                               # of chips" -- logic vs. memory -- and no correlation
-                                               # evidence either; memory is far more cyclical/commodity-
-                                               # priced than logic, and the two stocks have diverged
-                                               # sharply, TSM +~400% vs MU +~700% since 2023)
-    "INTC": ["AMD", "QCOM", "TSM", "SSNLF", "NVDA"],   # AMD: direct x86 CPU rival, the classic
-                                                        # INTC/AMD rivalry; QCOM: Snapdragon X now
-                                                        # directly competing for Windows PC/laptop
-                                                        # CPU share ("Qualcomm Snapdragon Takes Aim
-                                                        # At PC Rivals Intel..."); TSM/SSNLF: Intel
-                                                        # Foundry vs. TSMC/Samsung Foundry, grouped
-                                                        # industry-wide as the "big three" advanced-
-                                                        # node foundries; NVDA: still a direct data-
-                                                        # center/AI-compute rival despite NVIDIA's
-                                                        # $5B equity stake + joint roadmap (Sept 2025)
-                                                        # -- coverage calls it "both partner and
-                                                        # competitor." (ARM considered and excluded --
-                                                        # its March 2026 Arm AGI CPU is its first own-
-                                                        # brand chip and a genuine data-center
-                                                        # competitor, but too new/narrow a product to
-                                                        # be a real driver of INTC moves yet)
-    "V":    ["MA"],   # direct card-network duopoly competitors
-    "MA":   ["V"],
-    "LLY":  ["NVO"],   # sourced: LLY +7% / NVO -6% same week off each other's GLP-1 results --
-                       # opposite-direction, but real, evidenced cross-reactivity
-    "UBER": ["LYFT", "DASH"],   # direct rideshare/delivery competitors (LYFT's stock correlation
-                                # is actually low, ~0.49 -- kept anyway as a direct competitor)
-    "NOW":  ["CRM", "WDAY"],   # direct enterprise-software competitors
-    "DKNG": ["FLUT", "MGM", "CZR"],   # sourced: DKNG -8%, "selling off in sympathy with Flutter's
-                                      # 14% post-earnings drop"; MGM/CZR: direct competitors
-    "KHC":  ["GIS", "MDLZ"],   # direct packaged-food competitors (Kellanova/K delisted Dec 2025 --
-                               # acquired by Mars, removed)
-    "CMCSA": ["CHTR", "DIS", "WBD"],   # direct cable/streaming competitors
-    "NFLX": ["DIS", "WBD", "PSKY"],   # direct streaming competitors (Paramount now trades as PSKY,
-                                      # not PARA, post-Skydance merger)
-    "EIX":  ["PCG"],   # same California wildfire liability dynamics, explicitly cross-referenced
-                       # in coverage of both -- not a competitor (regulated monopoly), a shared-risk peer
+    "MSFT": ["GOOG", "AMZN", "META", "AAPL", "ORCL", "CRM", "SAP"],
+    "GOOG": ["MSFT", "AMZN", "META", "AAPL", "PINS", "SNAP", "RDDT", "ORCL"],
+    "AMZN": ["MSFT", "GOOG", "META", "AAPL", "WMT", "COST", "SHOP", "ORCL"],
+    "META": ["MSFT", "GOOG", "AMZN", "AAPL", "SNAP", "PINS", "RDDT"],
+    "AAPL": ["MSFT", "GOOG", "AMZN", "META", "005930.KS", "1810.HK", "DELL", "HPQ"],
+    "NVDA": ["AMD", "AVGO", "MRVL", "INTC", "QCOM"],
+    "AVGO": ["NVDA", "MRVL", "QCOM", "AMD", "CSCO", "ANET"],
+    "MRVL": ["AVGO", "NVDA", "AMD", "ALAB", "CRDO"],
+    "MU":   ["SKHY", "SSNLF", "SNDK", "005930.KS", "WDC", "285A.T", "2408.TW"],
+    "INTC": ["AMD", "QCOM", "TSM", "SSNLF", "NVDA", "ARM", "GFS"],
+    "V":    ["MA", "AXP", "PYPL", "COF", "ADYEN.AS", "FISV"],
+    "MA":   ["V", "AXP", "PYPL", "COF", "ADYEN.AS", "FISV"],
+    "LLY":  ["NVO", "PFE", "AMGN", "VKTX", "RHHBY", "AZN"],
+    "UBER": ["LYFT", "DASH", "GRAB", "CART"],
+    "NOW":  ["CRM", "WDAY", "TEAM", "FRSH", "SAP", "MSFT"],
+    "DKNG": ["FLUT", "MGM", "CZR", "HOOD", "RSI", "PENN"],
+    "KHC":  ["GIS", "CAG", "CPB", "HRL", "SJM", "MKC"],
+    "CMCSA": ["CHTR", "DIS", "WBD", "T", "VZ", "TMUS", "PSKY", "VSNT"],
+    "NFLX": ["DIS", "WBD", "PSKY", "GOOG", "AMZN", "AAPL", "ROKU", "FOXA", "CMCSA"],
+    "EIX":  ["PCG", "SRE", "PNW", "XEL", "HE"],
     # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
     # company driven by its own portfolio's performance, not sector peers.
 }
@@ -1278,16 +1229,47 @@ def etf_blocked_by(etf, today, exp_date):
     return [(h, d) for h, d in etf_holding_earnings(etf).items() if d is not None and today <= d <= exp_date]
 
 
+_PEER_EARN_CACHE = {}   # peer symbol -> (fetched at, next earnings date or None)
+
+
+def _peer_date(sym):
+    hit = _PEER_EARN_CACHE.get(sym)
+    if hit and _time.time() - hit[0] < (ETF_EARN_TTL_OK if hit[1] else ETF_EARN_TTL_MISSING):
+        return hit[1]
+    try:
+        d = get_earnings_date(sym)
+    except Exception:
+        d = None
+    _PEER_EARN_CACHE[sym] = (_time.time(), d)
+    return d
+
+
+def peer_earnings(symbol):
+    """{peer: next earnings date, or None if it couldn't be found} for PEER_TICKERS[symbol].
+    Cached per peer symbol (peers overlap heavily across tickers)."""
+    return {p: _peer_date(p) for p in PEER_TICKERS.get(symbol, [])}
+
+
+def peer_blocked_by(symbol, today, exp_date):
+    """Peers of `symbol` reporting between today and exp_date -> [(peer, date)]."""
+    return [(p, d) for p, d in peer_earnings(symbol).items() if d is not None and today <= d <= exp_date]
+
+
 def earnings_blocks(symbol, earnings, today, exp_date):
     """True if this expiration window must be excluded because of earnings.
     Known date in window -> block. ETF (no earnings of its own) -> blocked only if one of its
-    top-5 holdings reports in the window. Stock w/ unknown date -> block if strict."""
+    top-5 holdings reports in the window. A PEER_TICKERS peer reporting in the window blocks too.
+    Stock w/ unknown date -> block if strict."""
     if ALLOW_EARNINGS_IN_WINDOW:
         return False
     if symbol in ETF_TOP_HOLDINGS:
         return bool(etf_blocked_by(symbol, today, exp_date))
+    if earnings is not None and today <= earnings <= exp_date:
+        return True
+    if peer_blocked_by(symbol, today, exp_date):
+        return True
     if earnings is not None:
-        return today <= earnings <= exp_date
+        return False
     if symbol in NO_EARNINGS_TICKERS:
         return False
     return EXCLUDE_IF_EARNINGS_UNKNOWN
