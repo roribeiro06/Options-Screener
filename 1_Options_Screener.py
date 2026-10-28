@@ -26,10 +26,6 @@ import positions
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
-st.caption("Cash-secured puts & covered calls. Live quotes from Schwab. "
-           "Educational only - NOT financial advice. Verify every quote in your broker before trading.")
-st.caption("Tip: click any row in a contract table below for a copy-paste summary (Ticker / # of contracts / "
-           "DTE / strike(s) / premium) to send to your financial advisor.")
 if not (os.environ.get("TRADIER_TOKEN") or ws.use_schwab()):
     st.error("No market-data credentials found. Add SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET and SCHWAB_REFRESH_TOKEN "
              "(or TRADIER_TOKEN) in the app's Settings -> Secrets, then Rerun.")
@@ -694,27 +690,6 @@ else:
 
 st.markdown("---")
 st.header("Open Positions")
-st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
-           "`OPEN_POSITIONS` at the top of wheel_screener.py (same pattern as the Watchlist/Holdings "
-           "defaults), not from this page, so they survive redeploys. Sorted by DTE (soonest expiration "
-           "first), then alphabetically by ticker. **CurrentPrice** is the underlying STOCK's live price (not the option's), shown next "
-           "to **Strike**. **DaysHeld** = days since Opened. **CostToClose** = the live bid-to-ask range "
-           "to buy the position back right now, shown NEGATIVE (what you'd lose to close) as "
-           "\\$bid-\\$ask/share with the total across Contracts in parentheses, same range convention as "
-           "Premium/Max Profit elsewhere. The worst-case (ASK) end is what feeds UnrealizedGL below. "
-           "**EntryCredit** shows "
-           "\\$/share with the total across Contracts in parentheses. **UnrealizedGL** = EntryCredit "
-           "minus CostToClose's ASK end, i.e. what you'd realize if you closed now at the conservative "
-           "price. **MaxLoss** (last column) is "
-           "the net worst-case loss (premium already collected always reduces it) -- except for open "
-           "puts, where it's the loss already incurred net of premium: strike - current stock price - "
-           "entry credit ($0 while the put is out of the money or still inside the premium cushion). Covered calls: cost basis - premium (needs the ticker in "
-           "`HOLDINGS`, else undefined), width - credit for spreads (already capped by the long leg, no "
-           "stock-to-zero assumption needed). Same refresh cadence as the rest of the app. Click any row "
-           "for a copy-paste closing instruction to send your advisor (shown as a positive target price, "
-           "bid-to-halfway). A spread's pop-up lists each leg as its own order "
-           "(Buy to Close the short, Sell to Close the long). The sell-only-the-long-leg alternative is in "
-           "Credit Spread Actions below.")
 try:
     _dpos, _epos = scan_positions()
     if len(_dpos):
@@ -723,79 +698,12 @@ try:
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")
-        st.caption("Sorted by DTE (soonest expiration first), then alphabetically by ticker. "
-                   "Credit spreads that currently trip a management rule, plus **any spread with a negative "
-                   "Unrealized G/L** even when no rule has fired (labeled **LOSING**): those show a roll when "
-                   "one passes the screener, otherwise HOLD with the reason -- never a close order you didn't ask for. Rule group is set by the DTE the trade was entered at: **1** = under 21, **2** = 21-45 (core), **3** = over 45 "
-                   "(a Group 3 trade switches to Group 2 rules at 21 DTE). "
-                   "**TargetBTC** = the buy-back price that captures the group's profit target (50% of the credit in "
-                   "Groups 1 and 3, 70% in Group 2, so 50% / 30% of the credit), **StopBTC** = 2x the credit, both per share; "
-                   "**CostToClose** is the live ask. Actions: **STOP** (cost to close >= 2x credit), **TIME EXIT** "
-                   "(close by 5 DTE in Group 1, 7 DTE in Group 2), **CLOSE** (Group 1 short strike in the money), "
-                   "**TAKE PROFIT** (>= 50% of the credit captured, 70% in Group 2), **PROFIT PULLBACK** (this spread's "
-                   "all-time-high G/L% reached 60%+, and its current G/L% has since fallen 10+ percentage points "
-                   "below that high, even if it's still net profitable -- see below; a peak under 60% is too little "
-                   "money on the table to act on, e.g. a 30% peak sliding to 20% stays quiet), **21 DTE CHECK** "
-                   "(Group 2 at 21-23 DTE: close above 40% profit, or "
-                   "roll/close if losing with the short strike tested), **DEAD TRADE** "
-                   "(entered at 45+ DTE, halfway through, buy-back still within 10% of the credit). A short strike "
-                   "is \"tested\" when the stock is through it or within 2%. **Each side of an iron condor is judged "
-                   "independently** -- a put spread and a call spread on the same ticker/expiration each get their "
-                   "own row and their own action, so a tested/losing side can be flagged without forcing a decision "
-                   "on its safe counterpart. **Rolling takes priority over closing:** when STOP, TIME EXIT, the "
-                   "Group 1 ITM close, the 21 DTE check, or PROFIT PULLBACK fires, the app first searches for a "
-                   "roll -- buy the spread back at the ask and open a new spread on the same side in a LATER "
-                   "expiration -- and offers up to **two suggestions**: **ROLL 1** is the **best-Score spread that passes "
-                   "every regular Multi-Leg screener criterion** (POP, OTM incl. the volatility-tier rule, AnnROR, "
-                   "$1,000 premium floor, open interest, earnings exclusion) -- left out entirely when nothing "
-                   "passes; **ROLL 2** is the **best-Score spread with 1,000+ open interest on both legs and the "
-                   "screener's POP floor (70%+)** (7-60 DTE) -- it skips the other screener criteria (OTM, AnnROR, "
-                   "premium floor), so it exists more often than Roll 1, and its OTM is shown in the text so you can "
-                   "judge how close to the money it is. Either can be a net debit -- the net credit or debit is spelled out so the "
-                   "call is yours. Same contract count either way. If neither exists, it says CLOSE. Click a row for an advisor-ready "
-                   "order to copy: when a roll was found, BOTH orders a roll actually needs -- Close the "
-                   "existing spread (same Close summary as Open Positions), THEN Roll into the new one (new "
-                   "expiration, sell/buy strikes, the price to open it), with the roll's net gain/loss at the bottom (the new premium plus the position's Unrealized G/L -- the buy-back isn't subtracted again, you already collected that credit). "
-                   "When both suggestions exist they are shown as alternatives (EITHER / OR) -- open one, not both; "
-                   "when no roll exists, just the Close order. If nothing qualifies the action says CLOSE and why (e.g. a "
-                   "deep in-the-money spread costs more to buy back than any out-of-the-money spread can pay). "
-                   "**Recommendation** is one sentence -- CLOSE, ROLL 1 or ROLL 2, and why -- decided from the "
-                   "**Forward Outlook**, which uses only leading / market-implied inputs, not the lagging averages. "
-                   "A put spread is bullish and a call spread bearish, so each signal is scored for or against the "
-                   "side you hold: **momentum turning** (MACD histogram and RSI now vs 3 days ago, and the 5-day "
-                   "move); **what options price** (how many expected moves the short strike sits from the price, "
-                   "the implied-volatility term structure -- near-term IV above longer-dated means short-term stress "
-                   "is priced -- and 30-day IV vs 20-day realized volatility, i.e. rich or thin premium); and "
-                   "**catalysts** (earnings before the spread expires). **CLOSE** when the forward score is -2 or "
-                   "worse, naming what is against the spread, or when no roll is viable; otherwise the viable roll "
-                   "that nets a credit, then the higher POP, then Roll 1. A roll is viable only with **POP of 65%+** "
-                   "on its new short strike. **Rolls never cross earnings:** any expiration on or after a known "
-                   "earnings date is skipped by both searches, so a roll lands in the closest expiration before it "
-                   "(or there is no roll). **Trend Context (lagging)** (last column) is the older read -- price vs the "
-                   "50-day, 50-day vs 200-day, the 20-day move, RSI, how far the short strike sits from price, and "
-                   "that stock's **put/call open interest** across its 30-60 DTE expirations (above 1.0 = more puts "
-                   "than calls open) -- shown as context only; it does not drive the recommendation. Both are a "
-                   "rules-based read of the data shown, not personalized advice -- do your own research. "
-                   "TAKE PROFIT and DEAD TRADE never roll. **PROFIT PULLBACK's peak** is tracked in "
-                   "`position_peaks.json`, refreshed only on the scheduled email script's own ~30-min cadence during "
-                   "market hours (not live on every page load) -- a spread opened since the last refresh has no peak "
-                   "on file yet and can't trigger this check until it does. Entry rules "
-                   "(short delta, IV Rank) aren't tracked for open positions, so they aren't checked here.")
         _acts, _acts_raw = scan_spread_actions(_dpos)
         if len(_acts):
             _selectable_table(_acts_raw, _acts, "spread_actions_tbl", summary_fn=_spread_action_summary)
         else:
             st.write("No credit spreads need action right now.")
         st.markdown("**Financials** (unrealized)")
-        st.caption("Columns split by strategy: **Put**, **Call** (covered), **Multi-Leg** (all spreads/"
-                   "condors), **Total**. Max Loss here is NOT the same figure as the MaxLoss column above "
-                   "-- Puts use a scaled-down, more realistic estimate (20% of the usual strike-minus-"
-                   "premium worst case, minus the premium -- you're getting that back regardless of what "
-                   "the stock does); Calls show \"-\" (no max loss at all -- a covered call going to "
-                   "\\$0 is unrealistic enough that it's excluded outright, not just discounted); "
-                   "Multi-Leg is unchanged (width - credit, same subtract-the-premium-back logic as puts, "
-                   "already a real defined-risk worst case). **ROR %** is against the actual Unrealized "
-                   "G/L, not the theoretical Potential Profit Acc. (premium collected).")
         st.dataframe(positions.build_open_financials(_dpos), hide_index=True, use_container_width=True)
     else:
         st.write("No open positions tracked yet -- add them to `OPEN_POSITIONS` in wheel_screener.py.")
@@ -806,23 +714,6 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Contract Lookup")
-st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
-           "(cash-secured puts), calls (covered calls, as if you held the shares), put/call credit "
-           "spreads, iron condors, or long straddles/strangles (bought, not sold) - even ones that don't pass the screener criteria. Puts/put spreads "
-           "show strikes below the price, calls/call spreads above it. For spreads, Strike min/max "
-           "filters the SHORT leg; the long leg is auto-picked at the Spread width % set below "
-           "(independent of the sidebar's own Spread width %, which only affects the credit spread, iron condor and straddle/strangle sections). "
-           "**For an iron condor**, Strike min/max filters the PUT side's short strike and Call strike "
-           "min/max filters the CALL side's -- two independent ranges, since a condor pairs one of each; "
-           "the result count is the PRODUCT of how many strikes qualify on each side, not the sum, so "
-           "narrow both ranges more than you would for a single-sided spread search. "
-           "**Straddle / Strangle** (long -- you BUY the put and call): a straddle is the put and call at the "
-           "same strike -- Strike min/max bound that strike (blank = within 10% of the price); a strangle pairs "
-           "an out-of-the-money put with an out-of-the-money call -- Strike min/max bound the PUT strike and "
-           "Call strike min/max the CALL strike (blank = each within 15% of the price), and like a condor the "
-           "result count is the product of the two ranges. Shown with the screener's own long-strategy columns "
-           "(MaxLoss = the debit paid, Breakeven, ROR from the IV-implied move) and no earnings requirement. "
-           "Same stats (Score, yields, IV, liquidity) as everywhere else.")
 with st.form("lookup_form"):
     _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
     lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
@@ -903,9 +794,6 @@ with st.expander("ETF earnings check (top-5 holdings)"):
                           "Top-5 holdings": ", ".join(_h),
                           "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
                           "Date NOT FOUND for": ", ".join(_missing) or "-"})
-    st.caption(f"An ETF is left out of every screener while any of its top-5 holdings reports earnings inside the "
-               f"contract's window. Holdings as of {ws.ETF_TOP_HOLDINGS_ASOF}; a holding listed under NOT FOUND "
-               f"could not be checked.")
     st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
 
 with st.expander("Peer earnings check (competitors / related tickers)"):
@@ -920,9 +808,6 @@ with st.expander("Peer earnings check (competitors / related tickers)"):
                            "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
                                                 else ("-" if not _pe else "none found")),
                            "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
-    st.caption("A ticker is left out of the puts / calls / spreads screens for any expiration that spans its OWN earnings "
-               "or any listed peer's earnings (PEER_TICKERS in wheel_screener.py). Long straddles/strangles use the same "
-               "dates as catalysts instead. A peer listed under NOT FOUND couldn't be checked.")
     if _peer_rows:
         st.dataframe(pd.DataFrame(_peer_rows), hide_index=True, use_container_width=True)
     else:
@@ -1010,23 +895,6 @@ if es:
 
 st.markdown("---")
 st.header("Discover: High-Open-Interest Contracts (outside your watchlist)")
-st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500), screened with the "
-           "same criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so "
-           "a name you didn't add to the watchlist can still surface if one of its most liquid contracts "
-           "qualifies. Candidates come from two mechanisms: tickers trading well above their own normal "
-           "volume today (**surge**), and tickers that moved sharply in the last day on real dollar volume "
-           "(**movers**). Both require at least \\$25M/day in dollar volume (price x volume, not just a "
-           "share count -- a cheap stock can clear a share-count bar on trivial real activity) AND a market "
-           "cap of at least \\$10B, so thinly-capitalized or speculative names don't surface just because "
-           "they're liquid or moved a lot. However a ticker got in, it's then routed purely by its OWN "
-           "1-day % change today -- up gets screened for puts only, down for call credit spreads only "
-           "(fading the move, with likely-richer premium from the volatility) -- so a name is never screened "
-           "for both, even a surge candidate that didn't move much either direction. Every candidate still "
-           "needs real open interest to qualify -- none of the above skips that check. "
-           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
-           "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
-           "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
-           "after the watchlist sections since it scans far more tickers and is slower than they are.")
 try:
     _vl, _dfallback = scan_discover()
     if _dfallback:
@@ -1073,52 +941,12 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Concentration of Positions -- 1D All-Time High & Average (Max Loss)")
-st.caption("Every OPEN_POSITIONS/CLOSED_POSITIONS entry's Max Loss, cross-tabbed by sector -- **Tech** vs "
-           "**Non-Tech**, via each ticker's yfinance GICS sector (Technology **and** Communication "
-           "Services both count as Tech, since GOOG/META land in the latter under GICS but this app's own "
-           "peer-correlation list already treats them as part of the same tech cluster as "
-           "MSFT/AMZN/AAPL; ETFs like SMH have no sector and fall back to their category instead; "
-           "SPCX/EWY/QQQ/AMZN are manually overridden to Tech -- see SECTOR_OVERRIDES in "
-           "wheel_screener.py) -- by directional side, **Put** vs **Call** (put spreads join plain puts, "
-           "call spreads join plain calls, not a separate Multi-Leg bucket -- a put spread is still "
-           "bullish-put-side risk; an iron condor's two legs, tracked as separate put_spread/call_spread "
-           "entries in OPEN_POSITIONS, split across both columns accordingly). Each cell shows three "
-           "numbers: **Now** (today's Max Loss, using the SAME risk-scaled convention every Financials "
-           "table above already uses -- covered calls excluded entirely, a stock-to-zero worst case being "
-           "unrealistic enough that a covered call genuinely has no meaningful \"max loss\" in that sense; "
-           "puts scaled to a more realistic 20% tail-risk estimate net of premium; spreads unchanged, "
-           "width - credit), **ATH** (the highest single-day Max Loss ever seen in that bucket), and "
-           "**Avg** (the average single-day Max Loss across every day that bucket had at least one "
-           "position open) -- e.g. \"Now \\$12,000 | ATH \\$18,500 | Avg \\$9,200\" means today's risk "
-           "there is above its historical average but below its peak. Covers every position EVER held, "
-           "open or closed -- in all your time doing options. \"1D\" means the same thing \"Max Loss 1D\" "
-           "means in the Financials tables: the SUM of Max Loss across every position open on the same "
-           "calendar day, not any one position's own number. No live quotes needed -- pure arithmetic "
-           "over OPEN_POSITIONS/CLOSED_POSITIONS, Max Loss doesn't move intraday. (The 1-day contract "
-           "premium % change this table used to carry alongside Max Loss now lives in the Unrealized G/L "
-           "concentration table below, next to the number it actually explains the movement of.)")
 try:
     st.dataframe(positions.build_concentration_history_table(), hide_index=True, use_container_width=True)
 except Exception as _e:
     st.caption(f"(concentration history unavailable: {_e})")
 
 st.markdown("**Concentration of Positions -- Unrealized G/L**")
-st.caption("Same Sector x Put/Call/Total grid, but for your CURRENT Unrealized G/L instead of risk: each "
-           "cell packs three figures together -- the $ and what % of \"Potential Profit Acc.\" (total "
-           "premium collected -- the theoretical max if every position in that bucket captured its full "
-           "premium, same basis the Financials tables above call \"Potential Profit Acc.\") that $ "
-           "represents, plus your **P&L direction** on that contract today vs yesterday, shown "
-           "as a signed \"+X.X%\"/\"-X.X% chg\" as far right as one plain-text cell can go. (This lives "
-           "here rather than next to the Max Loss table above since a static risk figure doesn't move "
-           "intraday -- Unrealized G/L is the number the day change actually explains.) E.g. "
-           "\"+\\$10,000.00 (20.0% of potential)     |  +13.8% chg\" means only 20% of the theoretical max "
-           "has been captured so far (still 80% of the room left to run) AND today's move was in your "
-           "favor. Since every position here is SHORT (sold to open), a FALLING contract price is good "
-           "for you and shows POSITIVE, a RISING price is bad and shows NEGATIVE -- the reverse of the "
-           "contract's own raw price move. A position opened TODAY has no real \"yesterday\" for that "
-           "percentage, so it's excluded from the comparison. The G/L half reuses the already-live-quoted "
-           "Open Positions table above (no extra chain fetch); the % change needs its own fresh chain "
-           "fetch per position (today's ask vs prevclose).")
 try:
     _dconcgl, _econcgl = positions.build_concentration_gl_table(_dpos)
     st.dataframe(_dconcgl, hide_index=True, use_container_width=True)
@@ -1129,14 +957,6 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Closed Positions (last 30 days)")
-st.caption("Positions you've closed, edited in `CLOSED_POSITIONS` at the top of wheel_screener.py -- add "
-           "`exit_cost` (what you paid to buy it back, 0 if it expired worthless / hit max profit) and "
-           "`exit_date` to a copy of the position's entry. Sorted by Date Closed (most recent last). Pure "
-           "arithmetic against the recorded exit price -- no live quotes needed since the trade is already "
-           "settled. **EntryCredit** shows \\$/share with the total across Contracts in parentheses, same "
-           "convention as Open Positions. **MaxLoss** (last column) uses the same convention as Open "
-           "Positions too. Automatically rolls off this list 30 days after the exit date (the entry stays "
-           "in the config either way, just stops showing here).")
 try:
     _dclosed, _eclosed = scan_closed_positions()
     if len(_dclosed):
@@ -1144,9 +964,6 @@ try:
         st.download_button("Download closed positions (CSV)", _dclosed.to_csv(index=False),
                            "closed_positions.csv", "text/csv")
         st.markdown("**Financials** (realized)")
-        st.caption("Same Put/Call/Multi-Leg/Total split and Max Loss convention as Open Positions above. "
-                   "**ROR %** here is against the actual Realized G/L (what you really walked away with), "
-                   "not the theoretical premium collected.")
         st.dataframe(positions.build_closed_financials(_dclosed), hide_index=True, use_container_width=True)
     else:
         st.write("No closed positions in the last 30 days.")
@@ -1157,13 +974,6 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Financials (Open + Closed combined)")
-st.caption("Every OPEN_POSITIONS entry plus every CLOSED_POSITIONS entry in the 30-day window, same Put/"
-           "Call/Multi-Leg/Total split and Max Loss convention as the two tables above. Unlike those two, "
-           "**Max Loss 1D** here is a fresh peak-day sweep across the combined open+closed timeline (not "
-           "just the two tables' 1D figures added together) -- a still-open position and an already-closed "
-           "one can genuinely have overlapped on the same real day, so this can differ meaningfully from "
-           "Max Loss Accumulated even when nothing in either table alone would suggest it. **ROR %** is "
-           "against the summed actual Unrealized + Realized G/L, not the theoretical premium collected.")
 try:
     _dpos_fin, _ = scan_positions()
     _dclosed_fin, _ = scan_closed_positions()
@@ -1174,13 +984,6 @@ except Exception as _e:
 
 st.markdown("---")
 st.header("Realized G/L by Month")
-st.caption("Every closed position (recorded in CLOSED_POSITIONS, plus anything auto-closed after expiring "
-           "-- see Open Positions above), grouped by the calendar month it closed in. Unlike Closed "
-           "Positions' own 30-day display window, this covers your full history, oldest month first, so "
-           "it's the place to check 'did anything close last month' months after the fact. Premium "
-           "Collected is entry credit x 100 x contracts (same basis the Financials tables' Potential "
-           "Profit Acc. uses); Realized G/L % is that month's G/L against that month's own premium "
-           "collected, so a bad month can show well below -100% if you gave back more than you took in.")
 try:
     _dmonthly, _emonthly = positions.build_monthly_realized_table()
     if len(_dmonthly):
