@@ -528,6 +528,7 @@ PEER_TICKERS = {
     "CMCSA": ["CHTR", "DIS", "WBD", "T", "VZ", "TMUS", "PSKY", "VSNT"],
     "NFLX": ["DIS", "WBD", "PSKY", "GOOG", "AMZN", "AAPL", "ROKU", "FOXA", "CMCSA"],
     "EIX":  ["PCG", "SRE", "PNW", "XEL", "HE"],
+    "CRWD": ["S", "PANW", "MSFT", "ZS", "FTNT", "CHKP"],
     # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
     # company driven by its own portfolio's performance, not sector peers.
 }
