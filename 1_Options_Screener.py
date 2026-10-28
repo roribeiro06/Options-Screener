@@ -692,256 +692,6 @@ if vix is not None:
 else:
     st.info("VIX unavailable right now.")
 
-with st.expander("ETF earnings check (top-5 holdings)"):
-    _etf_rows = []
-    for _etf in ws.ETF_TOP_HOLDINGS:
-        _h = ws.etf_holding_earnings(_etf)
-        _next = sorted((d, h) for h, d in _h.items() if d)
-        _missing = [h for h, d in _h.items() if not d]
-        _etf_rows.append({"ETF": _etf,
-                          "Top-5 holdings": ", ".join(_h),
-                          "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
-                          "Date NOT FOUND for": ", ".join(_missing) or "-"})
-    st.caption(f"An ETF is left out of every screener while any of its top-5 holdings reports earnings inside the "
-               f"contract's window. Holdings as of {ws.ETF_TOP_HOLDINGS_ASOF}; a holding listed under NOT FOUND "
-               f"could not be checked.")
-    st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
-
-with st.expander("Peer earnings check (competitors / related tickers)"):
-    _peer_rows = []
-    for _t in sorted({*puts, *(h[0] for h in holds)} & set(ws.PEER_TICKERS)):
-        _pe = ws.peer_earnings(_t)
-        _own = ws.get_earnings_date(_t)
-        _next = sorted((d, p) for p, d in _pe.items() if d)
-        _peer_rows.append({"Ticker": _t,
-                           "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
-                           "Peers": ", ".join(_pe) or "none configured",
-                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
-                                                else ("-" if not _pe else "none found")),
-                           "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
-    st.caption("A ticker is left out of the puts / calls / spreads screens for any expiration that spans its OWN earnings "
-               "or any listed peer's earnings (PEER_TICKERS in wheel_screener.py). Long straddles/strangles use the same "
-               "dates as catalysts instead. A peer listed under NOT FOUND couldn't be checked.")
-    if _peer_rows:
-        st.dataframe(pd.DataFrame(_peer_rows), hide_index=True, use_container_width=True)
-    else:
-        st.write("None of your tickers have peers configured.")
-
-dp, ep = scan_puts(tuple(puts), CRITERIA)
-dc, ec = scan_calls(holds, CRITERIA)
-
-st.subheader("Cash-Secured Puts")
-if len(dp):
-    _selectable_table(dp, ws._fmt(dp), "puts_tbl")
-    st.download_button("Download puts (CSV)", dp.to_csv(index=False),
-                       "puts.csv", "text/csv")
-else:
-    st.write("None qualify right now - nothing pays enough; stay in T-bills.")
-if ep:
-    st.caption("Skipped: " + " | ".join(ep))
-
-st.subheader("Covered Calls")
-if len(dc):
-    _selectable_table(dc, ws._fmt(dc), "calls_tbl")
-    st.download_button("Download calls (CSV)", dc.to_csv(index=False),
-                       "calls.csv", "text/csv")
-else:
-    st.write("None qualify right now.")
-if ec:
-    st.caption("Skipped: " + " | ".join(ec))
-
-st.markdown("---")
-st.header("Contract Lookup")
-st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
-           "(cash-secured puts), calls (covered calls, as if you held the shares), put/call credit "
-           "spreads, iron condors, or long straddles/strangles (bought, not sold) - even ones that don't pass the criteria above. Puts/put spreads "
-           "show strikes below the price, calls/call spreads above it. For spreads, Strike min/max "
-           "filters the SHORT leg; the long leg is auto-picked at the Spread width % set below "
-           "(independent of the sidebar's own Spread width %, which only affects Multi-Leg Strategies). "
-           "**For an iron condor**, Strike min/max filters the PUT side's short strike and Call strike "
-           "min/max filters the CALL side's -- two independent ranges, since a condor pairs one of each; "
-           "the result count is the PRODUCT of how many strikes qualify on each side, not the sum, so "
-           "narrow both ranges more than you would for a single-sided spread search. "
-           "**Straddle / Strangle** (long -- you BUY the put and call): a straddle is the put and call at the "
-           "same strike -- Strike min/max bound that strike (blank = within 10% of the price); a strangle pairs "
-           "an out-of-the-money put with an out-of-the-money call -- Strike min/max bound the PUT strike and "
-           "Call strike min/max the CALL strike (blank = each within 15% of the price), and like a condor the "
-           "result count is the product of the two ranges. Shown with the screener's own long-strategy columns "
-           "(MaxLoss = the debit paid, Breakeven, ROR from the IV-implied move) and no earnings requirement. "
-           "Same stats (Score, yields, IV, liquidity) as everywhere else.")
-with st.form("lookup_form"):
-    _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
-    lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
-    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread", "iron_condor", "straddle", "strangle"],
-                        horizontal=True,
-                        format_func=lambda k: {"put": "Put", "call": "Call",
-                                               "put_spread": "Put Spread",
-                                               "call_spread": "Call Spread",
-                                               "iron_condor": "Iron Condor",
-                                               "straddle": "Straddle", "strangle": "Strangle"}[k])
-    lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
-    lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
-    _e1, _e2 = st.columns(2)
-    lk_csmin = _e1.number_input("Call strike min (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
-    lk_csmax = _e2.number_input("Call strike max (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
-    _d1, _d2, _d3 = st.columns(3)
-    _today = datetime.now().date()
-    lk_start = _d1.date_input("Expiration from", _today)
-    lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
-    lk_width = _d3.number_input("Spread width % (spreads/condor only)", 1, 50,
-                                int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
-    lk_go = st.form_submit_button("Search")
-
-if lk_go and lk_ticker:
-    # Persist the query, not just react to lk_go: a form_submit_button's True
-    # value only lasts for the one script run it was clicked on. Selecting a
-    # row below triggers its own on_select="rerun", and on that rerun lk_go
-    # is False again -- gating this whole section on it directly made the
-    # results (and the row you just clicked) disappear instead of showing
-    # the summary. Keying off session_state instead survives any rerun.
-    st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
-                                        lk_smax or None, lk_start, lk_end, lk_width / 100,
-                                        lk_csmin or None, lk_csmax or None)
-
-_lq = st.session_state.get("lookup_query")
-if _lq:
-    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax = _lq
-    try:
-        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width,
-                           csmin=_q_csmin, csmax=_q_csmax)
-        if len(_res):
-            _label = {"put": "cash-secured put", "call": "covered call",
-                      "put_spread": "put credit spread", "call_spread": "call credit spread",
-                      "iron_condor": "iron condor",
-                      "straddle": "long straddle", "strangle": "long strangle"}[_q_kind]
-            _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread", "iron_condor") else ""
-            st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker}{_width_note} ({_q_start} to {_q_end}).")
-            if _q_kind in ("put", "call"):
-                _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
-            else:
-                _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
-                                              "Call Max Profit", "Call Max Profit (Best)"])
-                for _lk_mc in ("Max Profit", "Max Profit (Best)"):    # long straddle/strangle: no real max profit
-                    if _lk_mc in _lk_disp.columns and _lk_disp[_lk_mc].isna().all():
-                        _lk_disp = _lk_disp.drop(columns=[_lk_mc])
-                for _lk_lc in ("Put Legs", "Call Legs"):     # drop the always-empty side
-                    if _lk_lc in _lk_disp.columns and (_lk_disp[_lk_lc].fillna("") == "").all():
-                        _lk_disp = _lk_disp.drop(columns=[_lk_lc])
-                if "Breakeven" in _lk_disp.columns and (_lk_disp["Breakeven"] == "-").all():
-                    _lk_disp = _lk_disp.drop(columns=["Breakeven"])
-                _selectable_table(_res, sp._fmt(_lk_disp), "lookup_tbl")
-            st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
-                               f"{_q_ticker}_{_q_kind}_lookup.csv", "text/csv")
-        else:
-            st.write("No sellable contracts in that range (for puts/put spreads try strikes below the price; "
-                     "for calls/call spreads, above).")
-    except Exception as _e:
-        st.error(f"Lookup failed: {_e}")
-
-st.markdown("---")
-st.header("Multi-Leg Strategies  (70% POP)")
-ds, es = scan_spreads(tuple(puts), SPREAD_CRITERIA)
-_SPREAD_SECTIONS = [
-    ("Put credit spread",  "Put Credit Spreads  (bullish, defined risk)"),
-    ("Call credit spread", "Call Credit Spreads  (bearish, defined risk)"),
-    ("Iron condor",        "Iron Condors  (neutral, defined risk)"),
-    ("Long Straddle",      "Long Straddles  (big-move bet, defined risk, requires confirmed earnings in-window)"),
-    ("Long Strangle",      "Long Strangles  (big-move bet, defined risk, requires confirmed earnings in-window)"),
-]
-for _key, _title in _SPREAD_SECTIONS:
-    st.subheader(_title)
-    _sub = ds[ds["Strategy"] == _key] if len(ds) else ds
-    if len(_sub):
-        # Iron condor's per-side best-case credit columns exist only so the
-        # click-to-copy summary can quote the put spread and call spread as
-        # two independent legs (see spreads.py SPREAD_COLS) -- never shown
-        # in the table itself, the row stays a single combined iron condor.
-        _disp = _sub.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
-                                   "Call Max Profit", "Call Max Profit (Best)"])
-        for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
-            if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
-                _disp = _disp.drop(columns=[_lc])
-        # Long Straddle/Strangle have no real Max Profit (unlimited upside, not a
-        # guaranteed number) -- drop the column entirely rather than show a
-        # column of "-" for every row (Breakeven is the real number there instead).
-        for _mc in ("Max Profit", "Max Profit (Best)"):
-            if _mc in _disp.columns and _disp[_mc].isna().all():
-                _disp = _disp.drop(columns=[_mc])
-        # Breakeven, conversely, only means something for Long Straddle/Strangle --
-        # drop it for credit spreads/iron condor, where it's always "-".
-        if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
-            _disp = _disp.drop(columns=["Breakeven"])
-        _selectable_table(_sub, sp._fmt(_disp), f"spread_tbl_{_key}")
-        st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
-                           f"{_key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{_key}")
-    else:
-        st.write("None qualify right now.")
-if es:
-    st.caption("Skipped: " + " | ".join(es))
-
-st.markdown("---")
-st.subheader("Discover: High-Open-Interest Contracts (outside your watchlist)")
-st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500), screened with the "
-           "same criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so "
-           "a name you didn't add to the watchlist can still surface if one of its most liquid contracts "
-           "qualifies. Candidates come from two mechanisms: tickers trading well above their own normal "
-           "volume today (**surge**), and tickers that moved sharply in the last day on real dollar volume "
-           "(**movers**). Both require at least \\$25M/day in dollar volume (price x volume, not just a "
-           "share count -- a cheap stock can clear a share-count bar on trivial real activity) AND a market "
-           "cap of at least \\$10B, so thinly-capitalized or speculative names don't surface just because "
-           "they're liquid or moved a lot. However a ticker got in, it's then routed purely by its OWN "
-           "1-day % change today -- up gets screened for puts only, down for call credit spreads only "
-           "(fading the move, with likely-richer premium from the volatility) -- so a name is never screened "
-           "for both, even a surge candidate that didn't move much either direction. Every candidate still "
-           "needs real open interest to qualify -- none of the above skips that check. "
-           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
-           "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
-           "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
-           "last on the page since it scans far more tickers and is slower than the sections above.")
-try:
-    _vl, _dfallback = scan_discover()
-    if _dfallback:
-        st.caption(f"Live scan failed ({_dfallback}) -- showing the last daily-Action snapshot instead.")
-    if _vl:
-        _leaders = _vl.get("leaders", [])
-        if _leaders:
-            def _leader_txt(l):
-                pct = (l.get("change_pct") or 0) * 100
-                sign = "+" if pct >= 0 else ""
-                src = l.get("source", "mover")
-                return f"{l['ticker']} ({l['option_open_interest']:,} OI, {sign}{pct:.1f}% today, {src})"
-            _lead_txt = " | ".join(_leader_txt(l) for l in _leaders)
-            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
-
-        st.markdown("**Puts**")
-        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
-        if len(_dp):
-            _selectable_table(_dp, ws._fmt(_dp), "discover_puts_tbl")
-            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
-                               "volume_leaders_puts.csv", "text/csv")
-        else:
-            st.write("None of today's highest-open-interest tickers currently qualify.")
-
-        st.markdown("**Call Credit Spreads (defined-risk)**")
-        _dc = sp._df(_vl.get("call_spreads", []))
-        if len(_dc):
-            _disp = _dc.drop(columns=["Strategy", "Put Legs", "Put Max Profit",
-                                      "Put Max Profit (Best)", "Call Max Profit",
-                                      "Call Max Profit (Best)"])
-            # Breakeven only means something for Long Straddle/Strangle -- this
-            # section is call credit spreads only, so it's always "-"; drop it.
-            if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
-                _disp = _disp.drop(columns=["Breakeven"])
-            _selectable_table(_dc, sp._fmt(_disp), "discover_spreads_tbl")
-            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
-                               "volume_leaders_call_spreads.csv", "text/csv")
-        else:
-            st.write("None of today's highest-open-interest tickers currently qualify.")
-    else:
-        st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
-except Exception as _e:
-    st.caption(f"(discover section unavailable: {_e})")
-
 st.markdown("---")
 st.header("Open Positions")
 st.caption("Tracked positions you've SOLD to open (puts, covered calls, credit spreads) -- edited in "
@@ -1053,6 +803,273 @@ try:
         st.caption("Skipped: " + " | ".join(_epos))
 except Exception as _e:
     st.caption(f"(positions unavailable: {_e})")
+
+st.markdown("---")
+st.header("Contract Lookup")
+st.caption("Look up ANY ticker's SELLABLE contracts in a strike/expiration range - out-of-the-money puts "
+           "(cash-secured puts), calls (covered calls, as if you held the shares), put/call credit "
+           "spreads, iron condors, or long straddles/strangles (bought, not sold) - even ones that don't pass the screener criteria. Puts/put spreads "
+           "show strikes below the price, calls/call spreads above it. For spreads, Strike min/max "
+           "filters the SHORT leg; the long leg is auto-picked at the Spread width % set below "
+           "(independent of the sidebar's own Spread width %, which only affects the credit spread, iron condor and straddle/strangle sections). "
+           "**For an iron condor**, Strike min/max filters the PUT side's short strike and Call strike "
+           "min/max filters the CALL side's -- two independent ranges, since a condor pairs one of each; "
+           "the result count is the PRODUCT of how many strikes qualify on each side, not the sum, so "
+           "narrow both ranges more than you would for a single-sided spread search. "
+           "**Straddle / Strangle** (long -- you BUY the put and call): a straddle is the put and call at the "
+           "same strike -- Strike min/max bound that strike (blank = within 10% of the price); a strangle pairs "
+           "an out-of-the-money put with an out-of-the-money call -- Strike min/max bound the PUT strike and "
+           "Call strike min/max the CALL strike (blank = each within 15% of the price), and like a condor the "
+           "result count is the product of the two ranges. Shown with the screener's own long-strategy columns "
+           "(MaxLoss = the debit paid, Breakeven, ROR from the IV-implied move) and no earnings requirement. "
+           "Same stats (Score, yields, IV, liquidity) as everywhere else.")
+with st.form("lookup_form"):
+    _c1, _c2, _c3, _c4 = st.columns([1.2, 1.3, 1, 1])
+    lk_ticker = _c1.text_input("Ticker", "NVDA").strip().upper()
+    lk_kind = _c2.radio("Type", ["put", "call", "put_spread", "call_spread", "iron_condor", "straddle", "strangle"],
+                        horizontal=True,
+                        format_func=lambda k: {"put": "Put", "call": "Call",
+                                               "put_spread": "Put Spread",
+                                               "call_spread": "Call Spread",
+                                               "iron_condor": "Iron Condor",
+                                               "straddle": "Straddle", "strangle": "Strangle"}[k])
+    lk_smin = _c3.number_input("Strike min (0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_smax = _c4.number_input("Strike max (0 = any)", min_value=0.0, value=0.0, step=1.0)
+    _e1, _e2 = st.columns(2)
+    lk_csmin = _e1.number_input("Call strike min (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
+    lk_csmax = _e2.number_input("Call strike max (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
+    _d1, _d2, _d3 = st.columns(3)
+    _today = datetime.now().date()
+    lk_start = _d1.date_input("Expiration from", _today)
+    lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
+    lk_width = _d3.number_input("Spread width % (spreads/condor only)", 1, 50,
+                                int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
+    lk_go = st.form_submit_button("Search")
+
+if lk_go and lk_ticker:
+    # Persist the query, not just react to lk_go: a form_submit_button's True
+    # value only lasts for the one script run it was clicked on. Selecting a
+    # row below triggers its own on_select="rerun", and on that rerun lk_go
+    # is False again -- gating this whole section on it directly made the
+    # results (and the row you just clicked) disappear instead of showing
+    # the summary. Keying off session_state instead survives any rerun.
+    st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
+                                        lk_smax or None, lk_start, lk_end, lk_width / 100,
+                                        lk_csmin or None, lk_csmax or None)
+
+_lq = st.session_state.get("lookup_query")
+if _lq:
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax = _lq
+    try:
+        _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width,
+                           csmin=_q_csmin, csmax=_q_csmax)
+        if len(_res):
+            _label = {"put": "cash-secured put", "call": "covered call",
+                      "put_spread": "put credit spread", "call_spread": "call credit spread",
+                      "iron_condor": "iron condor",
+                      "straddle": "long straddle", "strangle": "long strangle"}[_q_kind]
+            _width_note = f" at {_q_width:.0%} width" if _q_kind in ("put_spread", "call_spread", "iron_condor") else ""
+            st.write(f"**{len(_res)} {_label} contracts** for {_q_ticker}{_width_note} ({_q_start} to {_q_end}).")
+            if _q_kind in ("put", "call"):
+                _selectable_table(_res, ws._fmt(_res), "lookup_tbl")
+            else:
+                _lk_disp = _res.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
+                                              "Call Max Profit", "Call Max Profit (Best)"])
+                for _lk_mc in ("Max Profit", "Max Profit (Best)"):    # long straddle/strangle: no real max profit
+                    if _lk_mc in _lk_disp.columns and _lk_disp[_lk_mc].isna().all():
+                        _lk_disp = _lk_disp.drop(columns=[_lk_mc])
+                for _lk_lc in ("Put Legs", "Call Legs"):     # drop the always-empty side
+                    if _lk_lc in _lk_disp.columns and (_lk_disp[_lk_lc].fillna("") == "").all():
+                        _lk_disp = _lk_disp.drop(columns=[_lk_lc])
+                if "Breakeven" in _lk_disp.columns and (_lk_disp["Breakeven"] == "-").all():
+                    _lk_disp = _lk_disp.drop(columns=["Breakeven"])
+                _selectable_table(_res, sp._fmt(_lk_disp), "lookup_tbl")
+            st.download_button("Download lookup (CSV)", _res.to_csv(index=False),
+                               f"{_q_ticker}_{_q_kind}_lookup.csv", "text/csv")
+        else:
+            st.write("No sellable contracts in that range (for puts/put spreads try strikes below the price; "
+                     "for calls/call spreads, above).")
+    except Exception as _e:
+        st.error(f"Lookup failed: {_e}")
+
+st.markdown("---")
+with st.expander("ETF earnings check (top-5 holdings)"):
+    _etf_rows = []
+    for _etf in ws.ETF_TOP_HOLDINGS:
+        _h = ws.etf_holding_earnings(_etf)
+        _next = sorted((d, h) for h, d in _h.items() if d)
+        _missing = [h for h, d in _h.items() if not d]
+        _etf_rows.append({"ETF": _etf,
+                          "Top-5 holdings": ", ".join(_h),
+                          "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
+                          "Date NOT FOUND for": ", ".join(_missing) or "-"})
+    st.caption(f"An ETF is left out of every screener while any of its top-5 holdings reports earnings inside the "
+               f"contract's window. Holdings as of {ws.ETF_TOP_HOLDINGS_ASOF}; a holding listed under NOT FOUND "
+               f"could not be checked.")
+    st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
+
+with st.expander("Peer earnings check (competitors / related tickers)"):
+    _peer_rows = []
+    for _t in sorted({*puts, *(h[0] for h in holds)} & set(ws.PEER_TICKERS)):
+        _pe = ws.peer_earnings(_t)
+        _own = ws.get_earnings_date(_t)
+        _next = sorted((d, p) for p, d in _pe.items() if d)
+        _peer_rows.append({"Ticker": _t,
+                           "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
+                           "Peers": ", ".join(_pe) or "none configured",
+                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
+                                                else ("-" if not _pe else "none found")),
+                           "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
+    st.caption("A ticker is left out of the puts / calls / spreads screens for any expiration that spans its OWN earnings "
+               "or any listed peer's earnings (PEER_TICKERS in wheel_screener.py). Long straddles/strangles use the same "
+               "dates as catalysts instead. A peer listed under NOT FOUND couldn't be checked.")
+    if _peer_rows:
+        st.dataframe(pd.DataFrame(_peer_rows), hide_index=True, use_container_width=True)
+    else:
+        st.write("None of your tickers have peers configured.")
+
+st.markdown("---")
+_SPREAD_SECTIONS = {
+    "Put credit spread":  "Put Credit Spreads  (bullish, defined risk)",
+    "Call credit spread": "Call Credit Spreads  (bearish, defined risk)",
+    "Iron condor":        "Iron Condors  (neutral, defined risk, 70% POP)",
+    "Long Straddle":      "Long Straddles  (big-move bet, defined risk, requires confirmed earnings in-window)",
+    "Long Strangle":      "Long Strangles  (big-move bet, defined risk, requires confirmed earnings in-window)",
+}
+
+
+def _render_spread_section(ds, key, heading=st.subheader):
+    heading(_SPREAD_SECTIONS[key])
+    _sub = ds[ds["Strategy"] == key] if len(ds) else ds
+    if len(_sub):
+        # Iron condor's per-side best-case credit columns exist only so the
+        # click-to-copy summary can quote the put spread and call spread as
+        # two independent legs (see spreads.py SPREAD_COLS) -- never shown
+        # in the table itself, the row stays a single combined iron condor.
+        _disp = _sub.drop(columns=["Strategy", "Put Max Profit", "Put Max Profit (Best)",
+                                   "Call Max Profit", "Call Max Profit (Best)"])
+        for _lc in ("Put Legs", "Call Legs"):     # hide the empty side for one-sided spreads
+            if _lc in _disp.columns and (_disp[_lc].fillna("") == "").all():
+                _disp = _disp.drop(columns=[_lc])
+        # Long Straddle/Strangle have no real Max Profit (unlimited upside, not a
+        # guaranteed number) -- drop the column entirely rather than show a
+        # column of "-" for every row (Breakeven is the real number there instead).
+        for _mc in ("Max Profit", "Max Profit (Best)"):
+            if _mc in _disp.columns and _disp[_mc].isna().all():
+                _disp = _disp.drop(columns=[_mc])
+        # Breakeven, conversely, only means something for Long Straddle/Strangle --
+        # drop it for credit spreads/iron condor, where it's always "-".
+        if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
+            _disp = _disp.drop(columns=["Breakeven"])
+        _selectable_table(_sub, sp._fmt(_disp), f"spread_tbl_{key}")
+        st.download_button(f"Download (CSV)", _sub.to_csv(index=False),
+                           f"{key.replace(' ', '_')}.csv", "text/csv", key=f"dl_{key}")
+    else:
+        st.write("None qualify right now.")
+
+
+ds, es = scan_spreads(tuple(puts), SPREAD_CRITERIA)
+st.header("Put / Call Credit Spreads  (70% POP)")
+_render_spread_section(ds, "Put credit spread")
+_render_spread_section(ds, "Call credit spread")
+
+st.markdown("---")
+st.header("Puts / Calls")
+dp, ep = scan_puts(tuple(puts), CRITERIA)
+dc, ec = scan_calls(holds, CRITERIA)
+
+st.subheader("Cash-Secured Puts")
+if len(dp):
+    _selectable_table(dp, ws._fmt(dp), "puts_tbl")
+    st.download_button("Download puts (CSV)", dp.to_csv(index=False),
+                       "puts.csv", "text/csv")
+else:
+    st.write("None qualify right now - nothing pays enough; stay in T-bills.")
+if ep:
+    st.caption("Skipped: " + " | ".join(ep))
+
+st.subheader("Covered Calls")
+if len(dc):
+    _selectable_table(dc, ws._fmt(dc), "calls_tbl")
+    st.download_button("Download calls (CSV)", dc.to_csv(index=False),
+                       "calls.csv", "text/csv")
+else:
+    st.write("None qualify right now.")
+if ec:
+    st.caption("Skipped: " + " | ".join(ec))
+
+st.markdown("---")
+_render_spread_section(ds, "Iron condor", st.header)
+
+st.markdown("---")
+st.header("Straddles / Strangles")
+_render_spread_section(ds, "Long Straddle")
+_render_spread_section(ds, "Long Strangle")
+if es:
+    st.caption("Skipped: " + " | ".join(es))
+
+st.markdown("---")
+st.header("Discover: High-Open-Interest Contracts (outside your watchlist)")
+st.caption("Live scan of a broad US-listed universe (not limited to the S&P 500), screened with the "
+           "same criteria as above plus a higher open-interest floor (5,000, vs 1,000 elsewhere) -- so "
+           "a name you didn't add to the watchlist can still surface if one of its most liquid contracts "
+           "qualifies. Candidates come from two mechanisms: tickers trading well above their own normal "
+           "volume today (**surge**), and tickers that moved sharply in the last day on real dollar volume "
+           "(**movers**). Both require at least \\$25M/day in dollar volume (price x volume, not just a "
+           "share count -- a cheap stock can clear a share-count bar on trivial real activity) AND a market "
+           "cap of at least \\$10B, so thinly-capitalized or speculative names don't surface just because "
+           "they're liquid or moved a lot. However a ticker got in, it's then routed purely by its OWN "
+           "1-day % change today -- up gets screened for puts only, down for call credit spreads only "
+           "(fading the move, with likely-richer premium from the volatility) -- so a name is never screened "
+           "for both, even a surge candidate that didn't move much either direction. Every candidate still "
+           "needs real open interest to qualify -- none of the above skips that check. "
+           "Calls here are call credit spreads, not naked/covered calls -- these are tickers you don't hold "
+           "shares of, so a spread caps the risk instead of leaving the upside uncovered. Same refresh "
+           "cadence as the rest of the app (30-min auto-refresh / 'Refresh data' on demand) -- placed "
+           "after the watchlist sections since it scans far more tickers and is slower than they are.")
+try:
+    _vl, _dfallback = scan_discover()
+    if _dfallback:
+        st.caption(f"Live scan failed ({_dfallback}) -- showing the last daily-Action snapshot instead.")
+    if _vl:
+        _leaders = _vl.get("leaders", [])
+        if _leaders:
+            def _leader_txt(l):
+                pct = (l.get("change_pct") or 0) * 100
+                sign = "+" if pct >= 0 else ""
+                src = l.get("source", "mover")
+                return f"{l['ticker']} ({l['option_open_interest']:,} OI, {sign}{pct:.1f}% today, {src})"
+            _lead_txt = " | ".join(_leader_txt(l) for l in _leaders)
+            st.caption(f"Scanned {_vl.get('_meta', {}).get('built', '?')} - highest open interest: {_lead_txt}")
+
+        st.markdown("**Puts**")
+        _dp = ws._df(_vl.get("puts", []), ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False))
+        if len(_dp):
+            _selectable_table(_dp, ws._fmt(_dp), "discover_puts_tbl")
+            st.download_button("Download discovered puts (CSV)", _dp.to_csv(index=False),
+                               "volume_leaders_puts.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+
+        st.markdown("**Call Credit Spreads (defined-risk)**")
+        _dc = sp._df(_vl.get("call_spreads", []))
+        if len(_dc):
+            _disp = _dc.drop(columns=["Strategy", "Put Legs", "Put Max Profit",
+                                      "Put Max Profit (Best)", "Call Max Profit",
+                                      "Call Max Profit (Best)"])
+            # Breakeven only means something for Long Straddle/Strangle -- this
+            # section is call credit spreads only, so it's always "-"; drop it.
+            if "Breakeven" in _disp.columns and (_disp["Breakeven"] == "-").all():
+                _disp = _disp.drop(columns=["Breakeven"])
+            _selectable_table(_dc, sp._fmt(_disp), "discover_spreads_tbl")
+            st.download_button("Download discovered call spreads (CSV)", _dc.to_csv(index=False),
+                               "volume_leaders_call_spreads.csv", "text/csv")
+        else:
+            st.write("None of today's highest-open-interest tickers currently qualify.")
+    else:
+        st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
+except Exception as _e:
+    st.caption(f"(discover section unavailable: {_e})")
 
 st.markdown("---")
 st.header("Concentration of Positions -- 1D All-Time High & Average (Max Loss)")
