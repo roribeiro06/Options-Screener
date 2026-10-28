@@ -529,6 +529,10 @@ PEER_TICKERS = {
     "NFLX": ["DIS", "WBD", "PSKY", "GOOG", "AMZN", "AAPL", "ROKU", "FOXA", "CMCSA"],
     "EIX":  ["PCG", "SRE", "PNW", "XEL", "HE"],
     "CRWD": ["S", "PANW", "MSFT", "ZS", "FTNT", "CHKP"],
+    "TSM":  ["005930.KS", "INTC"],
+    "ORCL": ["AMZN", "MSFT", "GOOG", "CRWV", "NBIS"],
+    "SPCX": ["AMZN", "ASTS", "RKLB", "FLY", "GOOG", "MSFT", "META"],
+    "SKHY": ["005930.KS", "MU", "SNDK", "WDC", "285A.T"],
     # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
     # company driven by its own portfolio's performance, not sector peers.
 }
