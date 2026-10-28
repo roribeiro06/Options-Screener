@@ -98,16 +98,6 @@ OPEN_POSITIONS = [
     {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
      "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25",
      "long_cost": 2.94},
-    # NVDA put credit spread: entry credit from the brokerage's cost basis on both
-    # legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P $2,275.00 / 2,700 = 0.842593.
-    {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
-     "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28",
-     "long_cost": 0.842593},
-    # ORCL put credit spread: entry credit from the brokerage's cost basis on both
-    # legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P $5,264.00 / 5,600 = 0.94.
-    {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
-     "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08",
-     "long_cost": 0.94},
     # AVGO put credit spread (opened 10/13 after the 10/05 close of the 10/16 320/300):
     # entry credit from the brokerage's cost basis on both legs -- short 320P
     # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
@@ -127,6 +117,25 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # NVDA 205/195 put spread closed 10/28 (opened 09/28). Entry credit from the brokerage's
+    # cost basis on both legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P
+    # $2,275.00 / 2,700 = 0.842593 -> 0.769967. Exit: short bought back for $864.00 (0.32/sh)
+    # and long sold for $107.99 on the real fill (the brokerage's header -$2,153.50 for the long
+    # leg is the lot at a $0.045 mark, not the actual sell) -> exit_cost = (864.00 - 107.99) /
+    # 2,700 = 0.280004. Realized +$1,322.90 = short +$3,489.91 (matches the brokerage's total
+    # exactly) + long -$2,167.01.
+    {"ticker": "NVDA", "type": "put_spread", "short_strike": 205, "long_strike": 195,
+     "expiration": "2026-10-30", "contracts": 27, "entry_credit": 0.769967, "entry_date": "2026-09-28",
+     "exit_cost": 0.280004, "exit_date": "2026-10-28", "long_cost": 0.842593},
+    # ORCL 125/120 put spread closed 10/28 (opened 10/08). Entry credit from the brokerage's
+    # cost basis on both legs -- short 125P $9,519.80 / 5,600 = 1.699964, long 120P
+    # $5,264.00 / 5,600 = 0.94 -> 0.759964. Exit: short bought back for $560.00 (0.10/sh) and
+    # long sold for $297.99 on the real fill (the header -$4,956.00 is the lot at a $0.055
+    # mark) -> exit_cost = (560.00 - 297.99) / 5,600 = 0.046788. Realized +$3,993.79 = short
+    # +$8,959.80 (matches the brokerage's total exactly) + long -$4,966.01.
+    {"ticker": "ORCL", "type": "put_spread", "short_strike": 125, "long_strike": 120,
+     "expiration": "2026-10-30", "contracts": 56, "entry_credit": 0.759964, "entry_date": "2026-10-08",
+     "exit_cost": 0.046788, "exit_date": "2026-10-28", "long_cost": 0.94},
     # UBER 76/80 call spread closed 10/16 (opened 10/13). Entry credit from the brokerage's
     # cost basis on both legs -- short 76C $3,967.91 / 6,900 = 0.575059, long 80C
     # $1,208.00 / 6,900 = 0.175072 -> 0.399987. Exit: short bought back for $1,587.00
