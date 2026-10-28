@@ -283,7 +283,7 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
                        "Recommendation", "Forward Outlook", "Trend Context (lagging)"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
-                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "PutCallOI", "Roll1Exp", "Roll1Sell", "Roll1Buy",
+                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "PutCallOI", "PutCallFlow", "Roll1Exp", "Roll1Sell", "Roll1Buy",
                            "Roll1NetLow", "Roll1NetHigh", "Roll1OpenLow", "Roll1OpenHigh",
                            "Roll2Exp", "Roll2Sell", "Roll2Buy", "Roll2NetLow", "Roll2NetHigh", "Roll2OpenLow",
                            "Roll2OpenHigh", "UnrealizedGLDollars", "EntryCredit",
@@ -550,22 +550,26 @@ def _tech_snapshot(ticker):
 _PC_CACHE = {}
 
 
-def _put_call_oi(ticker):
-    """Put/call OPEN INTEREST ratio for this one stock across its 30-60 DTE
-    expirations (all strikes), or None if there's no data. Above 1.0 = more put
-    contracts open than calls. Positioning context only -- it mixes hedging,
-    covered calls and cash-secured puts, so it's displayed, not used in the lean.
+def _put_call_window(ticker):
+    """(put/call OPEN INTEREST ratio, estimated flow direction) for this one stock across its
+    30-60 DTE expirations (all strikes); each is None / NaN-free-None when there's no data.
+    Ratio above 1.0 = more put contracts open than calls. Flow is ws.flow_score over the same
+    chains (-1 bearish .. +1 bullish, None when too thin). Positioning context only -- it mixes
+    hedging, covered calls and cash-secured puts, so it's displayed, not used in the lean.
     Cached per ticker per day."""
     key = (ticker, dt.date.today())
     if key in _PC_CACHE:
         return _PC_CACHE[key]
     puts = calls = 0
+    flow = []
     try:
         for e in ws.td_expirations(ticker):
             dte = (dt.date.fromisoformat(e) - dt.date.today()).days
             if not 30 <= dte <= 60:
                 continue
-            for o in ws.td_chain(ticker, e) or []:
+            ch = ws.td_chain(ticker, e) or []
+            flow.append(ws.flow_parts(ch))
+            for o in ch:
                 oi = int(o.get("oi") or 0)
                 if o["type"] == "put":
                     puts += oi
@@ -574,8 +578,17 @@ def _put_call_oi(ticker):
     except Exception as ex:
         print(f"P/C OI {ticker}: ERROR {ex}", file=sys.stderr)
     ratio = (puts / calls) if calls else None
-    _PC_CACHE[key] = ratio
-    return ratio
+    score = ws.flow_score(ws._sum_parts(flow)) if flow else float("nan")
+    _PC_CACHE[key] = (ratio, None if score != score else score)
+    return _PC_CACHE[key]
+
+
+def _put_call_oi(ticker):
+    return _put_call_window(ticker)[0]
+
+
+def _put_call_flow(ticker):
+    return _put_call_window(ticker)[1]
 
 
 # --- Forward outlook: leading / market-implied inputs only (no 50/200-day, no 20-day) ---
@@ -1012,6 +1025,7 @@ def build_spread_actions_table(df):
             "CostToClose": cost, "CurrentPrice": r["CurrentPrice"], "Kind": "roll" if (roll["r1"] or roll["r2"]) else "close",
             "Recommendation": rec_text,
             "PutCallOI": (lambda v: float("nan") if v is None else v)(_put_call_oi(r["Ticker"])),
+            "PutCallFlow": (lambda v: float("nan") if v is None else v)(_put_call_flow(r["Ticker"])),
             **_roll_cols("Roll1", roll["r1"]), **_roll_cols("Roll2", roll["r2"]),
             "UnrealizedGLDollars": r["UnrealizedGL_$"], "EntryCredit": credit,
             "LongBid": r.get("LongBid", float("nan")), "LongAsk": r.get("LongAsk", float("nan")),

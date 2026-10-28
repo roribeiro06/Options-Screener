@@ -479,6 +479,9 @@ def _spread_action_summary(row):
     pc_line = ("Put/Call open interest (30-60 DTE): "
                + (f"{pc:.2f} ({'more puts than calls open' if pc > 1 else 'more calls than puts open' if pc < 1 else 'even'})"
                   if pd.notna(pc) else "unavailable"))
+    flow = row.get("PutCallFlow")
+    pc_line += ("\nEstimated direction (30-60 DTE): "
+                + (ws.fmt_flow(flow) if pd.notna(flow) else "unavailable (too little volume)"))
     # Recommendation first (when there is one -- rows like TAKE PROFIT have none), put/call line directly under it
     rec = ((f"RECOMMENDATION: {recommendation}\n"
             if isinstance(recommendation, str) and recommendation not in ("", "-") else "") + pc_line + "\n\n")
