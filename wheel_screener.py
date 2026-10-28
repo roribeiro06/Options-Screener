@@ -487,6 +487,12 @@ ALLOW_EARNINGS_IN_WINDOW = False  # True: DO show contracts whose window spans a
 # Fill in your tickers' next earnings date; update roughly once a quarter.
 EARNINGS_DATES = {
     "UBER": "2026-08-05",
+    # Not announced / not on Yahoo as of 2026-10-28, so entered by hand from web lookups, using the
+    # EARLIEST plausible date (blocks every expiration after it; the cost of being early is only
+    # a few over-blocked expirations). Past dates are ignored, so once the date passes the live
+    # lookup takes over again. Replace with the confirmed date when the company announces it.
+    "SPCX": "2026-11-03",   # unconfirmed: Wall Street Horizon/Nasdaq calendar Nov 3, TipRanks Nov 5, projection Nov 17
+    "S":    "2026-12-03",   # SentinelOne: not announced; Nasdaq's estimate Dec 3 (last year it reported Dec 11)
     # add your other stocks' next earnings the same way (YYYY-MM-DD):
     # "NVDA": "2026-08-27",
     # "MSFT": "2026-07-29",
