@@ -499,46 +499,45 @@ EARNINGS_DATES = {
     # "LLY":  "2026-08-06",
 }
 
-# Related tickers (competitors, suppliers, read-through names) whose OWN earnings move this one.
+# "Strong" competitors / read-through names whose OWN earnings move this one (the user's curated
+# list, 2026-10-28 -- only the strongest relationships, replacing the longer earlier lists).
 # Two uses, both fully automatic (dates come live from get_earnings_date, same as your own earnings):
 #   1. Puts / calls / credit spreads / iron condors (earnings_blocks): a contract is left out when
-#      this ticker's OWN earnings OR any peer's earnings fall between today and its expiration --
+#      this ticker's OWN earnings OR any listed peer's earnings fall between today and its expiration --
 #      the peer's report can gap this stock just like its own.
 #   2. Long straddle/strangle (spreads.py _catalyst_dates): a peer's report counts as a catalyst
 #      date, so a ticker with nothing on its own calendar can still qualify ("(via PEER)").
 # A peer whose date can't be found is simply not checked -- the app's "Peer earnings check"
 # expander lists every peer date and which ones are NOT FOUND.
 # Edit the LIST itself if a relationship changes. Not mutual: each ticker lists what moves IT.
-# Non-US peers use Yahoo symbols (005930.KS Samsung, 1810.HK Xiaomi, 285A.T Kioxia, 2408.TW Nanya,
-# ADYEN.AS Adyen). Samsung also appears as SSNLF (OTC) for MU/INTC -- same company, either may resolve.
-# Dropped from the previous list: TSM from NVDA/MRVL, the chip-equipment makers (AMAT/ASML/LRCX/KLAC)
-# from MU, MDLZ from KHC.
+# Samsung = 005930.KS (Yahoo symbol). AAPL, NFLX and SPCX deliberately have no strong peers.
 PEER_TICKERS = {
-    "MSFT": ["GOOG", "AMZN", "META", "AAPL", "ORCL", "CRM", "SAP"],
-    "GOOG": ["MSFT", "AMZN", "META", "AAPL", "PINS", "SNAP", "RDDT", "ORCL"],
-    "AMZN": ["MSFT", "GOOG", "META", "AAPL", "WMT", "COST", "SHOP", "ORCL"],
-    "META": ["MSFT", "GOOG", "AMZN", "AAPL", "SNAP", "PINS", "RDDT"],
-    "AAPL": ["MSFT", "GOOG", "AMZN", "META", "005930.KS", "1810.HK", "DELL", "HPQ"],
-    "NVDA": ["AMD", "AVGO", "MRVL", "INTC", "QCOM"],
-    "AVGO": ["NVDA", "MRVL", "QCOM", "AMD", "CSCO", "ANET"],
-    "MRVL": ["AVGO", "NVDA", "AMD", "ALAB", "CRDO"],
-    "MU":   ["SKHY", "SSNLF", "SNDK", "005930.KS", "WDC", "285A.T", "2408.TW"],
-    "INTC": ["AMD", "QCOM", "TSM", "SSNLF", "NVDA", "ARM", "GFS"],
-    "V":    ["MA", "AXP", "PYPL", "COF", "ADYEN.AS", "FISV"],
-    "MA":   ["V", "AXP", "PYPL", "COF", "ADYEN.AS", "FISV"],
-    "LLY":  ["NVO", "PFE", "AMGN", "VKTX", "RHHBY", "AZN"],
-    "UBER": ["LYFT", "DASH", "GRAB", "CART"],
-    "NOW":  ["CRM", "WDAY", "TEAM", "FRSH", "SAP", "MSFT"],
-    "DKNG": ["FLUT", "MGM", "CZR", "HOOD", "RSI", "PENN"],
-    "KHC":  ["GIS", "CAG", "CPB", "HRL", "SJM", "MKC"],
-    "CMCSA": ["CHTR", "DIS", "WBD", "T", "VZ", "TMUS", "PSKY", "VSNT"],
-    "NFLX": ["DIS", "WBD", "PSKY", "GOOG", "AMZN", "AAPL", "ROKU", "FOXA", "CMCSA"],
-    "EIX":  ["PCG", "SRE", "PNW", "XEL", "HE"],
-    "CRWD": ["S", "PANW", "MSFT", "ZS", "FTNT", "CHKP"],
-    "TSM":  ["005930.KS", "INTC"],
-    "ORCL": ["AMZN", "MSFT", "GOOG", "CRWV", "NBIS"],
-    "SPCX": ["AMZN", "ASTS", "RKLB", "FLY", "GOOG", "MSFT", "META"],
-    "SKHY": ["005930.KS", "MU", "SNDK", "WDC", "285A.T"],
+    "AAPL": [],
+    "AMZN": ["MSFT", "GOOG"],
+    "AVGO": ["NVDA", "GOOG", "MRVL"],
+    "CMCSA": ["CHTR"],
+    "CRWD": ["PANW", "S"],
+    "DKNG": ["FLUT", "HOOD", "MGM"],
+    "EIX":  ["PCG"],
+    "FLUT": ["DKNG", "HOOD", "MGM"],
+    "GOOG": ["META", "MSFT"],
+    "INTC": ["AMD"],
+    "KHC":  ["GIS"],
+    "LLY":  ["NVO"],
+    "MA":   ["V"],
+    "META": ["GOOG"],
+    "MRVL": ["AVGO", "NVDA", "AMZN"],
+    "MSFT": ["AMZN", "GOOG"],
+    "MU":   ["SKHY", "005930.KS", "NVDA", "SNDK", "LRCX", "AMAT"],
+    "NFLX": [],
+    "NOW":  ["CRM"],
+    "NVDA": ["MSFT", "GOOG", "AMZN", "META", "TSM"],
+    "ORCL": ["NVDA", "CRWV"],
+    "SKHY": ["MU", "005930.KS", "NVDA"],
+    "SPCX": [],
+    "TSM":  ["NVDA", "ASML"],
+    "UBER": ["DASH"],
+    "V":    ["MA"],
     # PS (Pershing Square Inc.) intentionally has no entry -- it's a holding
     # company driven by its own portfolio's performance, not sector peers.
 }

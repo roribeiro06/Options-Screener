@@ -712,8 +712,9 @@ with st.expander("Peer earnings check (competitors / related tickers)"):
         _next = sorted((d, p) for p, d in _pe.items() if d)
         _peer_rows.append({"Ticker": _t,
                            "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
-                           "Peers": ", ".join(_pe),
-                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
+                           "Peers": ", ".join(_pe) or "none configured",
+                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
+                                                else ("-" if not _pe else "none found")),
                            "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
     st.caption("A ticker is left out of the puts / calls / spreads screens for any expiration that spans its OWN earnings "
                "or any listed peer's earnings (PEER_TICKERS in wheel_screener.py). Long straddles/strangles use the same "
