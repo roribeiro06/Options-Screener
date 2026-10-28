@@ -149,6 +149,7 @@ def _contracts(side_map, kind):
                     "type": kind, "strike": float(c["strikePrice"]),
                     "bid": _num(c.get("bid"), 0) or 0, "ask": _num(c.get("ask"), 0) or 0,
                     "prevclose": _num(c.get("closePrice"), 0) or 0,
+                    "last": _num(c.get("last"), 0) or 0,
                     "delta": delta, "iv": iv,
                     "oi": int(_num(c.get("openInterest"), 0)), "volume": int(_num(c.get("totalVolume"), 0))})
     return out
@@ -191,6 +192,13 @@ def window_open_interest(symbol):
             else:
                 call_oi += o["oi"]
     return put_oi, call_oi
+
+
+def window_contracts(symbol):
+    """Every contract in the cached bulk chain (today through CHAIN_DAYS out), or None if that
+    chain isn't cached. Call after chain() has loaded it."""
+    hit = _chain_cache.get(symbol.upper())
+    return None if not hit else [o for lst in hit[2].values() for o in lst]
 
 
 def history(symbol, start, end):

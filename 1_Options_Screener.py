@@ -1213,6 +1213,11 @@ positioned for: above 1 = more put positioning (hedging / bearish lean), below 1
 _Exp covers only that row's expiration, so it differs between expirations of the same ticker; _All covers every expiration out to ~100 days,
 so it's the same on every row of a ticker. Comparing the two shows whether that expiration leans differently from the stock overall.
 "-" if either side has no open interest.
+**Flow_Exp / Flow_All** = _estimated_ direction behind today's option trading, which open interest can't show. Each contract that traded
+today is placed between its bid (seller) and ask (buyer) by where its last trade sits, weighted by premium traded; buying calls or selling
+puts counts bullish, buying puts or selling calls bearish. "Bullish 35%" = net 35% of the premium leaned bullish; within +/-10% reads
+"Neutral"; "-" = under {getattr(ws, "FLOW_MIN_CONTRACTS", 100)} contracts traded (too thin to trust). _Exp is that expiration, _All every expiration to ~100 days.
+It's an estimate from the last print per contract, not tape data: use it as a tilt next to the put/call ratios, not as proof of who is buying.
 **Value** = (AnnYield / IV) x sqrt(DTE/365) for single-leg, (AnnROR / IV) x sqrt(DTE/365) for spreads. Equivalently, period premium
 yield divided by the expected move over the holding period (IV x sqrt(DTE/365)) - i.e. how much of the expected move you're paid.
 Term-neutral, so short- and long-dated contracts are comparable. Higher = richer premium for the risk.

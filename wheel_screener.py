@@ -633,18 +633,63 @@ def put_call_ratio(chain):
     return _ratio(*_oi_split(chain))
 
 
+_FLOW = {}       # (symbol, expiration) -> (signed premium, premium, contracts) for the estimated direction
+_FLOW_ALL = {}   # symbol -> same, across every expiration fetched
+_FLOW_ACC = {}   # Tradier fallback accumulator: symbol -> {expiration: parts}
+FLOW_MIN_CONTRACTS = 100    # traded contracts needed before a direction is shown; thinner than this is noise
+FLOW_NEUTRAL_BAND = 0.10    # |score| below this reads "Neutral"
+
+
+def flow_parts(chain):
+    """(signed premium, premium, contracts) behind the estimated buy-vs-sell direction. Each
+    contract that traded today is placed between its bid (-1, seller hit the bid) and ask (+1,
+    buyer lifted the offer) by where its last trade sits against the quote, weighted by the
+    premium traded (volume x last). Calls count +, puts - (buying calls / selling puts is bullish,
+    buying puts / selling calls bearish). It's the last print standing in for the day's flow --
+    an estimate, not tape data."""
+    signed = prem = n = 0.0
+    for o in chain:
+        vol, last = int(o.get("volume") or 0), float(o.get("last") or 0)
+        bid, ask = float(o.get("bid") or 0), float(o.get("ask") or 0)
+        if vol <= 0 or last <= 0 or ask <= bid or ask <= 0:
+            continue
+        pos = max(-1.0, min(1.0, (last - (bid + ask) / 2) / ((ask - bid) / 2)))
+        w = vol * last
+        signed += w * pos * (1 if str(o.get("type")).lower().startswith("c") else -1)
+        prem += w
+        n += vol
+    return signed, prem, n
+
+
+def flow_score(parts):
+    """-1 (all bearish) .. +1 (all bullish) from flow_parts, NaN under FLOW_MIN_CONTRACTS traded."""
+    signed, prem, n = parts
+    return signed / prem if n >= FLOW_MIN_CONTRACTS and prem else float("nan")
+
+
+def _sum_parts(parts_list):
+    return tuple(sum(p[i] for p in parts_list) for i in range(3))
+
+
 def td_chain(symbol, expiration):
     out = _td_chain_raw(symbol, expiration)
     _PC_RATIO[(symbol, str(expiration))] = put_call_ratio(out)
-    wide = None
+    _FLOW[(symbol, str(expiration))] = flow_parts(out)
+    wide = wide_flow = None
     if use_schwab():
         import schwab_data
         wide = schwab_data.window_open_interest(symbol)       # whole bulk chain, not just what the screen touched
+        window = schwab_data.window_contracts(symbol)
+        wide_flow = flow_parts(window) if window is not None else None
     if wide is None:
         _PC_OI.setdefault(symbol, {})[str(expiration)] = _oi_split(out)
         pairs = _PC_OI[symbol].values()
         wide = (sum(p for p, _ in pairs), sum(c for _, c in pairs))
+    if wide_flow is None:
+        _FLOW_ACC.setdefault(symbol, {})[str(expiration)] = _FLOW[(symbol, str(expiration))]
+        wide_flow = _sum_parts(_FLOW_ACC[symbol].values())
     _PC_ALL[symbol] = _ratio(*wide)
+    _FLOW_ALL[symbol] = wide_flow
     return out
 
 
@@ -655,6 +700,9 @@ def add_put_call(df):
     d = df.copy()
     d["PutCall_Exp"] = [_PC_RATIO.get((t, str(e)), float("nan")) for t, e in zip(d["Ticker"], d["Expiration"])]
     d["PutCall_All"] = [_PC_ALL.get(t, float("nan")) for t in d["Ticker"]]
+    nan_parts = (0.0, 0.0, 0.0)
+    d["Flow_Exp"] = [flow_score(_FLOW.get((t, str(e)), nan_parts)) for t, e in zip(d["Ticker"], d["Expiration"])]
+    d["Flow_All"] = [flow_score(_FLOW_ALL.get(t, nan_parts)) for t in d["Ticker"]]
     return d
 
 
@@ -672,6 +720,7 @@ def _td_chain_raw(symbol, expiration):
                     "bid": o.get("bid") or 0,
                     "ask": o.get("ask") or 0,
                     "prevclose": o.get("prevclose") or 0,
+                    "last": o.get("last") or 0,
                     "delta": g.get("delta"),
                     "iv": g.get("mid_iv") or g.get("smv_vol") or 0,
                     "oi": o.get("open_interest") or 0,
@@ -1724,15 +1773,15 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
 # Lookup shows the same columns as puts (no CostBasis, since it's not tied to a holding)
 LOOKUP_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
                "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-               "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
+               "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "Flow_Exp", "Flow_All", "EarningsDate"]
 
 
 PUT_COLS = ["Ticker", "CurrentPrice", "Strike", "Expiration", "DTE", "OTM_%", "Premium", "Ask",
             "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-            "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
+            "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "Flow_Exp", "Flow_All", "EarningsDate"]
 CALL_COLS = ["Ticker", "CurrentPrice", "CostBasis", "Strike", "Expiration", "DTE", "OTM_%",
              "Premium", "Ask", "AvgPremium", "AnnYield_%", "PeriodYield_%", "Delta_%", "IV", "Score",
-             "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "EarningsDate"]
+             "# of contracts", "MaxLoss", "OpenInt", "Volume", "PutCall_Exp", "PutCall_All", "Flow_Exp", "Flow_All", "EarningsDate"]
 PCT_COLS = {"OTM_%", "PeriodYield_%", "AnnYield_%", "Delta_%",
             "Tbill_%", "RiskPrem_%", "IV"}
 
@@ -1777,6 +1826,15 @@ def fmt_put_call(v):
     return f"{v:.2f}" if pd.notna(v) else "-"
 
 
+def fmt_flow(v):
+    """Estimated direction as text: 'Bullish 35%' / 'Bearish 22%' / 'Neutral' ('-' = too little volume)."""
+    if pd.isna(v):
+        return "-"
+    if abs(v) < FLOW_NEUTRAL_BAND:
+        return "Neutral"
+    return f"{'Bullish' if v > 0 else 'Bearish'} {abs(v) * 100:.0f}%"
+
+
 def _fmt(df):
     d = df.copy()
     for c in PCT_COLS:
@@ -1785,6 +1843,9 @@ def _fmt(df):
     for c in ("PutCall_Exp", "PutCall_All"):
         if c in d.columns:
             d[c] = d[c].apply(fmt_put_call)
+    for c in ("Flow_Exp", "Flow_All"):
+        if c in d.columns:
+            d[c] = d[c].apply(fmt_flow)
     # Premium: "$bid-$ask (total range across the # of contracts that reach the cash target)".
     # Showing the live bid-ask spread here folds in what the old separate Spread_$
     # liquidity column used to convey, so that column is gone.
