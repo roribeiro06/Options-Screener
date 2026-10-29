@@ -1325,7 +1325,35 @@ def build_combined_financials(dpos_df, dclosed_df, window_days=30):
     return _pivot_table("G/L (Unrealized + Realized)", gl, entries)
 
 
-MONTHLY_COLS = ["Month", "# Closed", "Premium Collected", "Realized G/L", "Realized G/L %", "Cumulative G/L"]
+MONTHLY_COLS = ["Month", "# Closed", "Premium Collected", "Max Loss 1D", "Realized G/L",
+                "Realized G/L %", "Cumulative G/L"]
+
+
+def _monthly_peak_max_loss():
+    """({'YYYY-MM': peak single-day Max Loss $ within that calendar month}, all-time peak).
+    Same "1D" meaning and risk-scaled convention as the Financials tables (_pivot_max_loss_per_share:
+    puts at the 20% tail estimate, covered calls skipped, spreads width - credit): the SUM of Max Loss
+    across every position open on one calendar day, then the worst such day. Covers every position held
+    that day -- including ones opened in an earlier month or still open today -- so a month's number is
+    the most risk you were carrying at once, not just from positions that closed in it."""
+    today = dt.date.today()
+    spans = []   # (entry, end_inclusive, loss_total)
+    for pos, end in ([(p, today) for p in _open_unclosed(today)]
+                     + [(p, dt.date.fromisoformat(p["exit_date"])) for p in _all_closed()]):
+        loss = _pivot_max_loss_per_share(pos)
+        if loss != loss:
+            continue
+        entry = dt.date.fromisoformat(pos["entry_date"]) if pos.get("entry_date") else today
+        spans.append((entry, end, loss * 100 * pos["contracts"]))
+    peaks, overall = {}, 0.0
+    d = min((s[0] for s in spans), default=today)
+    while d <= today:
+        v = sum(loss for start, end, loss in spans if start <= d <= end)
+        key = d.strftime("%Y-%m")
+        peaks[key] = max(peaks.get(key, 0.0), v)
+        overall = max(overall, v)
+        d += dt.timedelta(days=1)
+    return peaks, overall
 
 
 def build_monthly_realized_table():
@@ -1358,6 +1386,7 @@ def build_monthly_realized_table():
         b["premium"] += r["EntryCredit"] * 100 * r["Contracts"]
         b["gl"] += r["RealizedGL_$"]
 
+    peaks, overall_peak = _monthly_peak_max_loss()
     rows = []
     cum = 0.0
     for month_key in sorted(by_month):
@@ -1365,7 +1394,7 @@ def build_monthly_realized_table():
         cum += b["gl"]
         month_label = dt.datetime.strptime(month_key, "%Y-%m").strftime("%B %Y")
         gl_pct = (b["gl"] / b["premium"]) if b["premium"] else float("nan")
-        rows.append([month_label, b["n"], _fmt_dollar(b["premium"]),
+        rows.append([month_label, b["n"], _fmt_dollar(b["premium"]), _fmt_dollar(peaks.get(month_key, 0.0)),
                     _fmt_dollar_signed(b["gl"]), _fmt_pct(gl_pct), _fmt_dollar_signed(cum)])
 
     if rows:
@@ -1373,7 +1402,7 @@ def build_monthly_realized_table():
         total_prem = sum(by_month[m]["premium"] for m in by_month)
         total_gl = sum(by_month[m]["gl"] for m in by_month)
         total_pct = (total_gl / total_prem) if total_prem else float("nan")
-        rows.append(["Total", total_n, _fmt_dollar(total_prem),
+        rows.append(["Total", total_n, _fmt_dollar(total_prem), _fmt_dollar(overall_peak),
                     _fmt_dollar_signed(total_gl), _fmt_pct(total_pct), _fmt_dollar_signed(total_gl)])
 
     return pd.DataFrame(rows, columns=MONTHLY_COLS), errs
