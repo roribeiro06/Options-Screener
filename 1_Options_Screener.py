@@ -208,16 +208,40 @@ def _bid_avg_range(lo, hi, contracts=None):
     return f"{base} {total}"
 
 
+def _open_order_blocks(row, legs, n_int, exp_txt):
+    """One order block per leg to OPEN, same shape as the Open Positions close orders --
+    "Sell to Open $300 Put" / "Buy to Open $290 Put", then ticker, contracts, expiration and
+    that leg's own target price. Sells quote halfway-to-ask (_avg_max_range, the premium you
+    collect), buys bid-to-halfway (_bid_avg_range, the cost you pay). `legs` is
+    [(action, "Put"/"Call", strike, bid, ask), ...]."""
+    blocks = []
+    for action, side, strike, bid, ask in legs:
+        sell = str(action).lower().startswith("s")
+        price = _avg_max_range(bid, ask, n_int) if sell else _bid_avg_range(bid, ask, n_int)
+        blocks.append("\n".join([f"{'Sell' if sell else 'Buy'} to Open ${float(strike):g} {side}", str(row["Ticker"]),
+                                 f"{n_int if n_int is not None else '-'} Contract{'s' if n_int != 1 else ''}",
+                                 f"Expiration: {exp_txt}",
+                                 f"{'Premium' if sell else 'Cost to Open'}: {price}"]))
+    return "\n\n".join(blocks)
+
+
 def _contract_summary(row):
-    """Copy-paste summary for a financial advisor: Ticker / # of contracts /
-    expiration date / Sell/Buy $strike Put or Call line(s) / premium (with
-    the total across # of contracts in parentheses) / Current Price. Built
-    from the RAW (unformatted) row so the numbers are exact dollar figures,
-    not the display-formatted range strings."""
+    """Copy-paste summary for a financial advisor to OPEN a screened contract: one
+    "Sell to Open / Buy to Open $strike Put or Call" order block per leg (ticker, # of
+    contracts, expiration, that leg's own premium or cost, with the total across # of
+    contracts in parentheses), then Current Price. A spread / condor / straddle / strangle
+    lists each leg separately, taken from the row's LegQuotes; rows without them fall back
+    to the older combined text below. Built from the RAW (unformatted) row so the numbers
+    are exact dollar figures, not the display-formatted range strings."""
     n = row.get("# of contracts")
     n_int = int(n) if pd.notna(n) else None
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
+    _px = row.get("CurrentPrice")
+    _price_tail = f"\n\nCurrent Price: ${_px:.2f}" if pd.notna(_px) else ""
+    legs = row.get("LegQuotes")
+    if isinstance(legs, (list, tuple)) and len(legs):
+        return _open_order_blocks(row, legs, n_int, exp_txt) + _price_tail
     header = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
              f"Expiration: {exp_txt}"]
@@ -234,9 +258,8 @@ def _contract_summary(row):
         # is a target to quote the advisor -- the bid-to-ask midpoint through
         # the ask, not the conservative bid used elsewhere.
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
-        strike_lines = [f"Sell ${row['Strike']:g} {'Call' if is_call else 'Put'}"]
-        prem_txt = _avg_max_range(row.get("Premium"), row.get("Ask"), n_int)
-        return "\n".join(header + strike_lines + [f"Premium: {prem_txt}"] + tail)
+        leg = ("Sell", "Call" if is_call else "Put", row["Strike"], row.get("Premium"), row.get("Ask"))
+        return _open_order_blocks(row, [leg], n_int, exp_txt) + _price_tail
 
     # Iron condor: the table keeps it as one combined row, but the broker
     # has no native iron condor order type -- it has to be placed as two

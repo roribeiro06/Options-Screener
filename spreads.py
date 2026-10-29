@@ -75,7 +75,11 @@ SPREAD_COLS = ["Ticker", "CurrentPrice", "Strategy", "Put Legs", "Call Legs", "E
                # quote the put spread and call spread as two independent legs, since the
                # user's broker has no native iron condor order type and has to place them
                # as two separate spread orders anyway.
-               "Put Max Profit", "Put Max Profit (Best)", "Call Max Profit", "Call Max Profit (Best)"]
+               "Put Max Profit", "Put Max Profit (Best)", "Call Max Profit", "Call Max Profit (Best)",
+               # Every row: the legs to place, as (action, "Put"/"Call", strike, bid, ask) tuples in
+               # order -- not for display (_fmt drops it); lets the click-to-copy summary write one
+               # "Sell to Open / Buy to Open" order per leg with that leg's own quote.
+               "LegQuotes"]
 PCT_COLS = {"OTM_%", "ROR_%", "AnnROR_%", "POP_%", "IV"}   # Width_% is folded into Width in _fmt
 
 
@@ -142,6 +146,11 @@ def _credit_spread_candidates(chain, opt_type, target_delta, tol):
     return out
 
 
+def _leg_quote(action, opt_type, leg):
+    """One entry of a row's LegQuotes: what to do on this leg and its live bid/ask."""
+    return (action, opt_type.capitalize(), leg["strike"], leg.get("bid") or 0, leg.get("ask") or 0)
+
+
 def _leg_liquidity(*legs):
     """Minimum open interest across a spread's legs."""
     ois = [int(l.get("oi") or 0) for l in legs]
@@ -202,7 +211,7 @@ def _ann_ror_range(credit_range, width, dte):
 
 def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
                  credit, credit_best, width, max_loss, pop, iv, otm, oi=0, avg_credit=None, *,
-                 width_base):
+                 width_base, legs=None):
     """width_base is the SHORT strike Width_% is measured against (long leg to
     short leg, the same base SPREAD_WIDTH_PCT targets -- see _long_strike), so
     the column reads ~the width setting on every row regardless of how far OTM
@@ -224,7 +233,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
             "Score": (round(score, 2) if score == score else float("nan")),
             "AvgPremium": ws.fmt_avg_band(avg_credit),
             "# of contracts": ws.contracts_for_target(max_loss * 100, target=SPREAD_CASH_TARGET),
-            "OpenInt": int(oi), "EarningsDate": earn}
+            "OpenInt": int(oi), "EarningsDate": earn, "LegQuotes": legs}
 
 
 def _ok_defined(r, pmin, pmax):
@@ -281,7 +290,9 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                 acr = _ann_ror_range(_acd, s["width"], dte)
                 r = _defined_row(sym, spot, exp, dte, earn, strat, pl, cl,
                                  s["credit"], s["credit_best"], s["width"], s["max_loss"], pop,
-                                 s["short"].get("iv") or 0, otm, oi, acr, width_base=sk)
+                                 s["short"].get("iv") or 0, otm, oi, acr, width_base=sk,
+                                 legs=[_leg_quote("Sell", opt_type, s["short"]),
+                                       _leg_quote("Buy", opt_type, s["long"])])
                 if r["AnnROR_%"] < ROR_ANN_MIN:
                     continue
                 sc = r["Score"]
@@ -366,7 +377,9 @@ def _for_expiration(sym, spot, exp, dte, earn, chain):
                                  f"sell {cs['short']['strike']:g}C / buy {cs['long_strike']:g}C",
                                  credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi, acr,
                                  width_base=(ps["short"]["strike"] if ps["width"] >= cs["width"]
-                                             else cs["short"]["strike"]))
+                                             else cs["short"]["strike"]),
+                                 legs=[_leg_quote("Sell", "put", ps["short"]), _leg_quote("Buy", "put", ps["long"]),
+                                       _leg_quote("Sell", "call", cs["short"]), _leg_quote("Buy", "call", cs["long"])])
                 if r["AnnROR_%"] < ROR_ANN_MIN:
                     continue
                 sc = r["Score"]
@@ -497,7 +510,8 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
             "Score": (round(score, 2) if score == score else float("nan")),
             "AvgPremium": "-",
             "# of contracts": ws.contracts_for_target(debit * 100, target=SPREAD_CASH_TARGET),
-            "OpenInt": int(oi), "EarningsDate": earn}
+            "OpenInt": int(oi), "EarningsDate": earn,
+            "LegQuotes": [_leg_quote("Buy", "put", p), _leg_quote("Buy", "call", c)]}
 
 
 def _for_expiration_long(sym, spot, exp, dte, earn, chain):
@@ -773,7 +787,8 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
                 put_legs, call_legs = "", f"sell {short_strike:g}C / buy {long_strike:g}C"
             rows.append(_defined_row(symbol, price, exp, dte, earnings, strat, put_legs, call_legs,
                                      credit, credit_best, width, max_loss, pop, iv, otm, oi,
-                                     width_base=short_strike))
+                                     width_base=short_strike,
+                                     legs=[_leg_quote("Sell", opt_type, short), _leg_quote("Buy", opt_type, long_leg)]))
     return rows
 
 
@@ -877,7 +892,9 @@ def lookup_iron_condor(symbol, put_strike_min=None, put_strike_max=None,
                                  f"sell {ps:g}P / buy {p['long_strike']:g}P",
                                  f"sell {cs:g}C / buy {c['long_strike']:g}C",
                                  credit, credit_best, width, max_loss, pop, iv, min(p_otm, c_otm), oi,
-                                 width_base=(ps if p["width"] >= c["width"] else cs))
+                                 width_base=(ps if p["width"] >= c["width"] else cs),
+                                 legs=[_leg_quote("Sell", "put", p["short"]), _leg_quote("Buy", "put", p["long"]),
+                                       _leg_quote("Sell", "call", c["short"]), _leg_quote("Buy", "call", c["long"])])
                 r["Put Max Profit"] = round(p["credit"], 2)
                 r["Put Max Profit (Best)"] = round(p["credit_best"], 2)
                 r["Call Max Profit"] = round(c["credit"], 2)
@@ -978,7 +995,7 @@ def _df(rows):
 
 
 def _fmt(df):
-    d = df.copy()
+    d = df.drop(columns=["LegQuotes"], errors="ignore")
     for c in PCT_COLS:
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "-")
