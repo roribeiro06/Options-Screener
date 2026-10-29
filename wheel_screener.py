@@ -109,6 +109,11 @@ OPEN_POSITIONS = [
     {"ticker": "TSM", "type": "put_spread", "short_strike": 380, "long_strike": 360,
      "expiration": "2026-11-20", "contracts": 14, "entry_credit": 1.399936, "entry_date": "2026-10-20",
      "long_cost": 1.257857},
+    # NOW put credit spread (opened 10/29): entry credit from the brokerage's cost basis on both
+    # legs -- short 100P $7,427.85 / 5,600 = 1.326402, long 95P $4,200.00 / 5,600 = 0.75.
+    {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
+     "expiration": "2026-11-20", "contracts": 56, "entry_credit": 0.576402, "entry_date": "2026-10-29",
+     "long_cost": 0.75},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
