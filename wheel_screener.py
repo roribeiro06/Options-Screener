@@ -41,6 +41,7 @@ HOLDINGS = {
     "FDL": 37.07,
     "EDV": 59.47,
     "LLY": 1128.0,
+    "QQQ": 686.615,
 }
 
 # Actual shares owned, from the brokerage -- used only to cap covered calls'
@@ -64,6 +65,7 @@ HOLDINGS_SHARES = {
     "FDL": 5400,
     "EDV": 3400,
     "LLY": 100,
+    "QQQ": 150,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
