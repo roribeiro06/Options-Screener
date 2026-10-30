@@ -283,9 +283,9 @@ SPREAD_ACTIONS_COLS = ["Ticker", "Type", "Strike", "CurrentPrice", "DTE", "Group
                        "EntryCredit", "CostToClose", "TargetBTC", "StopBTC", "UnrealizedGL", "Action",
                        "Recommendation", "Forward Outlook", "Trend Context (lagging)"]
 SPREAD_ACTIONS_RAW_COLS = ["Ticker", "Type", "Strike", "Contracts", "Expiration", "CostToCloseBid",
-                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "PutCallOI", "PutCallFlow", "Roll1Exp", "Roll1Sell", "Roll1Buy",
+                           "CostToClose", "CurrentPrice", "Kind", "Recommendation", "PutCallOI", "PutCallFlow", "Roll1Exp", "Roll1Legs", "Roll1Sell", "Roll1Buy",
                            "Roll1NetLow", "Roll1NetHigh", "Roll1OpenLow", "Roll1OpenHigh",
-                           "Roll2Exp", "Roll2Sell", "Roll2Buy", "Roll2NetLow", "Roll2NetHigh", "Roll2OpenLow",
+                           "Roll2Exp", "Roll2Legs", "Roll2Sell", "Roll2Buy", "Roll2NetLow", "Roll2NetHigh", "Roll2OpenLow",
                            "Roll2OpenHigh", "UnrealizedGLDollars", "EntryCredit",
                            "LongBid", "LongAsk", "ShortBid", "ShortAsk", "LongCost"]
 
@@ -412,7 +412,8 @@ def _find_roll(ticker, exp, kind, cost, cost_bid, contracts):
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
             "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid,
-            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"], "pop": r["POP_%"]}
+            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"], "pop": r["POP_%"],
+            "legs": r.get("LegQuotes")}
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
@@ -457,7 +458,8 @@ def _find_screener_roll(ticker, exp, kind, cost, cost_bid, contracts):
     sell, buy = (float(x) for x in re.search(r"sell ([\d.]+)[PC] / buy ([\d.]+)[PC]", legs).groups())
     roll = {"exp": r["Expiration"], "dte": r["DTE"], "sell": sell, "buy": buy,
             "net_low": net, "net_high": r["Max Profit (Best)"] - cost_bid,
-            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"], "pop": r["POP_%"]}
+            "open_low": r["Max Profit"], "open_high": r["Max Profit (Best)"], "pop": r["POP_%"],
+            "legs": r.get("LegQuotes")}
     net_txt = (f"net +${net:.2f}/sh (+${net * 100 * contracts:,.0f})" if net > 0 else
                f"NET DEBIT ${-net:.2f}/sh (-${-net * 100 * contracts:,.0f})")
     return (f"to {r['Expiration']} ({r['DTE']} DTE): {legs} for ${r['Max Profit']:.2f} credit "
@@ -854,6 +856,7 @@ def _roll_cols(prefix, roll):
     screener criteria, "Roll2" = best Score with open interest and screener POP); all NaN/None when that suggestion doesn't exist."""
     nan = float("nan")
     return {f"{prefix}Exp": roll["exp"] if roll else None,
+            f"{prefix}Legs": roll.get("legs") if roll else None,
             f"{prefix}Sell": roll["sell"] if roll else nan,
             f"{prefix}Buy": roll["buy"] if roll else nan,
             f"{prefix}NetLow": roll["net_low"] if roll else nan,

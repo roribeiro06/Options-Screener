@@ -357,10 +357,10 @@ def _long_leg_summary(row):
     n = row.get("Contracts")
     n_int = int(n) if pd.notna(n) else None
     exp = row.get("Expiration")
-    lines = [f"Close {row['Ticker']}",
+    lines = [f"Sell to Close ${float(long_k):g} Put",
+             str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} Contracts",
              f"Expiration: {exp if pd.notna(exp) else '-'}",
-             f"Sell ${float(long_k):g} Put (sell to close)",
              f"Premium: {_avg_max_range(lb, la, n_int)}"]
     # Only the long leg is sold; the short put STAYS OPEN (left to be assigned if the stock gets
     # there), so nothing is bought back. The net credit is therefore the credit already collected
@@ -389,7 +389,7 @@ def _long_leg_summary(row):
             + "\n".join(lines))
 
 
-def _close_position_legs_summary(row):
+def _close_position_legs_summary(row, with_price=True):
     """Open Positions click-to-copy: one order block per leg to close, in the same shape as
     the screener's own order text -- "Buy to Close $205 Put" for the short leg and "Sell to
     Close $195 Put" for the long leg of a spread (a single-leg position is one block), each
@@ -412,11 +412,12 @@ def _close_position_legs_summary(row):
         legs = [(f"Buy to Close ${float(strike_str):g} {side}",
                  _bid_avg_range(row.get("CostToCloseBid"), row.get("CostToClose"), n_int))]
     blocks = ["\n".join([head, str(row["Ticker"]), f"{n_int if n_int is not None else '-'} Contracts",
-                         f"Expiration: {exp if pd.notna(exp) else '-'}", f"Cost to Close: {cost}"])
+                         f"Expiration: {exp if pd.notna(exp) else '-'}",
+                         f"{'Premium' if head.startswith('Sell') else 'Cost to Close'}: {cost}"])
               for head, cost in legs]
     text = "\n\n".join(blocks)
     price = row.get("CurrentPrice")
-    return text + (f"\n\nCurrent Price: ${price:.2f}" if pd.notna(price) else "")
+    return text + (f"\n\nCurrent Price: ${price:.2f}" if with_price and pd.notna(price) else "")
 
 
 def _signed(x):
@@ -454,28 +455,22 @@ def _signed_range_line(label, a, b, n_int):
 
 
 def _roll_position_summary(row, prefix="Roll2"):
-    """Copy-paste summary for a financial advisor to ROLL a losing credit
-    spread (from the Credit Spread Actions table): the spread being rolled,
-    the NEW expiration, the new short/long strikes, and the price to OPEN the
-    new spread (its own credit -- the RAW worst-to-best range _find_roll
-    already computed, see _raw_range, not compressed toward the midpoint the
-    way a fresh-open premium quote is)."""
-    strike_str = str(row.get("Strike", "-"))
-    strike_disp = f"(${'/$'.join(strike_str.split('/'))})"
-    type_label = _CLOSE_TYPE_LABELS.get(row.get("Type"), row.get("Type", ""))
-    opt = "Call" if "Call" in str(row.get("Type")) else "Put"
+    """Copy-paste order for the OPEN half of a roll (from the Credit Spread Actions table), in the
+    same shape as the screener's own order text: "Sell to Open $110 Put" for the new short leg
+    and "Buy to Open $105 Put" for the new long leg, each with ticker, contracts, the NEW
+    expiration and that leg's own target price (sells halfway-to-ask, buys bid-to-halfway --
+    see _open_order_blocks). Falls back to one combined block (the net credit as the raw
+    worst-to-best range _find_roll already computed) if the leg quotes are missing."""
     n = row.get("Contracts")
     n_int = int(n) if pd.notna(n) else None
-    lines = [f"Roll {row['Ticker']} {type_label} {strike_disp}",
-             f"{n_int if n_int is not None else '-'} Contracts",
-             f"Expiration: {row[prefix + 'Exp']}",
-             f"Sell ${row[prefix + 'Sell']:g} {opt}",
-             f"Buy ${row[prefix + 'Buy']:g} {opt}",
-             f"Premium: {_raw_range(row.get(prefix + 'OpenLow'), row.get(prefix + 'OpenHigh'), n_int)}"]
-    current_price = row.get("CurrentPrice")
-    if pd.notna(current_price):
-        lines += ["", f"Current Price: ${current_price:.2f}"]
-    return "\n".join(lines)
+    legs = row.get(prefix + "Legs")
+    if isinstance(legs, (list, tuple)) and len(legs):
+        return _open_order_blocks(row, legs, n_int, str(row[prefix + "Exp"]))
+    opt = "Call" if "Call" in str(row.get("Type")) else "Put"
+    return "\n".join([f"Sell to Open ${row[prefix + 'Sell']:g} {opt} / Buy to Open ${row[prefix + 'Buy']:g} {opt}",
+                      str(row["Ticker"]), f"{n_int if n_int is not None else '-'} Contracts",
+                      f"Expiration: {row[prefix + 'Exp']}",
+                      f"Premium: {_raw_range(row.get(prefix + 'OpenLow'), row.get(prefix + 'OpenHigh'), n_int)}"])
 
 
 def _spread_action_summary(row):
@@ -493,6 +488,8 @@ def _spread_action_summary(row):
     to special-case."""
     leg = _long_leg_summary(row)
     tail = f"\n\n{leg}" if leg else ""
+    px = row.get("CurrentPrice")
+    price_tail = f"\n\nCurrent Price: ${px:.2f}" if pd.notna(px) else ""
     recommendation = row.get("Recommendation")
     pc = row.get("PutCallOI")
     pc_line = ("Put/Call open interest (30-60 DTE): "
@@ -524,8 +521,8 @@ def _spread_action_summary(row):
             joined = "--- THEN, EITHER ---\n\n" + blocks[0] + "\n\n--- OR ---\n\n" + blocks[1]
         else:
             joined = "--- THEN ---\n\n" + blocks[0]
-        return rec + f"{_close_position_summary(row)}\n\n{joined}" + tail
-    return rec + _close_position_summary(row) + tail
+        return rec + f"{_close_position_legs_summary(row, with_price=False)}\n\n{joined}{price_tail}" + tail
+    return rec + _close_position_legs_summary(row) + tail
 
 
 @st.fragment
