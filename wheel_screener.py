@@ -116,6 +116,13 @@ OPEN_POSITIONS = [
     {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
      "expiration": "2026-11-20", "contracts": 56, "entry_credit": 0.576402, "entry_date": "2026-10-29",
      "long_cost": 0.75},
+    # MSFT 495/470 put credit spread (opened 11/02): entry credit from the brokerage's cost basis on
+    # both legs -- short 495P $4,946.89 / 1,200 = 4.122408, long 470P $1,707.00 / 1,200 = 1.4225.
+    # (The brokerage's symbol reads "...C495000" but the description says PUT and the prices only
+    # work as puts: the higher-strike short is the richer leg.)
+    {"ticker": "MSFT", "type": "put_spread", "short_strike": 495, "long_strike": 470,
+     "expiration": "2026-11-20", "contracts": 12, "entry_credit": 2.699908, "entry_date": "2026-11-02",
+     "long_cost": 1.4225},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
