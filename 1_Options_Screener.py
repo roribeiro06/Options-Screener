@@ -23,6 +23,7 @@ except Exception:
 import wheel_screener as ws
 import spreads as sp
 import positions
+import bgscan
 
 st.set_page_config(page_title="Wheel Screener", layout="wide")
 st.title("Wheel Screener")
@@ -551,7 +552,10 @@ def _selectable_table(raw_df, disp_df, key, summary_fn=_contract_summary):
         st.code(summary_fn(raw_df.iloc[sel[0]]), language=None)
 
 
-@st.cache_data(ttl=600, show_spinner=True)
+# The scan_* functions below that are fetched through _bg() (scan_puts, scan_calls, scan_spreads,
+# scan_spread_actions, scan_discover, scan_concentration_*, scan_earnings_checks) run on bgscan's
+# background worker and are cached there (ttl=600), NOT with st.cache_data: a script run that blocks
+# on them also blocks every row-click summary until it finishes (see bgscan.py).
 def scan_puts(tickers, crit):
     apply_criteria(crit)
     rows, errs = [], []
@@ -565,7 +569,6 @@ def scan_puts(tickers, crit):
     return ws._df(rows, ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False)), errs
 
 
-@st.cache_data(ttl=600, show_spinner=True)
 def scan_calls(holdings, crit):
     apply_criteria(crit)
     rows, errs = [], []
@@ -579,7 +582,6 @@ def scan_calls(holdings, crit):
     return ws._df(rows, ws.CALL_COLS, sort_by=("Ticker", "Score"), asc=(True, False)), errs
 
 
-@st.cache_data(ttl=600, show_spinner=True)
 def scan_spreads(tickers, sc):
     apply_spread_criteria(sc)
     rows, errs = [], []
@@ -620,9 +622,41 @@ def scan_positions():
     return positions.build_positions_table()
 
 
-@st.cache_data(ttl=600, show_spinner=True)
 def scan_spread_actions(dpos):
     return positions.build_spread_actions_table(dpos)   # (display_df, raw_df)
+
+
+def scan_concentration_history():
+    return positions.build_concentration_history_table()
+
+
+def scan_concentration_gl(dpos):
+    return positions.build_concentration_gl_table(dpos)   # (df, errors)
+
+
+def scan_earnings_checks(etf_holdings, own_tickers):
+    """(ETF rows, peer rows) for the two earnings-check expanders. Slow on a cold cache (one
+    earnings lookup per holding/peer), so it runs in the background like the screeners."""
+    etf_rows, peer_rows = [], []
+    for _etf in etf_holdings:
+        _h = ws.etf_holding_earnings(_etf)
+        _next = sorted((d, h) for h, d in _h.items() if d)
+        _missing = [h for h, d in _h.items() if not d]
+        etf_rows.append({"ETF": _etf,
+                         "Top-5 holdings": ", ".join(_h),
+                         "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
+                         "Date NOT FOUND for": ", ".join(_missing) or "-"})
+    for _t in sorted(set(own_tickers) & set(ws.PEER_TICKERS)):
+        _pe = ws.peer_earnings(_t)
+        _own = ws.get_earnings_date(_t)
+        _next = sorted((d, p) for p, d in _pe.items() if d)
+        peer_rows.append({"Ticker": _t,
+                          "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
+                          "Peers": ", ".join(_pe) or "none configured",
+                          "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
+                                               else ("-" if not _pe else "none found")),
+                          "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
+    return pd.DataFrame(etf_rows), pd.DataFrame(peer_rows)
 
 
 @st.cache_data(ttl=600, show_spinner=True)
@@ -630,7 +664,6 @@ def scan_closed_positions():
     return positions.build_closed_positions_table()
 
 
-@st.cache_data(ttl=600, show_spinner="Scanning the market for high-open-interest tickers...")
 def scan_discover():
     """Live, same cadence as everything else (30-min auto-refresh / on-demand,
     ttl=600 like the other scan_* functions). Scans a broad non-watchlist
@@ -690,6 +723,7 @@ with st.sidebar:
                "No earnings in window (always on).")
     if st.button("Refresh data (clear cache)"):
         st.cache_data.clear()
+        bgscan.clear()
 
 puts = parse_puts(puts_txt)
 holds = parse_holdings(holds_txt)
@@ -701,6 +735,20 @@ apply_criteria(CRITERIA)
 SPREAD_CRITERIA = (s_min_ror / 100, s_pop_min / 100,
                    int(s_dte_min), int(s_dte_max), s_width / 100)
 apply_spread_criteria(SPREAD_CRITERIA)
+
+_bg_seen = bgscan.done_count()     # the poller at the bottom reruns the page once this changes
+_bg_pending = []                   # non-empty = some background scan is still running this run
+
+
+def _bg(fn, *args, lane="main"):
+    """Result of a slow scan, or None while its first result is still being computed (an expired
+    result keeps showing while the refresh runs). Never blocks, so the page finishes quickly and
+    row-click summaries answer immediately -- see bgscan.py."""
+    value, pending = bgscan.fetch(fn, *args, lane=lane)
+    if pending:
+        _bg_pending.append(fn.__name__)
+    return value
+
 
 vix = cached_vix()
 if vix is not None:
@@ -718,9 +766,11 @@ try:
         st.download_button("Download positions (CSV)", _dpos.to_csv(index=False),
                            "open_positions.csv", "text/csv")
         st.markdown("**Credit Spread Actions**")
-        _acts, _acts_raw = scan_spread_actions(_dpos)
-        if len(_acts):
-            _selectable_table(_acts_raw, _acts, "spread_actions_tbl", summary_fn=_spread_action_summary)
+        _ar = _bg(scan_spread_actions, _dpos)
+        if _ar is None:
+            st.write("Checking credit spreads for actions...")
+        elif len(_ar[0]):
+            _selectable_table(_ar[1], _ar[0], "spread_actions_tbl", summary_fn=_spread_action_summary)
         else:
             st.write("No credit spreads need action right now.")
         st.markdown("**Financials** (unrealized)")
@@ -804,32 +854,23 @@ if _lq:
         st.error(f"Lookup failed: {_e}")
 
 st.markdown("---")
+try:
+    _earn = _bg(scan_earnings_checks, tuple(ws.ETF_TOP_HOLDINGS), tuple(sorted({*puts, *(h[0] for h in holds)})),
+                lane="earnings")      # own lane: slow lookups, and no criteria globals to share with the screeners
+except Exception as _e:
+    _earn = (pd.DataFrame(), pd.DataFrame())
+    st.caption(f"(earnings checks unavailable: {_e})")
 with st.expander("ETF earnings check (top-5 holdings)"):
-    _etf_rows = []
-    for _etf in ws.ETF_TOP_HOLDINGS:
-        _h = ws.etf_holding_earnings(_etf)
-        _next = sorted((d, h) for h, d in _h.items() if d)
-        _missing = [h for h, d in _h.items() if not d]
-        _etf_rows.append({"ETF": _etf,
-                          "Top-5 holdings": ", ".join(_h),
-                          "Next holding report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next else "none found"),
-                          "Date NOT FOUND for": ", ".join(_missing) or "-"})
-    st.dataframe(pd.DataFrame(_etf_rows), hide_index=True, use_container_width=True)
+    if _earn is None:
+        st.write("Loading...")
+    else:
+        st.dataframe(_earn[0], hide_index=True, use_container_width=True)
 
 with st.expander("Peer earnings check (competitors / related tickers)"):
-    _peer_rows = []
-    for _t in sorted({*puts, *(h[0] for h in holds)} & set(ws.PEER_TICKERS)):
-        _pe = ws.peer_earnings(_t)
-        _own = ws.get_earnings_date(_t)
-        _next = sorted((d, p) for p, d in _pe.items() if d)
-        _peer_rows.append({"Ticker": _t,
-                           "Own next earnings": (f"{_own:%b %d, %Y}" if _own else "not found"),
-                           "Peers": ", ".join(_pe) or "none configured",
-                           "Next peer report": (f"{_next[0][1]} {_next[0][0]:%b %d}" if _next
-                                                else ("-" if not _pe else "none found")),
-                           "Peer date NOT FOUND for": ", ".join(p for p, d in _pe.items() if not d) or "-"})
-    if _peer_rows:
-        st.dataframe(pd.DataFrame(_peer_rows), hide_index=True, use_container_width=True)
+    if _earn is None:
+        st.write("Loading...")
+    elif len(_earn[1]):
+        st.dataframe(_earn[1], hide_index=True, use_container_width=True)
     else:
         st.write("None of your tickers have peers configured.")
 
@@ -845,6 +886,9 @@ _SPREAD_SECTIONS = {
 
 def _render_spread_section(ds, key, heading=st.subheader):
     heading(_SPREAD_SECTIONS[key])
+    if ds is None:                                 # background scan hasn't produced its first result yet
+        st.write("Scanning...")
+        return
     _sub = ds[ds["Strategy"] == key] if len(ds) else ds
     if len(_sub):
         # Iron condor's per-side best-case credit columns exist only so the
@@ -873,18 +917,20 @@ def _render_spread_section(ds, key, heading=st.subheader):
         st.write("None qualify right now.")
 
 
-ds, es = scan_spreads(tuple(puts), SPREAD_CRITERIA)
+ds, es = _bg(scan_spreads, tuple(puts), SPREAD_CRITERIA) or (None, [])
 st.header("Put / Call Credit Spreads  (70% POP)")
 _render_spread_section(ds, "Put credit spread")
 _render_spread_section(ds, "Call credit spread")
 
 st.markdown("---")
 st.header("Puts / Calls")
-dp, ep = scan_puts(tuple(puts), CRITERIA)
-dc, ec = scan_calls(holds, CRITERIA)
+dp, ep = _bg(scan_puts, tuple(puts), CRITERIA) or (None, [])
+dc, ec = _bg(scan_calls, holds, CRITERIA) or (None, [])
 
 st.subheader("Cash-Secured Puts")
-if len(dp):
+if dp is None:
+    st.write("Scanning...")
+elif len(dp):
     _selectable_table(dp, ws._fmt(dp), "puts_tbl")
     st.download_button("Download puts (CSV)", dp.to_csv(index=False),
                        "puts.csv", "text/csv")
@@ -894,7 +940,9 @@ if ep:
     st.caption("Skipped: " + " | ".join(ep))
 
 st.subheader("Covered Calls")
-if len(dc):
+if dc is None:
+    st.write("Scanning...")
+elif len(dc):
     _selectable_table(dc, ws._fmt(dc), "calls_tbl")
     st.download_button("Download calls (CSV)", dc.to_csv(index=False),
                        "calls.csv", "text/csv")
@@ -913,11 +961,22 @@ _render_spread_section(ds, "Long Strangle")
 if es:
     st.caption("Skipped: " + " | ".join(es))
 
+# Queue the quick Concentration scans BEFORE Discover (the one very long scan) so they aren't stuck
+# behind it on the single worker; they're rendered further down the page.
+_conc_hist = _bg(scan_concentration_history)
+try:
+    _conc_gl = _bg(scan_concentration_gl, _dpos)
+except NameError:                      # positions failed to load above
+    _conc_gl = False
+
 st.markdown("---")
 st.header("Discover: High-Open-Interest Contracts (outside your watchlist)")
 try:
-    _vl, _dfallback = scan_discover()
-    if _dfallback:
+    _dr = _bg(scan_discover)
+    _vl, _dfallback = _dr if _dr is not None else (None, None)
+    if _dr is None:
+        st.write("Scanning the market for high-open-interest tickers...")
+    elif _dfallback:
         st.caption(f"Live scan failed ({_dfallback}) -- showing the last daily-Action snapshot instead.")
     if _vl:
         _leaders = _vl.get("leaders", [])
@@ -955,23 +1014,31 @@ try:
         else:
             st.write("None of today's highest-open-interest tickers currently qualify.")
     else:
-        st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
+        if _dr is not None:
+            st.write("Scan unavailable right now, and no fallback snapshot exists yet.")
 except Exception as _e:
     st.caption(f"(discover section unavailable: {_e})")
 
 st.markdown("---")
 st.header("Concentration of Positions -- 1D All-Time High & Average (Max Loss)")
 try:
-    st.dataframe(positions.build_concentration_history_table(), hide_index=True, use_container_width=True)
+    if _conc_hist is None:
+        st.write("Loading...")
+    else:
+        st.dataframe(_conc_hist, hide_index=True, use_container_width=True)
 except Exception as _e:
     st.caption(f"(concentration history unavailable: {_e})")
 
 st.markdown("**Concentration of Positions -- Unrealized G/L**")
 try:
-    _dconcgl, _econcgl = positions.build_concentration_gl_table(_dpos)
-    st.dataframe(_dconcgl, hide_index=True, use_container_width=True)
-    if _econcgl:
-        st.caption("Skipped: " + " | ".join(_econcgl))
+    if _conc_gl is None:
+        st.write("Loading...")
+    elif _conc_gl is False:
+        st.caption("(concentration G/L unavailable: positions did not load)")
+    else:
+        st.dataframe(_conc_gl[0], hide_index=True, use_container_width=True)
+        if _conc_gl[1]:
+            st.caption("Skipped: " + " | ".join(_conc_gl[1]))
 except Exception as _e:
     st.caption(f"(concentration G/L unavailable: {_e})")
 
@@ -1128,3 +1195,15 @@ try:
         _delay_slot.error(_w)
 except Exception:
     pass
+
+
+@st.fragment(run_every=2)
+def _bg_poller(seen):
+    """Reruns the whole page as soon as another background scan has landed, so its section fills
+    in by itself. Only rendered while something is still pending -- no polling once all is done."""
+    if bgscan.done_count() != seen:
+        st.rerun()
+
+
+if _bg_pending:
+    _bg_poller(_bg_seen)
