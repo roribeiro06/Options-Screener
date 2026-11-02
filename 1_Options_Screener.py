@@ -350,9 +350,10 @@ def _close_position_summary(row):
              f"{n_int if n_int is not None else '-'} Contracts",
              f"Expiration: {exp_txt}",
              f"Cost to Close: {cost_txt}"]
+    total = _total_cost_to_close_line(row, n_int)
     current_price = row.get("CurrentPrice")
-    if pd.notna(current_price):
-        lines += ["", f"Current Price: ${current_price:.2f}"]
+    if total or pd.notna(current_price):
+        lines += [""] + ([total] if total else []) + ([f"Current Price: ${current_price:.2f}"] if pd.notna(current_price) else [])
     return "\n".join(lines)
 
 
@@ -406,6 +407,15 @@ def _long_leg_summary(row):
             + "\n".join(lines))
 
 
+def _total_cost_to_close_line(row, n_int):
+    """'Total Cost to Close: -$bid to -$ask (-$tot to -$tot)' -- the whole position's cost to close
+    exactly as the Open Positions table's CostToClose column shows it. None if the quote is missing."""
+    bid, ask = row.get("CostToCloseBid"), row.get("CostToClose")
+    if n_int is None or bid is None or ask is None or pd.isna(bid) or pd.isna(ask):
+        return None
+    return f"Total Cost to Close: {positions.fmt_cost_to_close(bid, ask, n_int)}"
+
+
 def _close_position_legs_summary(row, with_price=True):
     """Open Positions click-to-copy: one order block per leg to close, in the same shape as
     the screener's own order text -- "Buy to Close $205 Put" for the short leg and "Sell to
@@ -433,8 +443,10 @@ def _close_position_legs_summary(row, with_price=True):
                          f"{'Premium' if head.startswith('Sell') else 'Cost to Close'}: {cost}"])
               for head, cost in legs]
     text = "\n\n".join(blocks)
+    total = _total_cost_to_close_line(row, n_int)
     price = row.get("CurrentPrice")
-    return text + (f"\n\nCurrent Price: ${price:.2f}" if with_price and pd.notna(price) else "")
+    return (text + (f"\n\n{total}" if total else "")
+            + (f"{chr(10) if total else chr(10) * 2}Current Price: ${price:.2f}" if with_price and pd.notna(price) else ""))
 
 
 def _signed(x):

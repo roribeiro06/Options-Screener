@@ -1104,6 +1104,22 @@ def build_closed_positions_table(window_days=30):
     return df, errs
 
 
+def _signed_cost(v):
+    return f"-${v:,.2f}" if v >= 0 else f"+${abs(v):,.2f}"
+
+
+def fmt_cost_to_close(bid, ask, n):
+    """The Open Positions table's CostToClose cell -- "-$bid to -$ask (-$totBid to -$totAsk)" --
+    also quoted in the click-to-copy popup so the two always read the same. See _fmt for why it
+    is negative and sign-aware."""
+    if bid != bid or ask != ask:
+        return "-"
+    if bid == ask:
+        return f"{_signed_cost(ask)} ({_signed_cost(ask * 100 * n)})"
+    return (f"{_signed_cost(bid)} to {_signed_cost(ask)} "
+           f"({_signed_cost(bid * 100 * n)} to {_signed_cost(ask * 100 * n)})")
+
+
 def _fmt(df):
     d = df.copy().drop(columns=["LongBid", "LongAsk", "ShortBid", "ShortAsk", "LongCost"], errors="ignore")   # raw quotes for the click-to-copy leg text only
     for c in PCT_COLS:
@@ -1125,21 +1141,12 @@ def _fmt(df):
     # instead of a cost is a rare but real possibility (illiquid/wide legs),
     # and negating an already-negative value should show as a gain ("+$"),
     # not a broken "-$-X.XX".
-    def _signed_cost(v):
-        return f"-${v:,.2f}" if v >= 0 else f"+${abs(v):,.2f}"
     if "CostToClose" in d.columns and "CostToCloseBid" in d.columns and "Contracts" in d.columns:
-        def _ctc_range(bid, ask, n):
-            if bid != bid or ask != ask:
-                return "-"
-            if bid == ask:
-                return f"{_signed_cost(ask)} ({_signed_cost(ask * 100 * n)})"
-            return (f"{_signed_cost(bid)} to {_signed_cost(ask)} "
-                   f"({_signed_cost(bid * 100 * n)} to {_signed_cost(ask * 100 * n)})")
-        d["CostToClose"] = [_ctc_range(b, a, int(n)) for b, a, n
+        d["CostToClose"] = [fmt_cost_to_close(b, a, int(n)) for b, a, n
                             in zip(d["CostToCloseBid"], d["CostToClose"], d["Contracts"])]
         d = d.drop(columns=["CostToCloseBid"])
     elif "CostToClose" in d.columns:
-        d["CostToClose"] = d["CostToClose"].apply(lambda v: _signed_cost(v) if v == v else "-")
+        d["CostToClose"] = d["CostToClose"].apply(lambda v: _signed_cost(v) if v == v else "-")   # no Contracts column: per-share only
     for c in ("ExitCost", "CurrentPrice"):
         if c in d.columns:
             d[c] = d[c].apply(lambda v: f"${v:.2f}" if v == v else "-")
