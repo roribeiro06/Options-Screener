@@ -226,11 +226,26 @@ def _open_order_blocks(row, legs, n_int, exp_txt):
     return "\n\n".join(blocks)
 
 
+def _table_premium_line(row, n_int):
+    """'Total Premium: $worst-$best ($total range)' -- the whole contract's premium exactly as the
+    table shows it: the Max Profit column for a spread/condor, the Premium column (bid to ask) for a
+    single put/call. None for a long straddle/strangle, whose Max Profit column is "-" (a debit,
+    not a premium -- each leg's own Cost to Open is already in the order blocks)."""
+    if pd.notna(row.get("Max Profit")):
+        lo, hi = row["Max Profit"], row.get("Max Profit (Best)")
+    elif pd.notna(row.get("Strike")) and pd.notna(row.get("Premium")):
+        lo, hi = row["Premium"], row.get("Ask")
+    else:
+        return None
+    return f"Total Premium: {_raw_range(lo, hi, n_int)}"
+
+
 def _contract_summary(row):
     """Copy-paste summary for a financial advisor to OPEN a screened contract: one
     "Sell to Open / Buy to Open $strike Put or Call" order block per leg (ticker, # of
     contracts, expiration, that leg's own premium or cost, with the total across # of
-    contracts in parentheses), then Current Price. A spread / condor / straddle / strangle
+    contracts in parentheses), then the whole contract's Total Premium (as the table's Max
+    Profit / Premium column shows it) and Current Price. A spread / condor / straddle / strangle
     lists each leg separately, taken from the row's LegQuotes; rows without them fall back
     to the older combined text below. Built from the RAW (unformatted) row so the numbers
     are exact dollar figures, not the display-formatted range strings."""
@@ -239,15 +254,16 @@ def _contract_summary(row):
     expiration = row.get("Expiration")
     exp_txt = str(expiration) if pd.notna(expiration) else "-"
     _px = row.get("CurrentPrice")
-    _price_tail = f"\n\nCurrent Price: ${_px:.2f}" if pd.notna(_px) else ""
+    _prem = _table_premium_line(row, n_int)
+    _tail_lines = ([_prem] if _prem else []) + ([f"Current Price: ${_px:.2f}"] if pd.notna(_px) else [])
+    _price_tail = "\n\n" + "\n".join(_tail_lines) if _tail_lines else ""
     legs = row.get("LegQuotes")
     if isinstance(legs, (list, tuple)) and len(legs):
         return _open_order_blocks(row, legs, n_int, exp_txt) + _price_tail
     header = [str(row["Ticker"]),
              f"{n_int if n_int is not None else '-'} contract{'s' if n_int != 1 else ''}",
              f"Expiration: {exp_txt}"]
-    current_price = row.get("CurrentPrice")
-    tail = ["", f"Current Price: ${current_price:.2f}"] if pd.notna(current_price) else []
+    tail = ["", *_tail_lines] if _tail_lines else []
 
     if "Strike" in row.index and pd.notna(row.get("Strike")):
         # Single-leg (cash-secured put / covered call): always a sell-to-open,
