@@ -123,6 +123,11 @@ OPEN_POSITIONS = [
     {"ticker": "MSFT", "type": "put_spread", "short_strike": 495, "long_strike": 470,
      "expiration": "2026-11-20", "contracts": 12, "entry_credit": 2.699908, "entry_date": "2026-11-02",
      "long_cost": 1.4225},
+    # GOOG 270/255 put credit spread (opened 11/02): entry credit from the brokerage's cost basis on
+    # both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 = 1.128.
+    {"ticker": "GOOG", "type": "put_spread", "short_strike": 270, "long_strike": 255,
+     "expiration": "2026-11-20", "contracts": 20, "entry_credit": 2.397425, "entry_date": "2026-11-02",
+     "long_cost": 1.128},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
