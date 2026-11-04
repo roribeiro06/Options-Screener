@@ -116,13 +116,6 @@ OPEN_POSITIONS = [
     {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
      "expiration": "2026-11-20", "contracts": 56, "entry_credit": 0.576402, "entry_date": "2026-10-29",
      "long_cost": 0.75},
-    # MSFT 495/470 put credit spread (opened 11/02): entry credit from the brokerage's cost basis on
-    # both legs -- short 495P $4,946.89 / 1,200 = 4.122408, long 470P $1,707.00 / 1,200 = 1.4225.
-    # (The brokerage's symbol reads "...C495000" but the description says PUT and the prices only
-    # work as puts: the higher-strike short is the richer leg.)
-    {"ticker": "MSFT", "type": "put_spread", "short_strike": 495, "long_strike": 470,
-     "expiration": "2026-11-20", "contracts": 12, "entry_credit": 2.699908, "entry_date": "2026-11-02",
-     "long_cost": 1.4225},
     # GOOG 270/255 put credit spread (opened 11/02): entry credit from the brokerage's cost basis on
     # both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 = 1.128.
     {"ticker": "GOOG", "type": "put_spread", "short_strike": 270, "long_strike": 255,
@@ -136,6 +129,15 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # MSFT 495/470 put spread closed 11/04 (opened 11/02). Entry credit from the brokerage's cost
+    # basis on both legs -- short 495P $4,946.90 / 1,200 = 4.122417, long 470P $1,707.00 / 1,200 =
+    # 1.4225 -> 2.699917. Exit: short bought back for $1,161.00 (3 fills) and long sold for $560.97
+    # on the real fills (the brokerage's $582.00 is the lot at a $0.485 mark, not the actual
+    # $0.46-$0.47 sells) -> exit_cost = (1,161.00 - 560.97) / 1,200 = 0.500025. Realized +$2,639.87
+    # = short +$3,785.90 (matches the brokerage's total exactly) + long -$1,146.03.
+    {"ticker": "MSFT", "type": "put_spread", "short_strike": 495, "long_strike": 470,
+     "expiration": "2026-11-20", "contracts": 12, "entry_credit": 2.699917, "entry_date": "2026-11-02",
+     "exit_cost": 0.500025, "exit_date": "2026-11-04", "long_cost": 1.4225},
     # NVDA 205/195 put spread closed 10/28 (opened 09/28). Entry credit from the brokerage's
     # cost basis on both legs -- short 205P $4,353.91 / 2,700 = 1.612559, long 195P
     # $2,275.00 / 2,700 = 0.842593 -> 0.769967. Exit: short bought back for $864.00 (0.32/sh)
