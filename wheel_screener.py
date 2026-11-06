@@ -25,21 +25,20 @@ PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL
                "V", "AAPL", "LLY", "MA", "UBER", "NOW", "EWY", "AMZN", "META", "INTC",
                "TSM", "ORCL", "SPCX", "SKHY", "CRWD"]
 
+# Unit cost = the brokerage's cost basis / shares (refreshed 11/06/2026; CMCSA, EIX and PS were
+# sold and dropped).
 HOLDINGS = {
     "DKNG": 18.4505,
-    "CMCSA": 35.12,
-    "PS": 25.25,
-    "NFLX": 69.30,
-    "AVGO": 381.07,
-    "EIX": 64.43,
+    "NFLX": 69.295,
+    "AVGO": 349.7291,
     "GOOG": 359.91,
-    "NVDA": 203.925,
-    "SMH": 573.6451,
+    "NVDA": 196.9172,
+    "SMH": 508.8622,
     "GPZ": 23.35,
-    "FLUT": 95.28,
-    "FDL": 37.07,
+    "FLUT": 95.2815,
+    "FDL": 37.0745,
     "EDV": 59.47,
-    "LLY": 1128.0,
+    "LLY": 1128.0005,
     "QQQ": 686.615,
 }
 
@@ -50,14 +49,11 @@ HOLDINGS = {
 # 1 contract rather than 0 -- see screen_calls.
 HOLDINGS_SHARES = {
     "DKNG": 1100,
-    "CMCSA": 3000,
-    "PS": 400,
     "NFLX": 360,
-    "AVGO": 131,
-    "EIX": 800,
+    "AVGO": 200,
     "GOOG": 139,
-    "NVDA": 245,
-    "SMH": 87,
+    "NVDA": 400,
+    "SMH": 200,
     "GPZ": 2000,
     "FLUT": 300,
     "FDL": 5400,
