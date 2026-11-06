@@ -27,7 +27,6 @@ PUT_TICKERS = ["SPY", "QQQ", "DIA", "MSFT", "GOOG", "NVDA", "AVGO", "SMH", "MRVL
 
 HOLDINGS = {
     "DKNG": 18.4505,
-    "KHC": 32.9834,
     "CMCSA": 35.12,
     "PS": 25.25,
     "NFLX": 69.30,
@@ -51,7 +50,6 @@ HOLDINGS = {
 # 1 contract rather than 0 -- see screen_calls.
 HOLDINGS_SHARES = {
     "DKNG": 1100,
-    "KHC": 3000,
     "CMCSA": 3000,
     "PS": 400,
     "NFLX": 360,
