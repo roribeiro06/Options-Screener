@@ -40,6 +40,7 @@ HOLDINGS = {
     "EDV": 59.47,
     "LLY": 1128.0005,
     "QQQ": 686.615,
+    "UBER": 68.675,
 }
 
 # Actual shares owned, from the brokerage -- used only to cap covered calls'
@@ -60,6 +61,7 @@ HOLDINGS_SHARES = {
     "EDV": 3400,
     "LLY": 100,
     "QQQ": 150,
+    "UBER": 400,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
