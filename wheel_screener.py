@@ -41,6 +41,7 @@ HOLDINGS = {
     "LLY": 1128.0005,
     "QQQ": 686.615,
     "UBER": 68.675,
+    "TSM": 390.12,
 }
 
 # Actual shares owned, from the brokerage -- used only to cap covered calls'
@@ -62,6 +63,7 @@ HOLDINGS_SHARES = {
     "LLY": 100,
     "QQQ": 150,
     "UBER": 400,
+    "TSM": 100,
 }
 
 # Open positions you've SOLD to open (cash-secured puts, covered calls, credit
