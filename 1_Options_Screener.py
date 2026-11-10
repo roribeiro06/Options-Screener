@@ -209,7 +209,7 @@ def _bid_avg_range(lo, hi, contracts=None):
     return f"{base} {total}"
 
 
-def _open_order_blocks(row, legs, n_int, exp_txt):
+def _open_order_blocks(row, legs, n_int, exp_txt, show_total=True):
     """One order block per leg to OPEN, same shape as the Open Positions close orders --
     "Sell to Open $300 Put" / "Buy to Open $290 Put", then ticker, contracts, expiration and
     that leg's own target price. Sells quote halfway-to-ask (_avg_max_range, the premium you
@@ -218,7 +218,8 @@ def _open_order_blocks(row, legs, n_int, exp_txt):
     blocks = []
     for action, side, strike, bid, ask in legs:
         sell = str(action).lower().startswith("s")
-        price = _avg_max_range(bid, ask, n_int) if sell else _bid_avg_range(bid, ask, n_int)
+        _n = n_int if show_total else None     # None -> per-share range only, no "(total)" suffix
+        price = _avg_max_range(bid, ask, _n) if sell else _bid_avg_range(bid, ask, _n)
         blocks.append("\n".join([f"{'Sell' if sell else 'Buy'} to Open ${float(strike):g} {side}", str(row["Ticker"]),
                                  f"{n_int if n_int is not None else '-'} Contract{'s' if n_int != 1 else ''}",
                                  f"Expiration: {exp_txt}",
@@ -276,7 +277,8 @@ def _contract_summary(row):
         # the ask, not the conservative bid used elsewhere.
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
         leg = ("Sell", "Call" if is_call else "Put", row["Strike"], row.get("Premium"), row.get("Ask"))
-        return _open_order_blocks(row, [leg], n_int, exp_txt) + _price_tail
+        # Regular (cash-secured) put: just the halfway-to-ask premium per share, no total in parentheses.
+        return _open_order_blocks(row, [leg], n_int, exp_txt, show_total=is_call) + _price_tail
 
     # Iron condor: the table keeps it as one combined row, but the broker
     # has no native iron condor order type -- it has to be placed as two
