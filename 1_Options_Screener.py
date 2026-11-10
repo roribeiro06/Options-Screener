@@ -229,13 +229,12 @@ def _open_order_blocks(row, legs, n_int, exp_txt, show_total=True):
 
 def _table_premium_line(row, n_int):
     """'Total Premium: $worst-$best ($total range)' -- the whole contract's premium exactly as the
-    table shows it: the Max Profit column for a spread/condor, the Premium column (bid to ask) for a
-    single put/call. None for a long straddle/strangle, whose Max Profit column is "-" (a debit,
-    not a premium -- each leg's own Cost to Open is already in the order blocks)."""
+    table shows it: the Max Profit column for a spread/condor. None for a single put/call (its
+    order block already carries the halfway-to-ask Premium; no bid-to-ask total) and for a long
+    straddle/strangle, whose Max Profit column is "-" (a debit, not a premium -- each leg's own
+    Cost to Open is already in the order blocks)."""
     if pd.notna(row.get("Max Profit")):
         lo, hi = row["Max Profit"], row.get("Max Profit (Best)")
-    elif pd.notna(row.get("Strike")) and pd.notna(row.get("Premium")):
-        lo, hi = row["Premium"], row.get("Ask")
     else:
         return None
     return f"Total Premium: {_raw_range(lo, hi, n_int)}"
@@ -277,8 +276,8 @@ def _contract_summary(row):
         # the ask, not the conservative bid used elsewhere.
         is_call = pd.notna(row.get("CurrentPrice")) and row["Strike"] > row["CurrentPrice"]
         leg = ("Sell", "Call" if is_call else "Put", row["Strike"], row.get("Premium"), row.get("Ask"))
-        # Regular (cash-secured) put: just the halfway-to-ask premium per share, no total in parentheses.
-        return _open_order_blocks(row, [leg], n_int, exp_txt, show_total=is_call) + _price_tail
+        # Regular (cash-secured) put and covered call: just the halfway-to-ask premium per share, no total in parentheses.
+        return _open_order_blocks(row, [leg], n_int, exp_txt, show_total=False) + _price_tail
 
     # Iron condor: the table keeps it as one combined row, but the broker
     # has no native iron condor order type -- it has to be placed as two
