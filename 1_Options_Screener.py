@@ -228,8 +228,10 @@ def _open_order_blocks(row, legs, n_int, exp_txt, show_total=True):
 
 
 def _table_premium_line(row, n_int):
-    """'Total Premium: $worst-$best ($total range)' -- the whole contract's premium exactly as the
-    table shows it: the Max Profit column for a spread/condor. None for a single put/call (its
+    """'Total Premium: $halfway-$best ($total range)' -- the whole contract's premium to quote, on the
+    same convention as every sell order here (_avg_max_range: halfway between the worst case and
+    the best case, up to the best case), built from the Max Profit columns for a spread/condor.
+    None for a single put/call (its
     order block already carries the halfway-to-ask Premium; no bid-to-ask total) and for a long
     straddle/strangle, whose Max Profit column is "-" (a debit, not a premium -- each leg's own
     Cost to Open is already in the order blocks)."""
@@ -237,7 +239,7 @@ def _table_premium_line(row, n_int):
         lo, hi = row["Max Profit"], row.get("Max Profit (Best)")
     else:
         return None
-    return f"Total Premium: {_raw_range(lo, hi, n_int)}"
+    return f"Total Premium: {_avg_max_range(lo, hi, n_int)}"
 
 
 def _contract_summary(row):
