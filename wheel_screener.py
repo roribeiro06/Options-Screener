@@ -119,6 +119,10 @@ OPEN_POSITIONS = [
     {"ticker": "GOOG", "type": "put_spread", "short_strike": 270, "long_strike": 255,
      "expiration": "2026-11-20", "contracts": 20, "entry_credit": 2.397425, "entry_date": "2026-11-02",
      "long_cost": 1.128},
+    # AMZN 255 cash-secured put (opened 11/11): entry credit from the brokerage's cost basis,
+    # $1,129.98 / 200 = 5.6499.
+    {"ticker": "AMZN", "type": "put", "strike": 255, "expiration": "2026-12-18",
+     "contracts": 2, "entry_credit": 5.6499, "entry_date": "2026-11-11"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
