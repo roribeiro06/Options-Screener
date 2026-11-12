@@ -114,11 +114,6 @@ OPEN_POSITIONS = [
     {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
      "expiration": "2026-11-20", "contracts": 56, "entry_credit": 0.576402, "entry_date": "2026-10-29",
      "long_cost": 0.75},
-    # GOOG 270/255 put credit spread (opened 11/02): entry credit from the brokerage's cost basis on
-    # both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 = 1.128.
-    {"ticker": "GOOG", "type": "put_spread", "short_strike": 270, "long_strike": 255,
-     "expiration": "2026-11-20", "contracts": 20, "entry_credit": 2.397425, "entry_date": "2026-11-02",
-     "long_cost": 1.128},
     # AMZN 255 cash-secured put (opened 11/11): entry credit from the brokerage's cost basis,
     # $1,129.98 / 200 = 5.6499.
     {"ticker": "AMZN", "type": "put", "strike": 255, "expiration": "2026-12-18",
@@ -131,6 +126,14 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # GOOG 270/255 put spread closed 11/11 (opened 11/02). Entry credit from the brokerage's cost
+    # basis on both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 =
+    # 1.128 -> 2.397425. Exit: short bought back for $1,246.00 and long sold for $239.99 ->
+    # exit_cost = (1,246.00 - 239.99) / 2,000 = 0.503005. Realized +$3,788.84 = short +$5,804.85
+    # + long -$2,016.01 (both leg totals match the brokerage's exactly).
+    {"ticker": "GOOG", "type": "put_spread", "short_strike": 270, "long_strike": 255,
+     "expiration": "2026-11-20", "contracts": 20, "entry_credit": 2.397425, "entry_date": "2026-11-02",
+     "exit_cost": 0.503005, "exit_date": "2026-11-11", "long_cost": 1.128},
     # MSFT 495/470 put spread closed 11/04 (opened 11/02). Entry credit from the brokerage's cost
     # basis on both legs -- short 495P $4,946.90 / 1,200 = 4.122417, long 470P $1,707.00 / 1,200 =
     # 1.4225 -> 2.699917. Exit: short bought back for $1,161.00 (3 fills) and long sold for $560.97
