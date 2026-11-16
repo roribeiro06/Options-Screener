@@ -118,6 +118,11 @@ OPEN_POSITIONS = [
     # $1,129.98 / 200 = 5.6499.
     {"ticker": "AMZN", "type": "put", "strike": 255, "expiration": "2026-12-18",
      "contracts": 2, "entry_credit": 5.6499, "entry_date": "2026-11-11"},
+    # MSFT 475/450 put credit spread (opened 11/16): entry credit from the brokerage's cost basis on
+    # both legs -- short 475P $6,425.87 / 1,200 = 5.354892, long 450P $3,186.00 / 1,200 = 2.655.
+    {"ticker": "MSFT", "type": "put_spread", "short_strike": 475, "long_strike": 450,
+     "expiration": "2026-12-18", "contracts": 12, "entry_credit": 2.699892, "entry_date": "2026-11-16",
+     "long_cost": 2.655},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
