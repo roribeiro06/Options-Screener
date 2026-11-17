@@ -1742,10 +1742,11 @@ def screen_calls(symbol, cost_basis):
 
 
 def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
-                     exp_start=None, exp_end=None):
+                     exp_start=None, exp_end=None, include_itm=False):
     """Manual lookup: return EVERY contract for a ticker within the given strike
     and expiration range, with all the same stats, regardless of whether it passes
-    the screener's criteria. No PASS filter, no OI floor, no earnings/dedup."""
+    the screener's criteria. No PASS filter, no OI floor, no earnings/dedup.
+    include_itm=True also lists in-the-money strikes (puts above the price, calls below)."""
     price = td_quote(symbol)
     if not price:
         raise RuntimeError("no quote")
@@ -1772,9 +1773,9 @@ def lookup_contracts(symbol, kind="put", strike_min=None, strike_max=None,
                 continue
             k = o["strike"]
             # sell side only: OTM puts (below price) for CSPs, OTM calls (above price) for covered calls
-            if kind == "put" and k >= price:
+            if not include_itm and kind == "put" and k >= price:
                 continue
-            if kind == "call" and k <= price:
+            if not include_itm and kind == "call" and k <= price:
                 continue
             if strike_min is not None and k < strike_min:
                 continue

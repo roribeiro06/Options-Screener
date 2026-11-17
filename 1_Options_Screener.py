@@ -625,9 +625,9 @@ def scan_spreads(tickers, sc):
 
 
 @st.cache_data(ttl=600, show_spinner=True)
-def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None, csmin=None, csmax=None):
+def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None, csmin=None, csmax=None, itm=False):
     if kind in ("put", "call"):
-        rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend)
+        rows = ws.lookup_contracts(ticker, kind, smin, smax, estart, eend, include_itm=itm)
         return ws._df(rows, ws.LOOKUP_COLS, sort_by=("Expiration", "Strike"), asc=(True, True))
     if kind in ("straddle", "strangle"):
         # long (bought) put + call: straddle = same strike (smin/smax bound it); strangle = smin/smax bound
@@ -637,9 +637,10 @@ def scan_lookup(ticker, kind, smin, smax, estart, eend, width_pct=None, csmin=No
     if kind == "iron_condor":
         # smin/smax bound the PUT short strike, csmin/csmax the CALL short strike --
         # two independent ranges, since a condor pairs one of each (see lookup_iron_condor).
-        rows = sp.lookup_iron_condor(ticker, smin, smax, csmin, csmax, estart, eend, width_pct=width_pct)
+        rows = sp.lookup_iron_condor(ticker, smin, smax, csmin, csmax, estart, eend, width_pct=width_pct,
+                                     include_itm=itm)
         return sp._df(rows)
-    rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend, width_pct=width_pct)
+    rows = sp.lookup_spreads(ticker, kind, smin, smax, estart, eend, width_pct=width_pct, include_itm=itm)
     return sp._df(rows)
 
 
@@ -836,6 +837,7 @@ with st.form("lookup_form"):
     lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
     lk_width = _d3.number_input("Spread width % (spreads/condor only)", 1, 50,
                                 int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
+    lk_itm = st.checkbox("Include in-the-money strikes (puts/spreads above the price, calls below)", value=False)
     lk_go = st.form_submit_button("Search")
 
 if lk_go and lk_ticker:
@@ -847,14 +849,15 @@ if lk_go and lk_ticker:
     # the summary. Keying off session_state instead survives any rerun.
     st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
                                         lk_smax or None, lk_start, lk_end, lk_width / 100,
-                                        lk_csmin or None, lk_csmax or None)
+                                        lk_csmin or None, lk_csmax or None, lk_itm)
 
 _lq = st.session_state.get("lookup_query")
 if _lq:
-    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax = _lq
+    _lq = tuple(_lq) + (False,) * (10 - len(_lq))    # a query saved by an older session has no ITM flag
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax, _q_itm = _lq
     try:
         _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width,
-                           csmin=_q_csmin, csmax=_q_csmax)
+                           csmin=_q_csmin, csmax=_q_csmax, itm=_q_itm)
         if len(_res):
             _label = {"put": "cash-secured put", "call": "covered call",
                       "put_spread": "put credit spread", "call_spread": "call credit spread",
@@ -880,7 +883,7 @@ if _lq:
                                f"{_q_ticker}_{_q_kind}_lookup.csv", "text/csv")
         else:
             st.write("No sellable contracts in that range (for puts/put spreads try strikes below the price; "
-                     "for calls/call spreads, above).")
+                     "for calls/call spreads, above -- or tick \"Include in-the-money strikes\").")
     except Exception as _e:
         st.error(f"Lookup failed: {_e}")
 

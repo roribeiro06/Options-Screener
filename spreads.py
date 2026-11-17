@@ -722,7 +722,7 @@ def _blocked_by_open_position(strategy, occupied):
 
 
 def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
-                   exp_start=None, exp_end=None, width_pct=None):
+                   exp_start=None, exp_end=None, width_pct=None, include_itm=False):
     """Manual lookup: every viable put_spread/call_spread for a ticker within
     the given SHORT-strike and expiration range -- the long leg is auto-picked
     at `width_pct` (defaults to the live SPREAD_WIDTH_PCT if not given, same
@@ -751,9 +751,10 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
         chain = ws.td_chain(symbol, exp)
         for short_strike in sorted({o["strike"] for o in chain if o["type"] == opt_type}):
             # sell side only: OTM puts below price, OTM calls above -- same convention as lookup_contracts
-            if opt_type == "put" and short_strike >= price:
+            # (include_itm=True lifts this so an in-the-money short strike can be looked up)
+            if not include_itm and opt_type == "put" and short_strike >= price:
                 continue
-            if opt_type == "call" and short_strike <= price:
+            if not include_itm and opt_type == "call" and short_strike <= price:
                 continue
             if strike_min is not None and short_strike < strike_min:
                 continue
@@ -794,7 +795,7 @@ def lookup_spreads(symbol, kind="put_spread", strike_min=None, strike_max=None,
 
 def lookup_iron_condor(symbol, put_strike_min=None, put_strike_max=None,
                        call_strike_min=None, call_strike_max=None,
-                       exp_start=None, exp_end=None, width_pct=None):
+                       exp_start=None, exp_end=None, width_pct=None, include_itm=False):
     """Manual lookup: every viable iron condor for a ticker -- every PUT short
     strike within [put_strike_min, put_strike_max] paired with every CALL
     short strike within [call_strike_min, call_strike_max], in the given
@@ -829,8 +830,10 @@ def lookup_iron_condor(symbol, put_strike_min=None, put_strike_max=None,
         if exp_end and exp_date > exp_end:
             continue
         chain = ws.td_chain(symbol, exp)
-        put_strikes = sorted({o["strike"] for o in chain if o["type"] == "put" and o["strike"] < price})
-        call_strikes = sorted({o["strike"] for o in chain if o["type"] == "call" and o["strike"] > price})
+        put_strikes = sorted({o["strike"] for o in chain
+                              if o["type"] == "put" and (include_itm or o["strike"] < price)})
+        call_strikes = sorted({o["strike"] for o in chain
+                               if o["type"] == "call" and (include_itm or o["strike"] > price)})
 
         put_legs = {}
         for ps in put_strikes:
