@@ -831,12 +831,14 @@ with st.form("lookup_form"):
     _e1, _e2 = st.columns(2)
     lk_csmin = _e1.number_input("Call strike min (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
     lk_csmax = _e2.number_input("Call strike max (iron condor / strangle only, 0 = any)", min_value=0.0, value=0.0, step=1.0)
-    _d1, _d2, _d3 = st.columns(3)
+    _d1, _d2, _d3, _d4 = st.columns([2, 2, 2, 1.4])
     _today = datetime.now().date()
     lk_start = _d1.date_input("Expiration from", _today)
     lk_end = _d2.date_input("Expiration to", _today + timedelta(days=90))
     lk_width = _d3.number_input("Spread width % (spreads/condor only)", 1, 50,
                                 int(getattr(sp, "SPREAD_WIDTH_PCT", 0.05) * 100))
+    lk_n = _d4.number_input("# of contracts (blank = default)", min_value=1, value=None, step=1,
+                            placeholder="default sizing")
     lk_itm = st.checkbox("Include in-the-money strikes (puts/spreads above the price, calls below)", value=False)
     lk_go = st.form_submit_button("Search")
 
@@ -849,15 +851,22 @@ if lk_go and lk_ticker:
     # the summary. Keying off session_state instead survives any rerun.
     st.session_state["lookup_query"] = (lk_ticker, lk_kind, lk_smin or None,
                                         lk_smax or None, lk_start, lk_end, lk_width / 100,
-                                        lk_csmin or None, lk_csmax or None, lk_itm)
+                                        lk_csmin or None, lk_csmax or None, lk_itm,
+                                        int(lk_n) if lk_n else None)
 
 _lq = st.session_state.get("lookup_query")
 if _lq:
-    _lq = tuple(_lq) + (False,) * (10 - len(_lq))    # a query saved by an older session has no ITM flag
-    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax, _q_itm = _lq
+    _lq = tuple(_lq) + (False, None)[len(_lq) - 9:]  # a query saved by an older session lacks the newer fields
+    _q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, _q_width, _q_csmin, _q_csmax, _q_itm, _q_n = _lq
     try:
         _res = scan_lookup(_q_ticker, _q_kind, _q_smin, _q_smax, _q_start, _q_end, width_pct=_q_width,
                            csmin=_q_csmin, csmax=_q_csmax, itm=_q_itm)
+        if _q_n and len(_res):
+            # your own contract count replaces the default cash-target sizing; every total in the table and
+            # the click-to-copy summary is built from this column. Applied outside scan_lookup's cache so
+            # changing the count doesn't refetch the chains.
+            _res = _res.copy()
+            _res["# of contracts"] = int(_q_n)
         if len(_res):
             _label = {"put": "cash-secured put", "call": "covered call",
                       "put_spread": "put credit spread", "call_spread": "call credit spread",
