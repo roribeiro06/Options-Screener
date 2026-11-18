@@ -411,12 +411,14 @@ def _long_leg_summary(row):
 
 
 def _total_cost_to_close_line(row, n_int):
-    """'Total Cost to Close: -$bid to -$ask (-$tot to -$tot)' -- the whole position's cost to close
-    exactly as the Open Positions table's CostToClose column shows it. None if the quote is missing."""
+    """'Total Cost to Close: -$mid to -$ask (-$tot to -$tot)' -- the whole position's cost to close,
+    quoted from the halfway point between bid and ask up to the ask (the table's CostToClose column
+    itself still shows bid to ask). None if the quote is missing."""
     bid, ask = row.get("CostToCloseBid"), row.get("CostToClose")
     if n_int is None or bid is None or ask is None or pd.isna(bid) or pd.isna(ask):
         return None
-    return f"Total Cost to Close: {positions.fmt_cost_to_close(bid, ask, n_int)}"
+    mid = (bid + ask) / 2
+    return f"Total Cost to Close: {positions.fmt_cost_to_close(mid, ask, n_int)}"
 
 
 def _close_position_legs_summary(row, with_price=True):
