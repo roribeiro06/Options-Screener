@@ -450,9 +450,17 @@ PUT_BEST_PER_EXPIRATION  = True
 CALL_BEST_PER_EXPIRATION = True
 # Composite ranking score (puts AND covered calls): Score = (AnnYield / IV^c) * POP^a * (365/DTE)^b.
 # Dividing by IV strips out the fact that yield is naturally richer on higher-IV (riskier) names,
-# so the score no longer rewards volatility. POP and shorter DTE break ties.
+# so the score no longer rewards volatility. POP breaks ties; DTE preference follows the VIX (see SCORE_DTE_VIX_ADAPTIVE).
 SCORE_POP_EXP = 2.0   # a: how much higher POP is rewarded (0 = ignore POP)
-SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length)
+SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length). Only the fallback / the
+                      #    calm-market end now -- with SCORE_DTE_VIX_ADAPTIVE on, b is set by the VIX (below).
+# b follows market volatility: calm market -> shorter contracts score higher (b > 0), turbulent market ->
+# longer contracts score higher (b < 0). Linear in the VIX between the two anchors, flat outside them.
+SCORE_DTE_VIX_ADAPTIVE = True
+SCORE_DTE_EXP_CALM  = 0.5    # b at/below VIX_CALM  (reward shorter DTE, (365/DTE)^+0.5)
+SCORE_DTE_EXP_STORM = -0.5   # b at/above VIX_STORM (reward LONGER DTE, (365/DTE)^-0.5)
+VIX_CALM  = 15.0
+VIX_STORM = 30.0             # neutral (b = 0) lands halfway, VIX 22.5
 SCORE_IV_EXP  = 1.0   # c: IV penalty. 0 = ignore IV (old behavior), 1 = neutralize IV, >1 = actively favor calmer names
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
@@ -820,6 +828,40 @@ def vix_regime(v):
     if v < 30:
         return "elevated - prime selling"
     return "high - rich but risky"
+
+
+_vix_cache = {"t": 0.0, "v": None}
+
+
+def current_vix(ttl=600):
+    """get_vix(), cached for `ttl` seconds (a failed lookup is cached too, so an outage doesn't
+    re-hit the network for every contract being scored)."""
+    import time as _t
+    if _t.time() - _vix_cache["t"] > ttl:
+        try:
+            v = get_vix()
+        except Exception:
+            v = None
+        _vix_cache["t"], _vix_cache["v"] = _t.time(), v
+    return _vix_cache["v"]
+
+
+def dte_score_exp(vix=None):
+    """The DTE exponent b in Score = ... x (365/DTE)^b. With SCORE_DTE_VIX_ADAPTIVE it slides
+    linearly from SCORE_DTE_EXP_CALM (VIX <= VIX_CALM: shorter contracts rank higher) down to
+    SCORE_DTE_EXP_STORM (VIX >= VIX_STORM: longer contracts rank higher). If the VIX can't be read it
+    is 0 (no DTE preference either way) rather than guessing a regime."""
+    if not SCORE_DTE_VIX_ADAPTIVE:
+        return SCORE_DTE_EXP
+    v = vix if vix is not None else current_vix()
+    if v is None or v != v:
+        return 0.0
+    if v <= VIX_CALM:
+        return SCORE_DTE_EXP_CALM
+    if v >= VIX_STORM:
+        return SCORE_DTE_EXP_STORM
+    f = (v - VIX_CALM) / (VIX_STORM - VIX_CALM)
+    return SCORE_DTE_EXP_CALM + f * (SCORE_DTE_EXP_STORM - SCORE_DTE_EXP_CALM)
 
 
 def _d1(S, K, T, sigma, r):
@@ -1456,7 +1498,7 @@ def evaluate_put(row, spot, dte, earnings_in_window, iv_rank=None, delta=None, o
         reasons.append(f"total premium ${_total_premium:,.0f} < ${MIN_TOTAL_PREMIUM:,.0f}")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
-    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
+    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** dte_score_exp())
              if (dte and dte > 0 and iv and iv > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
              else float("nan"))
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,
@@ -1534,7 +1576,7 @@ def evaluate_call(row, spot, dte, earnings_in_window, cost_basis, iv_rank=None, 
         reasons.append(f"strike below cost {cost_basis}")
     if USE_IVR and not tests.get("iv_rank"):
         reasons.append("IV Rank <50 or missing")
-    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** SCORE_DTE_EXP)
+    score = (ann_yld / (iv ** SCORE_IV_EXP) * (delta_pct ** SCORE_POP_EXP) * ((365.0 / dte) ** dte_score_exp())
              if (dte and dte > 0 and iv and iv > 0 and ann_yld == ann_yld and delta_pct == delta_pct)
              else float("nan"))
     return {"OTM_%": otm, "Premium": premium, "PeriodYield_%": per_yld,

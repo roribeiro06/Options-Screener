@@ -598,7 +598,7 @@ def scan_puts(tickers, crit):
             rows += passers
         except Exception as e:
             errs.append(f"{t}: {e}")
-    # rank within each ticker by composite Score (AnnYield * POP^a * (365/DTE)^b)
+    # rank within each ticker by composite Score (AnnYield * POP^a * (365/DTE)^b, b set by VIX)
     return ws._df(rows, ws.PUT_COLS, sort_by=("Ticker", "Score"), asc=(True, False)), errs
 
 
@@ -1185,7 +1185,7 @@ Term-neutral, so short- and long-dated contracts are comparable. Higher = richer
 - Days to expiration: {ws.DTE_MIN} to {ws.DTE_MAX}; never spans an earnings report (its own or any listed competitor/peer's -- see PEER_TICKERS)
 - **Puts only** extra filters: {("premium >= \$%.0f/share; " % ws.PUT_MIN_PREMIUM) if ws.PUT_MIN_PREMIUM > 0 else ""}{("premium >= %.1f%% of strike; " % (getattr(ws, "PUT_MIN_PREMIUM_PCT", 0)*100)) if getattr(ws, "PUT_MIN_PREMIUM_PCT", 0) > 0 else ""}AnnYield >= {ws.PUT_MIN_YIELD_OVER_IV:.0%} of IV; OTM >= {ws.PUT_MIN_OTM_OVER_IV:.0%} of IV
 - **Covered calls** extra filter: OTM >= {getattr(ws, "CALL_MIN_OTM_OVER_IV", 0):.0%} of IV (same volatility-scaled cushion as puts)
-- **Score** (all strategies) = (AnnYield / IV^{getattr(ws, "SCORE_IV_EXP", 1.0):g}) x POP^{getattr(ws, "SCORE_POP_EXP", 1.0):g} x (365/DTE)^{getattr(ws, "SCORE_DTE_EXP", 0.5):g}. For spreads, annualized ROR replaces AnnYield. Dividing by IV stops high-volatility names from dominating on richer premium; higher POP and shorter DTE break ties. Every table is ranked by Score (highest first) within each ticker.
+- **Score** (all strategies) = (AnnYield / IV^{getattr(ws, "SCORE_IV_EXP", 1.0):g}) x POP^{getattr(ws, "SCORE_POP_EXP", 1.0):g} x (365/DTE)^b. For spreads, annualized ROR replaces AnnYield. Dividing by IV stops high-volatility names from dominating on richer premium; higher POP breaks ties. **b follows the VIX** (currently {(lambda _b, _v: f"{_b:+.2f} at VIX {_v}" if _v is not None else f"{_b:+.2f}, VIX unavailable")(ws.dte_score_exp() if hasattr(ws, "dte_score_exp") else 0.5, ws.current_vix() if hasattr(ws, "current_vix") else None)}): calm market (VIX <= {getattr(ws, "VIX_CALM", 15):g}) b = {getattr(ws, "SCORE_DTE_EXP_CALM", 0.5):+g} so SHORTER contracts rank higher, turbulent market (VIX >= {getattr(ws, "VIX_STORM", 30):g}) b = {getattr(ws, "SCORE_DTE_EXP_STORM", -0.5):+g} so LONGER contracts rank higher, sliding linearly in between. Every table is ranked by Score (highest first) within each ticker.
 - **Puts diversity:** {"best-Score contract per expiration only (collapses each ticker's strike ladder)" if getattr(ws, "PUT_BEST_PER_EXPIRATION", False) else "showing all qualifying strikes"}
 - Yield-must-beat-IV filter: **{_on(ws.USE_YIELD_OVER_IV)}**{_yiv}
 - Tiered OTM-to-yield rule: **{_on(ws.USE_TIERED_YIELD)}**  |  Beat-T-bill rule: **{_on(ws.USE_TBILL_SPREAD)}**

@@ -219,7 +219,7 @@ def _defined_row(sym, spot, exp, dte, earn, strat, put_legs, call_legs,
     ror = credit / max_loss if max_loss > 0 else float("nan")
     ann = ror * 365.0 / dte if dte else float("nan")
     # Same composite score as puts/calls, with AnnROR standing in for AnnYield.
-    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
+    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.dte_score_exp())
              if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop)
              else float("nan"))
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
@@ -497,7 +497,7 @@ def _long_row(sym, spot, exp, dte, earn, s, pop):
                  if (expected_move == expected_move and closer_be_dist == closer_be_dist) else float("nan"))
     ror = (profit_est / debit) if (debit > 0 and profit_est == profit_est) else float("nan")
     ann = ror * 365.0 / dte if (dte and ror == ror) else float("nan")
-    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.SCORE_DTE_EXP)
+    score = (ann / (iv ** ws.SCORE_IV_EXP) * (pop ** ws.SCORE_POP_EXP) * ((365.0 / dte) ** ws.dte_score_exp())
              if (dte and dte > 0 and iv and iv > 0 and ann == ann and pop == pop) else float("nan"))
     return {"Ticker": sym, "CurrentPrice": round(spot, 2), "Strategy": strat,
             "Put Legs": f"buy {p['strike']:g}P", "Call Legs": f"buy {c['strike']:g}C",
