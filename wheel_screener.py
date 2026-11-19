@@ -454,13 +454,16 @@ CALL_BEST_PER_EXPIRATION = True
 SCORE_POP_EXP = 2.0   # a: how much higher POP is rewarded (0 = ignore POP)
 SCORE_DTE_EXP = 0.5   # b: how much shorter DTE is rewarded (0 = ignore length). Only the fallback / the
                       #    calm-market end now -- with SCORE_DTE_VIX_ADAPTIVE on, b is set by the VIX (below).
-# b follows market volatility, in three zones: calm market -> shorter contracts score higher (b > 0),
-# middle -> no DTE preference (b = 0), turbulent market -> longer contracts score higher (b < 0).
+# b follows market volatility with a neutral middle band and smooth ramps either side: calm market ->
+# shorter contracts score higher (b > 0), VIX_CALM..VIX_STORM -> no DTE preference (b = 0), turbulent
+# market -> longer contracts score higher (b < 0). b eases linearly from 0 at the band's edge to its full
+# value VIX_RAMP points further out (no sharp cutoff).
 SCORE_DTE_VIX_ADAPTIVE = True
-SCORE_DTE_EXP_CALM  = 0.5    # b when VIX <= VIX_CALM  (reward shorter DTE, (365/DTE)^+0.5)
-SCORE_DTE_EXP_STORM = -0.5   # b when VIX >  VIX_STORM (reward LONGER DTE, (365/DTE)^-0.5)
-VIX_CALM  = 17.0            # at/below this: shorter preferred
-VIX_STORM = 22.0            # above this: longer preferred; in between (17-22): no preference
+SCORE_DTE_EXP_CALM  = 0.5    # full b when VIX <= VIX_CALM - VIX_RAMP  (reward shorter DTE, (365/DTE)^+0.5)
+SCORE_DTE_EXP_STORM = -0.5   # full b when VIX >= VIX_STORM + VIX_RAMP (reward LONGER DTE, (365/DTE)^-0.5)
+VIX_CALM  = 17.0            # neutral band starts here: below it shorter is preferred, easing in
+VIX_STORM = 22.0            # neutral band ends here: above it longer is preferred, easing in
+VIX_RAMP  = 5.0             # VIX points over which b goes from 0 to its full value
 SCORE_IV_EXP  = 1.0   # c: IV penalty. 0 = ignore IV (old behavior), 1 = neutralize IV, >1 = actively favor calmer names
 USE_TIERED_YIELD  = False    # ON: use the tiered OTM->yield rule below instead of the flat floor
 TIERED_YIELD = [(0.15, 0.10), (0.10, 0.15), (0.05, 0.25)]  # (min OTM, required ann. yield), high OTM first
@@ -847,20 +850,20 @@ def current_vix(ttl=600):
 
 
 def dte_score_exp(vix=None):
-    """The DTE exponent b in Score = ... x (365/DTE)^b, set by the VIX in three zones:
-    VIX <= VIX_CALM -> SCORE_DTE_EXP_CALM (shorter contracts rank higher);
-    VIX_CALM < VIX <= VIX_STORM -> 0 (no preference);
-    VIX > VIX_STORM -> SCORE_DTE_EXP_STORM (longer contracts rank higher).
-    If the VIX can't be read it is 0 rather than guessing a regime."""
+    """The DTE exponent b in Score = ... x (365/DTE)^b, set by the VIX:
+    VIX_CALM..VIX_STORM -> 0 (no preference); below VIX_CALM it rises linearly to SCORE_DTE_EXP_CALM
+    (shorter contracts rank higher) over VIX_RAMP points; above VIX_STORM it falls linearly to
+    SCORE_DTE_EXP_STORM (longer contracts rank higher) over VIX_RAMP points. If the VIX can't be read
+    it is 0 rather than guessing a regime."""
     if not SCORE_DTE_VIX_ADAPTIVE:
         return SCORE_DTE_EXP
     v = vix if vix is not None else current_vix()
     if v is None or v != v:
         return 0.0
-    if v <= VIX_CALM:
-        return SCORE_DTE_EXP_CALM
+    if v < VIX_CALM:
+        return SCORE_DTE_EXP_CALM * min(1.0, (VIX_CALM - v) / VIX_RAMP)
     if v > VIX_STORM:
-        return SCORE_DTE_EXP_STORM
+        return SCORE_DTE_EXP_STORM * min(1.0, (v - VIX_STORM) / VIX_RAMP)
     return 0.0
 
 
