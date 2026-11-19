@@ -401,7 +401,7 @@ CLOSED_POSITIONS = [
 POP_MIN           = 0.70     # at least 70% POP (delta <= ~0.30); higher POP is fine too
 POP_MAX           = 1.0      # no upper cap
 DTE_MIN           = 7      # include short weeklies
-DTE_MAX           = 90     # up to ~3 months out
+DTE_MAX           = 100    # up to 100 days out
 YIELD_HURDLE_BASE = 0.25     # (informational; the active yield rule is the two lines below)
 MIN_ANN_YIELD     = 0.15     # flat floor: contracts must pay >= this annualized (when tiered rule off)
 MIN_ANN_YIELD_LOW_VOL = 0.10 # LOW-volatility tier (see vol_tier) is lower risk -> lower yield floor is OK
