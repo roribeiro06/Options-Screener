@@ -93,12 +93,6 @@ OPEN_POSITIONS = [
     # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
      "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
-    # AVGO put credit spread (opened 10/13 after the 10/05 close of the 10/16 320/300):
-    # entry credit from the brokerage's cost basis on both legs -- short 320P
-    # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
-    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
-     "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13",
-     "long_cost": 1.628},
     # AMZN 255 cash-secured put (opened 11/11): entry credit from the brokerage's cost basis,
     # $1,129.98 / 200 = 5.6499.
     {"ticker": "AMZN", "type": "put", "strike": 255, "expiration": "2026-12-18",
@@ -122,6 +116,15 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # AVGO 320/300 put spread closed 11/20 (opened 10/13). Entry credit from the brokerage's cost
+    # basis on both legs -- short 320P $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 =
+    # 1.628 -> 2.457913. Exit: short bought back for $19,725.00 ($13.15) and long sold for $2,069.96
+    # on the real fill (the brokerage's -$312.00 on the long lot is a $1.42 mark, not the actual
+    # $1.38 sell) -> exit_cost = (19,725.00 - 2,069.96) / 1,500 = 11.770027. Realized -$13,968.17 =
+    # short -$13,596.13 (matches the brokerage's total exactly) + long -$372.04.
+    {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
+     "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13",
+     "exit_cost": 11.770027, "exit_date": "2026-11-20", "long_cost": 1.628},
     # TSM 380/360 put spread closed 11/20 (opened 10/20). Entry credit from the brokerage's cost
     # basis on both legs -- short 380P $3,720.92 / 1,400 = 2.657800, long 360P $1,761.00 / 1,400 =
     # 1.257857 -> 1.399943. Exit: short bought back for $70,196.00 ($50.14) and long sold for
