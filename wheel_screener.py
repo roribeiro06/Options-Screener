@@ -93,27 +93,12 @@ OPEN_POSITIONS = [
     # LLY 1150P -- entry credit from the brokerage's cost basis: $2,199.95 / 100 = 21.9995.
     {"ticker": "LLY", "type": "put", "strike": 1150, "expiration": "2026-10-02",
      "contracts": 1, "entry_credit": 21.9995, "entry_date": "2026-09-23"},
-    # QQQ put credit spread: entry credit from the brokerage's cost basis on both
-    # legs -- short 675P $4,271.91 / 800 = 5.3398875, long 640P $2,352.00 / 800 = 2.94.
-    {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
-     "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25",
-     "long_cost": 2.94},
     # AVGO put credit spread (opened 10/13 after the 10/05 close of the 10/16 320/300):
     # entry credit from the brokerage's cost basis on both legs -- short 320P
     # $6,128.87 / 1,500 = 4.085913, long 300P $2,442.00 / 1,500 = 1.628.
     {"ticker": "AVGO", "type": "put_spread", "short_strike": 320, "long_strike": 300,
      "expiration": "2026-11-20", "contracts": 15, "entry_credit": 2.457913, "entry_date": "2026-10-13",
      "long_cost": 1.628},
-    # TSM put credit spread (opened 10/20): entry credit from the brokerage's cost basis on both
-    # legs -- short 380P $3,720.91 / 1,400 = 2.657793, long 360P $1,761.00 / 1,400 = 1.257857.
-    {"ticker": "TSM", "type": "put_spread", "short_strike": 380, "long_strike": 360,
-     "expiration": "2026-11-20", "contracts": 14, "entry_credit": 1.399936, "entry_date": "2026-10-20",
-     "long_cost": 1.257857},
-    # NOW put credit spread (opened 10/29): entry credit from the brokerage's cost basis on both
-    # legs -- short 100P $7,427.85 / 5,600 = 1.326402, long 95P $4,200.00 / 5,600 = 0.75.
-    {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
-     "expiration": "2026-11-20", "contracts": 56, "entry_credit": 0.576402, "entry_date": "2026-10-29",
-     "long_cost": 0.75},
     # AMZN 255 cash-secured put (opened 11/11): entry credit from the brokerage's cost basis,
     # $1,129.98 / 200 = 5.6499.
     {"ticker": "AMZN", "type": "put", "strike": 255, "expiration": "2026-12-18",
@@ -131,6 +116,38 @@ OPEN_POSITIONS = [
 # exit_date -- pure arithmetic against the recorded exit price, no live quotes
 # needed since the trade is already settled. See positions.py.
 CLOSED_POSITIONS = [
+    # TSM 380/360 put spread closed 11/20 (opened 10/20). Entry credit from the brokerage's cost
+    # basis on both legs -- short 380P $3,720.92 / 1,400 = 2.657800, long 360P $1,761.00 / 1,400 =
+    # 1.257857 -> 1.399943. Exit: short bought back for $70,196.00 ($50.14) and long sold for
+    # $42,153.13 on the real fill (the brokerage's +$40,379.00 on the long lot is a $30.10 mark, not
+    # the actual $30.11 sell) -> exit_cost = (70,196.00 - 42,153.13) / 1,400 = 20.030621. Realized
+    # -$26,082.95 = short -$66,475.08 (matches the brokerage's total exactly) + long +$40,392.13.
+    {"ticker": "TSM", "type": "put_spread", "short_strike": 380, "long_strike": 360,
+     "expiration": "2026-11-20", "contracts": 14, "entry_credit": 1.399943, "entry_date": "2026-10-20",
+     "exit_cost": 20.030621, "exit_date": "2026-11-20", "long_cost": 1.257857},
+    # QQQ 675/640 put spread closed 11/20 (opened 09/25). Entry credit from the brokerage's cost
+    # basis on both legs -- short 675P $4,271.91 / 800 = 5.339888, long 640P $2,352.00 / 800 = 2.94
+    # -> 2.399888. Exit: short bought back for $35,752.00 ($44.69) and long sold for $8,639.82 ->
+    # exit_cost = (35,752.00 - 8,639.82) / 800 = 33.890225. Realized -$25,192.27 = short -$31,480.09
+    # (matches the brokerage's total exactly) + long +$6,287.82.
+    {"ticker": "QQQ", "type": "put_spread", "short_strike": 675, "long_strike": 640,
+     "expiration": "2026-11-20", "contracts": 8, "entry_credit": 2.399888, "entry_date": "2026-09-25",
+     "exit_cost": 33.890225, "exit_date": "2026-11-20", "long_cost": 2.94},
+    # NOW 100/95 put spread (56 contracts opened 10/29, expiring 11/20) -- split in two records:
+    # entry credit from the brokerage's cost basis on both legs -- short 100P $7,427.85 / 5,600 =
+    # 1.326402, long 95P $4,200.00 / 5,600 = 0.75 -> 0.576402.
+    # (1) 31 contracts closed 11/20: short bought back for $26,443.00 ($8.53) and long sold for
+    # $10,981.77 -> exit_cost = (26,443.00 - 10,981.77) / 3,100 = 4.987494. Realized -$13,674.39.
+    {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
+     "expiration": "2026-11-20", "contracts": 31, "entry_credit": 0.576402, "entry_date": "2026-10-29",
+     "exit_cost": 4.987494, "exit_date": "2026-11-20", "long_cost": 0.75},
+    # (2) the other 25 contracts: the short 100P was ASSIGNED on 11/20 (value $8.65/sh = the 91.35
+    # stock price vs the 100 strike) and the 25 long 95Ps are still held -- PROVISIONAL, valued at
+    # the $3.675 mark: exit_cost = 8.65 - 3.675 = 4.975, realized -$10,996.49. Update exit_cost to
+    # the real fill once the 95Ps are sold / settle.
+    {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
+     "expiration": "2026-11-20", "contracts": 25, "entry_credit": 0.576402, "entry_date": "2026-10-29",
+     "exit_cost": 4.975, "exit_date": "2026-11-20", "long_cost": 0.75},
     # GOOG 270/255 put spread closed 11/11 (opened 11/02). Entry credit from the brokerage's cost
     # basis on both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 =
     # 1.128 -> 2.397425. Exit: short bought back for $1,246.00 and long sold for $239.99 ->
