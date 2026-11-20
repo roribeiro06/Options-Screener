@@ -54,14 +54,15 @@ import wheel_screener as ws
 import spreads as sp
 
 TYPE_LABELS = {"put": "Put", "call": "Covered Call",
-              "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread"}
+              "put_spread": "Put Credit Spread", "call_spread": "Call Credit Spread",
+              "long_put": "Long Put"}
 
 # Row order within a tie on the primary sort (DTE / Closed date): a ticker's
 # positions stay together, and put-side sorts before call-side. That keeps the
 # two halves of an iron condor -- tracked as a separate put spread and call
 # spread on the same ticker/expiration -- directly on top of each other, instead
 # of another ticker's contract landing between them. Display order only.
-_TYPE_ORDER = {"Put": 0, "Put Credit Spread": 1, "Call Credit Spread": 2, "Covered Call": 3}
+_TYPE_ORDER = {"Put": 0, "Put Credit Spread": 1, "Call Credit Spread": 2, "Covered Call": 3, "Long Put": 4}
 
 
 def _sort_grouped(df, primary):
@@ -89,7 +90,7 @@ def _leg_prices(chain, kind, strike):
 
 def _strikes_display(pos):
     kind = pos["type"]
-    if kind in ("put", "call"):
+    if kind in ("put", "call", "long_put"):
         return f"{pos['strike']:g}"
     if kind in ("put_spread", "call_spread"):
         return f"{pos['short_strike']:g}/{pos['long_strike']:g}"
@@ -121,6 +122,8 @@ def _max_loss_per_share(pos):
     if kind in ("put_spread", "call_spread"):
         width = abs(pos["short_strike"] - pos["long_strike"])
         return width - credit
+    if kind == "long_put":
+        return -credit            # a bought option: the most you can lose is the debit paid (entry_credit is negative)
     raise RuntimeError(f"unknown position type {kind!r} for {pos.get('ticker', '?')}")
 
 
@@ -129,7 +132,7 @@ def _pos_key(pos):
     one -- ticker/type/expiration/entry_date plus whichever strike field(s)
     this type uses."""
     base = (pos["ticker"], pos["type"], pos["expiration"], pos.get("entry_date"))
-    if pos["type"] in ("put", "call"):
+    if pos["type"] in ("put", "call", "long_put"):
         return base + (pos["strike"],)
     return base + (pos["short_strike"], pos["long_strike"])
 
@@ -178,7 +181,19 @@ def evaluate_position(pos, today):
         raise RuntimeError(f"no option chain for {ticker} {exp} (expired or invalid expiration?)")
 
     long_bid = long_ask = short_bid = short_ask = float("nan")      # each spread leg's own quote (see the click-to-copy
-    if kind in ("put", "call"):             # "close only the long leg" option in the app)
+    if kind == "long_put":
+        # A BOUGHT put (e.g. the long leg left over after the short leg was assigned): entry_credit is the
+        # NEGATIVE debit paid, and "closing" it means selling at the bid (worst case) / ask (best case),
+        # so the cost to close is negative -- the table's sign-aware CostToClose shows it as "+$" proceeds.
+        strike = pos["strike"]
+        leg = _leg_prices(chain, "put", strike)
+        if not leg:
+            raise RuntimeError(f"contract not found: {ticker} {strike:g}P {exp}")
+        bid, ask, _prevclose = leg
+        long_bid, long_ask = bid, ask
+        cost_to_close = -bid                                 # worst case: sell at the bid
+        cost_to_close_bid = -ask                             # best case: sell at the ask
+    elif kind in ("put", "call"):             # "close only the long leg" option in the app)
         strike = pos["strike"]
         leg = _leg_prices(chain, kind, strike)
         if not leg:
@@ -202,7 +217,7 @@ def evaluate_position(pos, today):
     current_price = ws.td_quote(ticker)   # the underlying stock's live price, not the option's
 
     unrealized_pl = entry_credit - cost_to_close
-    unrealized_pl_pct = (unrealized_pl / entry_credit) if entry_credit else float("nan")
+    unrealized_pl_pct = (unrealized_pl / abs(entry_credit)) if entry_credit else float("nan")
 
     # Open cash-secured puts only: MaxLoss here is how far the stock has already
     # fallen through the strike, net of the premium collected (strike - current
@@ -1059,7 +1074,7 @@ def evaluate_closed_position(pos):
     exit_date = dt.date.fromisoformat(pos["exit_date"])
 
     realized_pl = entry_credit - exit_cost
-    realized_pl_pct = (realized_pl / entry_credit) if entry_credit else float("nan")
+    realized_pl_pct = (realized_pl / abs(entry_credit)) if entry_credit else float("nan")
 
     return {"Ticker": ticker, "Type": TYPE_LABELS.get(kind, kind), "Strike": _strikes_display(pos),
             "Expiration": pos["expiration"], "Opened": pos["entry_date"], "Closed": pos["exit_date"],
@@ -1127,7 +1142,9 @@ def _fmt(df):
             d[c] = d[c].apply(lambda v: f"{v*100:.1f}%" if v == v else "-")
     # EntryCredit: "$/share (total premium across Contracts)", same convention as Premium/MaxLoss elsewhere.
     if "EntryCredit" in d.columns and "Contracts" in d.columns:
-        d["EntryCredit"] = [f"${v:.2f} (${v * 100 * int(n):,.2f})" if v == v else "-"
+        # (a bought position's debit is stored negative: -$0.75 (-$1,875.00))
+        d["EntryCredit"] = [(f"{'-' if v < 0 else ''}${abs(v):.2f} ({'-' if v < 0 else ''}${abs(v) * 100 * int(n):,.2f})")
+                            if v == v else "-"
                             for v, n in zip(d["EntryCredit"], d["Contracts"])]
     elif "EntryCredit" in d.columns:
         d["EntryCredit"] = d["EntryCredit"].apply(lambda v: f"${v:.2f}" if v == v else "-")
@@ -1350,6 +1367,8 @@ def _monthly_peak_max_loss():
     spans = []   # (entry, end_inclusive, loss_total)
     for pos, end in ([(p, today) for p in _open_unclosed(today)]
                      + [(p, dt.date.fromisoformat(p["exit_date"])) for p in _all_closed()]):
+        if pos["type"] == "long_put":
+            continue          # a bought option isn't credit-spread risk (its spread was already counted)
         loss = _pivot_max_loss_per_share(pos)
         if loss != loss:
             continue

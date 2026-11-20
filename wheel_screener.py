@@ -108,6 +108,12 @@ OPEN_POSITIONS = [
     {"ticker": "MSFT", "type": "put_spread", "short_strike": 475, "long_strike": 450,
      "expiration": "2026-12-18", "contracts": 12, "entry_credit": 2.699892, "entry_date": "2026-11-16",
      "long_cost": 2.655},
+    # NOW 95P LONG put, 25 contracts -- what's left of the 10/29 NOW 100/95 spread after the short 100P
+    # was assigned on 11/20 (the other 31 contracts closed as a spread, see CLOSED_POSITIONS). A bought
+    # option: "entry_credit" is the NEGATIVE debit paid, -(cost basis $4,200.00 / 5,600) = -0.75; its
+    # cost to close is the (negative) sale proceeds. Not part of the sold-premium financials.
+    {"ticker": "NOW", "type": "long_put", "strike": 95, "expiration": "2026-11-20",
+     "contracts": 25, "entry_credit": -0.75, "entry_date": "2026-10-29"},
 ]
 
 # Closed positions, same shape as OPEN_POSITIONS plus "exit_cost" (what you paid
@@ -141,13 +147,15 @@ CLOSED_POSITIONS = [
     {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
      "expiration": "2026-11-20", "contracts": 31, "entry_credit": 0.576402, "entry_date": "2026-10-29",
      "exit_cost": 4.987494, "exit_date": "2026-11-20", "long_cost": 0.75},
-    # (2) the other 25 contracts: the short 100P was ASSIGNED on 11/20 (value $8.65/sh = the 91.35
-    # stock price vs the 100 strike) and the 25 long 95Ps are still held -- PROVISIONAL, valued at
-    # the $3.675 mark: exit_cost = 8.65 - 3.675 = 4.975, realized -$10,996.49. Update exit_cost to
-    # the real fill once the 95Ps are sold / settle.
+    # (2) the other 25 contracts: the short 100P was ASSIGNED on 11/20 ($8.65/sh = the 91.35 stock price
+    # vs the 100 strike) and the 25 long 95Ps are STILL HELD -- they stay in OPEN_POSITIONS as a
+    # "long_put" (below). So this record books only the short leg's realized loss and carries the
+    # long leg at its $0.75 cost (zero P&L here; its gain/loss shows on the open long put and is
+    # realized when it's sold/settles): exit_cost = 8.65 - 0.75 = 7.90 -> realized -$18,309.00
+    # (= short 1.326402 - 8.65 = -7.323598 x 2,500). Risk (width - credit) is unchanged.
     {"ticker": "NOW", "type": "put_spread", "short_strike": 100, "long_strike": 95,
      "expiration": "2026-11-20", "contracts": 25, "entry_credit": 0.576402, "entry_date": "2026-10-29",
-     "exit_cost": 4.975, "exit_date": "2026-11-20", "long_cost": 0.75},
+     "exit_cost": 7.90, "exit_date": "2026-11-20", "long_cost": 0.75},
     # GOOG 270/255 put spread closed 11/11 (opened 11/02). Entry credit from the brokerage's cost
     # basis on both legs -- short 270P $7,050.85 / 2,000 = 3.525425, long 255P $2,256.00 / 2,000 =
     # 1.128 -> 2.397425. Exit: short bought back for $1,246.00 and long sold for $239.99 ->

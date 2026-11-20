@@ -433,7 +433,13 @@ def _close_position_legs_summary(row, with_price=True):
     n_int = int(n) if pd.notna(n) else None
     exp = row.get("Expiration")
     side = "Call" if "Call" in str(row.get("Type", "")) else "Put"
-    if "/" in strike_str:
+    long_put = row.get("Type") == "Long Put"      # a bought put: closing it is a SELL
+    if long_put:
+        lb, la = row.get("LongBid"), row.get("LongAsk")
+        if lb is None or la is None or pd.isna(lb) or pd.isna(la):
+            lb, la = -row.get("CostToClose"), -row.get("CostToCloseBid")
+        legs = [(f"Sell to Close ${float(strike_str):g} Put", _avg_max_range(lb, la, n_int))]
+    elif "/" in strike_str:
         sb, sa, lb, la = (row.get(k) for k in ("ShortBid", "ShortAsk", "LongBid", "LongAsk"))
         if any(v is None or pd.isna(v) for v in (sb, sa, lb, la)):
             return _close_position_summary(row)
@@ -448,7 +454,7 @@ def _close_position_legs_summary(row, with_price=True):
                          f"{'Premium' if head.startswith('Sell') else 'Cost to Close'}: {cost}"])
               for head, cost in legs]
     text = "\n\n".join(blocks)
-    total = _total_cost_to_close_line(row, n_int)
+    total = None if long_put else _total_cost_to_close_line(row, n_int)
     price = row.get("CurrentPrice")
     return (text + (f"\n\n{total}" if total else "")
             + (f"{chr(10) if total else chr(10) * 2}Current Price: ${price:.2f}" if with_price and pd.notna(price) else ""))
